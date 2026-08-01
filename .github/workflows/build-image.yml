@@ -1,0 +1,162 @@
+name: Build and publish image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Containerfile
+      - stack.lock.json
+      - patches/**
+      - scripts/verify-patches.sh
+      - .github/buildkitd.toml
+      - .github/workflows/build-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: sglang-dsv4-0731-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # This build uses only an ephemeral GitHub-hosted VM. It is intentionally
+    # not eligible for any self-hosted runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Reclaim runner disk space
+        run: |
+          # The CUDA base image, the FlashInfer source build, and the final
+          # runtime layers are large. These SDKs are unrelated to the build and
+          # the VM is discarded after this job.
+          sudo rm -rf \
+            /opt/hostedtoolcache \
+            /opt/ghc \
+            /opt/az \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/local/share/vcpkg \
+            /usr/share/swift \
+            /usr/share/dotnet
+          docker system prune --all --force
+
+          # GitHub currently assigns this label two layouts: one has roughly
+          # 111 GiB free on /, while another has only about 42 GiB on / plus a
+          # larger ephemeral /mnt filesystem. The latter cannot hold this
+          # build's transient layers. Put Docker on whichever filesystem has
+          # more free space before creating the BuildKit builder; no runner
+          # state needs to survive this ephemeral job.
+          root_avail=$(df --output=avail -k / | tail -1)
+          mnt_avail=$(df --output=avail -k /mnt | tail -1)
+          if (( mnt_avail > root_avail )); then
+            sudo systemctl stop docker.service docker.socket
+            sudo install -d -m 0711 /mnt/docker
+            if [[ -f /etc/docker/daemon.json ]]; then
+              jq '. + {"data-root":"/mnt/docker"}' \
+                /etc/docker/daemon.json \
+                | sudo tee /etc/docker/daemon.json.new >/dev/null
+            else
+              printf '%s\n' '{"data-root":"/mnt/docker"}' \
+                | sudo tee /etc/docker/daemon.json.new >/dev/null
+            fi
+            sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+            sudo systemctl start docker.socket docker.service
+          fi
+          docker info --format 'Docker root: {{.DockerRootDir}}'
+          df -h / /mnt
+      - name: Log in to GHCR
+        run: |
+          for attempt in 1 2 3; do
+            if printf '%s' '${{ secrets.GITHUB_TOKEN }}' \
+              | docker login ghcr.io \
+                  --username '${{ github.actor }}' \
+                  --password-stdin; then
+              break
+            fi
+            if (( attempt == 3 )); then
+              echo "GHCR login failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+      - name: Configure serialized BuildKit
+        run: |
+          docker buildx create \
+            --name sm120-builder \
+            --driver docker-container \
+            --buildkitd-config .github/buildkitd.toml \
+            --use \
+            --bootstrap
+          docker buildx inspect sm120-builder
+      - name: Verify the locked stack reproduces
+        run: ./scripts/verify-patches.sh
+      - name: Build and push the canonical tag
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY}:dsv4-0731"
+          docker buildx build \
+            --builder sm120-builder \
+            --file Containerfile \
+            --target runtime \
+            --platform linux/amd64 \
+            --provenance=false \
+            --tag "$image" \
+            --push \
+            .
+
+          raw_manifest=$(mktemp)
+          docker buildx imagetools inspect --raw "$image" > "$raw_manifest"
+          if jq -e 'has("manifests")' "$raw_manifest" >/dev/null; then
+            echo "$image is an OCI index; expected a directly pullable image manifest" >&2
+            exit 1
+          fi
+          jq -e '.config.digest and (.layers | length > 0)' "$raw_manifest" >/dev/null
+          published_digest=$(
+            docker buildx imagetools inspect "$image" \
+              | awk '$1 == "Digest:" { print $2; exit }'
+          )
+          if [[ ! "$published_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "could not resolve published manifest digest for $image" >&2
+            exit 1
+          fi
+          echo "published $image@$published_digest"
+          echo "::notice title=Published image digest::$published_digest"
+      - name: Verify anonymous pull access
+        run: |
+          image=${GITHUB_REPOSITORY}
+          token=$(
+            curl --fail --silent --show-error \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${image}:pull" \
+              | jq -r '.token'
+          )
+          test -n "$token"
+          test "$token" != null
+          curl --fail --silent --show-error \
+            --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            --header "Authorization: Bearer $token" \
+            "https://ghcr.io/v2/${image}/manifests/dsv4-0731" \
+            >/dev/null
+      - name: Delete superseded untagged package versions
+        # Best effort: the canonical tag is already published, so a failure here
+        # must not fail the build.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package=${GITHUB_REPOSITORY#*/}
+          owner=${GITHUB_REPOSITORY_OWNER}
+          # Only versions carrying no tag at all are removed, which can never
+          # include the version the canonical tag currently points at.
+          gh api --paginate \
+            --jq '.[] | select((.metadata.container.tags | length) == 0) | .id' \
+            "/users/${owner}/packages/container/${package}/versions?per_page=100" \
+            | while read -r id; do
+              gh api --method DELETE \
+                "/users/${owner}/packages/container/${package}/versions/${id}"
+            done

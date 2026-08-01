@@ -1,0 +1,5 @@
+[worker.oci]
+  # The FlashInfer source build plus the CUDA 13 base image and the final
+  # runtime layers exceed a standard GitHub-hosted runner's disk if BuildKit
+  # extracts and builds several stages concurrently.
+  max-parallelism = 1

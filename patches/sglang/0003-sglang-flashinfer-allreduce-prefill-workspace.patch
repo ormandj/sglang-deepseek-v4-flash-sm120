@@ -1,0 +1,81 @@
+diff --git a/python/sglang/srt/model_executor/runner/base_runner.py b/python/sglang/srt/model_executor/runner/base_runner.py
+index 9527310361..c79d8931f2 100644
+--- a/python/sglang/srt/model_executor/runner/base_runner.py
++++ b/python/sglang/srt/model_executor/runner/base_runner.py
+@@ -251,8 +251,23 @@ class BaseRunner(ABC):
+         from sglang.srt.layers.communicator import FUSE_ALLREDUCE_MAX_BATCH_SIZE
+         from sglang.srt.layers.flashinfer_comm_fusion import pre_initialize_workspaces
+ 
++        # Prefill fusion sees the full forward batch. Size the workspace before
++        # CUDA graph capture so a larger prefill cannot replace graph-held buffers.
++        chunked_prefill_size = mr.server_args.chunked_prefill_size
++        if (
++            mr.server_args.enable_dynamic_chunking
++            or chunked_prefill_size is None
++            or chunked_prefill_size <= 0
++        ):
++            prefill_token_capacity = mr.server_args.max_prefill_tokens
++        else:
++            prefill_token_capacity = chunked_prefill_size
++        workspace_token_capacity = max(
++            FUSE_ALLREDUCE_MAX_BATCH_SIZE, prefill_token_capacity or 0
++        )
++
+         pre_initialize_workspaces(
+-            max_token_num=FUSE_ALLREDUCE_MAX_BATCH_SIZE,
++            max_token_num=workspace_token_capacity,
+             hidden_dim=mr.model_config.hidden_size,
+             dtype=mr.dtype,
+         )
+diff --git a/test/registered/unit/layers/test_flashinfer_comm_fusion.py b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
+index 1e4a56fde1..bd4ae0f4f4 100644
+--- a/test/registered/unit/layers/test_flashinfer_comm_fusion.py
++++ b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
+@@ -86,6 +86,47 @@ def _torch_allreduce_residual_rmsnorm_baseline(
+ 
+ 
+ class TestFlashInferCommFusion(unittest.TestCase):
++    def test_preinitialized_workspace_covers_largest_prefill_forward(self):
++        from sglang.srt.model_executor.runner.base_runner import BaseRunner
++
++        cases = (
++            (8192, False, 16384, 8192),
++            (8192, True, 16384, 16384),
++            (-1, False, 16384, 16384),
++        )
++        for (
++            chunked_prefill_size,
++            enable_dynamic_chunking,
++            max_prefill_tokens,
++            expected,
++        ) in cases:
++            with self.subTest(
++                chunked_prefill_size=chunked_prefill_size,
++                enable_dynamic_chunking=enable_dynamic_chunking,
++            ):
++                model_runner = types.SimpleNamespace(
++                    server_args=types.SimpleNamespace(
++                        flashinfer_allreduce_fusion_backend="auto",
++                        chunked_prefill_size=chunked_prefill_size,
++                        enable_dynamic_chunking=enable_dynamic_chunking,
++                        max_prefill_tokens=max_prefill_tokens,
++                    ),
++                    model_config=types.SimpleNamespace(hidden_size=4096),
++                    dtype=torch.bfloat16,
++                )
++                runner = types.SimpleNamespace(model_runner=model_runner)
++
++                with patch(
++                    "sglang.srt.layers.flashinfer_comm_fusion.pre_initialize_workspaces"
++                ) as pre_initialize:
++                    BaseRunner._pre_initialize_flashinfer_allreduce_workspace(runner)
++
++                pre_initialize.assert_called_once_with(
++                    max_token_num=expected,
++                    hidden_dim=4096,
++                    dtype=torch.bfloat16,
++                )
++
+     def test_trtllm_workspace_preflight_does_not_require_multicast(self):
+         class _FakeCudaDriver:
+             CUresult = types.SimpleNamespace(CUDA_SUCCESS=0)

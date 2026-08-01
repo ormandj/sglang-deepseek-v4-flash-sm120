@@ -1,0 +1,32 @@
+name: Validate integration sources
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Ensure required tools
+        run: |
+          missing=()
+          for tool in jq git sha256sum; do
+            command -v "$tool" >/dev/null || missing+=("$tool")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends jq git coreutils
+          fi
+      - name: Check shell syntax
+        run: bash -n scripts/*.sh examples/*.sh
+      - name: Check JSON syntax
+        run: jq -e . stack.lock.json >/dev/null
+      - name: Verify the locked stack reproduces
+        run: ./scripts/verify-patches.sh
