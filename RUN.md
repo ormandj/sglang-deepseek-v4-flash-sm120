@@ -68,6 +68,19 @@ The OpenAI-compatible API is at `http://localhost:8000/v1`, and the served model
 curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
 ```
 
+## Expected KV capacity at TP=2
+
+On the validated two-GPU configuration, SGLang reported `max_total_num_tokens=1108224` with FP8 KV cache and `mem-fraction-static=0.94`. This is the total scheduler KV pool shared by all active and cached sequences; it is not 1,108,224 tokens per GPU or per request. The same run reported `max_req_input_len=1048570`, reflecting the model's roughly 1M-token per-request context limit.
+
+Confirm the values after startup:
+
+```bash
+curl -fsS http://localhost:8000/get_server_info \
+  | jq '{max_total_num_tokens, max_req_input_len}'
+```
+
+Expect values near the measurement above when using the documented image, hardware, and launch settings. Available GPU memory, graph geometry, cache settings, or additional GPU consumers can change the calculated KV capacity.
+
 ## Recommended request settings
 
 The [model card](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731#how-to-run-locally) recommends `temperature=1.0` with `top_p=0.95` for agentic requests and `top_p=1.0` otherwise. Chat-completion requests may set `reasoning_effort` to `low`, `high`, or `max`.
