@@ -68,7 +68,26 @@ The OpenAI-compatible API is at `http://localhost:8000/v1`, and the served model
 curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
 ```
 
-Smoke test:
+## Recommended request settings
+
+The [model card](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731#how-to-run-locally) recommends `temperature=1.0` with `top_p=0.95` for agentic requests and `top_p=1.0` otherwise. Chat-completion requests may set `reasoning_effort` to `low`, `high`, or `max`.
+
+Treat OpenCode and other tool-using coding harnesses as agentic workloads. Use `high` as the normal coding default:
+
+```json
+{
+  "reasoning_effort": "high",
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "max_tokens": 393216
+}
+```
+
+Use `max` when maximum deliberation is worth the additional latency and output, or when reproducing DeepSeek's published code-agent evaluation setup, which used `max`.
+
+`393216` is the numeric API value for a 384K-token ceiling. For `high` and `max`, configure the client or agent harness to permit that maximum output length. The input and requested output must still fit within the server's available context and KV-cache capacity. This is a client-side request limit; the launch command does not impose it.
+
+The following is only a deterministic health smoke test. Its `temperature=0` setting is not the model card's recommendation for normal inference:
 
 ```bash
 curl -fsS http://localhost:8000/v1/chat/completions \
