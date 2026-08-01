@@ -25,20 +25,20 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | Source | Head | Scope in this image |
 |---|---|---|
 | SGLang PR #29927 | `bfc395a8` | [SM120] DeepSeek-V4: DeepGEMM paged-MQA indexer, FP4 MoE, and page-split |
-| SGLang PR #32815 | `1dbf09f6` | Layer communicator fusion gate |
+| SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
 | SGLang PR #30700 | `2960b751` | FlashInfer all-reduce-only dispatch and auto-enable |
 | SGLang PR #32330 | `34c9d596` | FlashInfer TRT-LLM all-reduce on SM120, without the multicast preflight |
 | SGLang PR #32686 | `15c0902e` | DeepGEMM warmup: pick the largest warmup `M` that fits the memory budget |
 | FlashInfer PR #3930 | `e855cc25` | Exact CUDA runtime library match when resolving the loaded library |
 
-Local follow-ups, not upstream pull requests:
+Image-local follow-ups:
 
 | Follow-up | Head | Scope in this image |
 |---|---|---|
 | SGLang all-reduce prefill workspace | — | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
-| SGLang DSV4-0731 reasoning effort | `5912c5d3` | Selects the 0731 checkpoint's low/high/max reasoning-effort prompts only when the model config carries the DSpark fields; earlier DeepSeek-V4 checkpoints keep their existing mapping |
-| FlashInfer SM120 DSV4 top-k-192 | `4d42fdbb` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels |
-| FlashInfer MXFP8 × MXFP4 profiler | `c8fb671d` | Makes the fused-MoE profiler's quantization state match the runtime path, so autotuning stays enabled |
+| SGLang DSV4-0731 reasoning effort | `5912c5d3` | Selects the 0731 checkpoint's low/high/max reasoning-effort prompts only when the model config carries the DSpark fields; proposed upstream in SGLang PR #33145 |
+| FlashInfer SM120 DSV4 top-k-192 | `4d42fdbb` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels; proposed upstream in FlashInfer PR #4309 |
+| FlashInfer MXFP8 × MXFP4 profiler | `c8fb671d` | Makes the fused-MoE profiler's quantization state match the runtime path, so autotuning stays enabled; proposed upstream in FlashInfer PR #4308 |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch is dropped rather than maintained.
 
