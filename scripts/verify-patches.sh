@@ -2,7 +2,7 @@
 # Verifies that stack.lock.json, the Containerfile, and the copied patch bytes
 # describe the same stack, then reproduces the image's source construction:
 # clone the pinned SGLang and FlashInfer commits, apply the patches in build
-# order, and confirm the intermediate and final tree hashes.
+# order, and confirm the final tree hashes.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -61,14 +61,12 @@ done < <(find patches -type f | sort)
 
 sglang_repo=$(jq -r '.verification.sglang_repository' "$lock")
 flashinfer_repo=$(jq -r '.verification.flashinfer_repository' "$lock")
-upstream_stack_count=$(jq -r '.verification.sglang_upstream_stack_patch_count' "$lock")
 
 sglang_head=$(lock_value DSV4_0731_SGLANG_MAIN_HEAD)
 sglang_tree=$(lock_value DSV4_0731_SGLANG_MAIN_TREE)
 sglang_effective_tree=$(lock_value DSV4_0731_SGLANG_EFFECTIVE_TREE)
-sglang_workspace_tree=$(lock_value DSV4_0731_SGLANG_WORKSPACE_TREE)
-flashinfer_head=$(lock_value DSV4_0731_FLASHINFER_BASE_HEAD)
-flashinfer_tree=$(lock_value DSV4_0731_FLASHINFER_BASE_TREE)
+flashinfer_head=$(lock_value DSV4_0731_FLASHINFER_MAIN_HEAD)
+flashinfer_tree=$(lock_value DSV4_0731_FLASHINFER_MAIN_TREE)
 flashinfer_effective_tree=$(lock_value DSV4_0731_FLASHINFER_EFFECTIVE_TREE)
 
 work=$(mktemp -d)
@@ -86,18 +84,12 @@ fetch_commit() {
 
 echo "== SGLang $sglang_head =="
 fetch_commit "$work/sglang" "$sglang_repo" "$sglang_head" "$sglang_tree"
-applied=0
 while IFS= read -r path; do
   git -C "$work/sglang" apply --index --binary "$repo/$path"
-  applied=$((applied + 1))
   printf '  applied %s\n' "$path"
-  if (( applied == upstream_stack_count )); then
-    test "$(git -C "$work/sglang" write-tree)" = "$sglang_effective_tree"
-    echo "  upstream PR stack tree $sglang_effective_tree"
-  fi
 done < <(jq -r '[.patches[] | select(.repository == "sglang")] | sort_by(.order)[].path' "$lock")
-test "$(git -C "$work/sglang" write-tree)" = "$sglang_workspace_tree"
-echo "  final tree $sglang_workspace_tree"
+test "$(git -C "$work/sglang" write-tree)" = "$sglang_effective_tree"
+echo "  final tree $sglang_effective_tree"
 
 echo "== FlashInfer $flashinfer_head =="
 fetch_commit "$work/flashinfer" "$flashinfer_repo" "$flashinfer_head" "$flashinfer_tree"

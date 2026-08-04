@@ -14,9 +14,9 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 
 ## Source composition
 
-- Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260731-68d44294`, pinned by digest.
-- SGLang: main `9dcaf6bf`, plus the current heads of five upstream pull requests and two local follow-ups. The tree after the upstream patches is `5aa76976`; the final tree in the image is `98411f8b`.
-- FlashInfer: main `668a1ba1` (version `0.6.17.dev20260731`), rebuilt from source with upstream PR #3930 and two local patches, giving tree `164ff8cf`. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
+- Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
+- SGLang: main `8f2a3ad6`, plus a single source patch carrying the pinned heads of six upstream pull requests, three local SM120 fixes, and a local tool-schema encoding fix. The final tree in the image is `3c4610a6`.
+- FlashInfer: main `67f76379` (version `0.6.17.dev20260804`), rebuilt from source with a single patch carrying upstream PRs #4308 and #4309, giving tree `d8567dec`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
 
@@ -24,23 +24,25 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 
 | Source | Head | Scope in this image |
 |---|---|---|
-| SGLang PR #29927 | `bfc395a8` | [SM120] DeepSeek-V4: DeepGEMM paged-MQA indexer, FP4 MoE, and page-split |
-| SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
-| SGLang PR #30700 | `2960b751` | FlashInfer all-reduce-only dispatch and auto-enable |
-| SGLang PR #32330 | `34c9d596` | FlashInfer TRT-LLM all-reduce on SM120, without the multicast preflight |
+| SGLang PR #33140 | `a580251a` | Official DSV4 reasoning-effort support |
+| SGLang PR #32194 | `f8fac391` | Skip unused DSV4 draft metadata in speculative decoding |
+| SGLang PR #30700 | `c2439af9` | FlashInfer all-reduce-only dispatch and auto-enable |
+| SGLang PR #32330 | `f330c748` | FlashInfer TRT-LLM all-reduce on SM12X; rebased with an mnnvl preflight multicast-granularity fix (trtllm still skips the multicast query, which fails on SM120) |
 | SGLang PR #32686 | `15c0902e` | DeepGEMM warmup: pick the largest warmup `M` that fits the memory budget |
-| FlashInfer PR #3930 | `e855cc25` | Exact CUDA runtime library match when resolving the loaded library |
+| SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
+| FlashInfer PR #4308 | `4ec7f230` | Makes the fused-MoE profiler's MXFP8 × MXFP4 quantization state match the runtime path, so autotuning stays enabled |
+| FlashInfer PR #4309 | `bf136350` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels |
 
-Image-local follow-ups:
+Image-local fixes:
 
-| Follow-up | Head | Scope in this image |
+| Fix | Head | Scope in this image |
 |---|---|---|
-| SGLang all-reduce prefill workspace | — | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
-| SGLang DSV4-0731 reasoning effort | `5912c5d3` | Selects the 0731 checkpoint's low/high/max reasoning-effort prompts only when the model config carries the DSpark fields; proposed upstream in SGLang PR #33145 |
-| FlashInfer SM120 DSV4 top-k-192 | `4d42fdbb` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels; proposed upstream in FlashInfer PR #4309 |
-| FlashInfer MXFP8 × MXFP4 profiler | `c8fb671d` | Makes the fused-MoE profiler's quantization state match the runtime path, so autotuning stays enabled; proposed upstream in FlashInfer PR #4308 |
+| SGLang SM120 DeepGEMM capability probe | `d4dc7502` | Enables the SM120 DeepGEMM capability when the required grouped FP4 symbol is installed |
+| SGLang all-reduce prefill workspace | `73d125d0` | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
+| SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
+| SGLang DSV4/DSV32 tool-schema encoding | — | Keeps unset protocol-model defaults (most visibly `strict: false`) out of the rendered DSV4/DSV32 tool schemas, so served prompts match the checkpoint's reference encoder exactly; proposed upstream in SGLang PR #33568 |
 
-The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch is dropped rather than maintained.
+The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
 ## Validated configuration
 

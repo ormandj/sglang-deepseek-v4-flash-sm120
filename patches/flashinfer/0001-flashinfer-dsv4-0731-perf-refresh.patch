@@ -1,3 +1,76 @@
+diff --git a/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_kernels.cuh b/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_kernels.cuh
+index 7decd3be..f97c191c 100644
+--- a/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_kernels.cuh
++++ b/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_kernels.cuh
+@@ -4730,8 +4730,9 @@ std::map<std::string, std::pair<size_t, size_t>> GemmProfilerBackend::getProfile
+     quant_6_size = num_experts_per_node * sizeof(float);
+   } else if (is_native_wfp4afp8_family) {
+     quant_1_size = sizeof(float);
+-    quant_2_size = getOffsetWeightSF(num_experts_per_node, inter_size, hidden_size, mScalingType) *
+-                   sizeof(TmaWarpSpecializedGroupedGemmInput::ElementSF);
++    quant_2_size =
++        getOffsetWeightSF(num_experts_per_node, fc1_out_size, hidden_size, mScalingType) *
++        sizeof(TmaWarpSpecializedGroupedGemmInput::ElementSF);
+     quant_3_size = num_experts_per_node * sizeof(float);
+     quant_4_size = sizeof(float);
+     quant_5_size = getOffsetWeightSF(num_experts_per_node, hidden_size, inter_size, mScalingType) *
+@@ -5034,12 +5035,30 @@ void GemmProfilerBackend::prepareQuantParams(int num_tokens, char* workspace_ptr
+   } else if (mDType == nvinfer1::DataType::kFP8 &&
+              (mWType == nvinfer1::DataType::kFP4 || mWType == nvinfer1::DataType::kINT64)) {
+     TLLM_CHECK(quant_1 && quant_2 && quant_3 && quant_4 && quant_5 && quant_6);
+-    mQuantParams = QuantParams::FP8MXFP4(
+-        static_cast<float const*>(quant_1),
+-        static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_2),
+-        static_cast<float const*>(quant_3), static_cast<float const*>(quant_4),
+-        static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_5),
+-        static_cast<float const*>(quant_6));
++    if (mUseMxfp8ActScaling) {
++#ifdef USING_OSS_CUTLASS_MOE_GEMM
++      // Normalize the profiler's fabricated weight block scale factors to UE8M0 unity so tactic
++      // timing is not driven by random exponents from the workspace.
++      TLLM_CUDA_CHECK(cudaMemsetAsync(const_cast<void*>(quant_2), 0x7F,
++                                      workspaces.at("quant_2").first, stream));
++      TLLM_CUDA_CHECK(cudaMemsetAsync(const_cast<void*>(quant_5), 0x7F,
++                                      workspaces.at("quant_5").first, stream));
++      mQuantParams = QuantParams::MXFP8MXFP4(
++          static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_2),
++          static_cast<float const*>(quant_3),
++          static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_5),
++          static_cast<float const*>(quant_6));
++#else
++      TLLM_CHECK_WITH_INFO(false, "MXFP8 x MXFP4 profiling requires OSS Cutlass MoE GEMM");
++#endif
++    } else {
++      mQuantParams = QuantParams::FP8MXFP4(
++          static_cast<float const*>(quant_1),
++          static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_2),
++          static_cast<float const*>(quant_3), static_cast<float const*>(quant_4),
++          static_cast<TmaWarpSpecializedGroupedGemmInput::MXFPXElementSF const*>(quant_5),
++          static_cast<float const*>(quant_6));
++    }
+   } else if ((mDType == nvinfer1::DataType::kFP4 || mDType == nvinfer1::DataType::kINT64) &&
+              (mWType == nvinfer1::DataType::kFP4 || mWType == nvinfer1::DataType::kINT64)) {
+     // nvllm still uses int64 because torch doesn't have fp4 yet.
+diff --git a/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/include/moe_kernels.h b/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/include/moe_kernels.h
+index c1960311..e78cb150 100644
+--- a/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/include/moe_kernels.h
++++ b/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/include/moe_kernels.h
+@@ -1078,6 +1078,7 @@ struct GemmProfilerBackend {
+     mNeedWeights = need_weights;
+     mParallelismConfig = parallelism_config;
+     mEnableAlltoall = enable_alltoall;
++    mUseMxfp8ActScaling = use_mxfp8_act_scaling;
+     mSm90Wfp4Afp8Mode = sm90_wfp4afp8_mode;
+     mSM = common::getSMVersion();
+ 
+@@ -1144,6 +1145,7 @@ struct GemmProfilerBackend {
+   bool mUseLora{};
+   bool mMinLatencyMode{};
+   bool mNeedWeights{};
++  bool mUseMxfp8ActScaling{};
+   Sm90Wfp4Afp8ScaleMode mSm90Wfp4Afp8Mode = Sm90Wfp4Afp8ScaleMode::kDisabled;
+ 
+   TmaWarpSpecializedGroupedGemmInput::FpXBlockScalingType mScalingType{};
 diff --git a/csrc/sparse_mla_sm120_decode_dsv4.cu b/csrc/sparse_mla_sm120_decode_dsv4.cu
 index 44af28a2..ced49c1e 100644
 --- a/csrc/sparse_mla_sm120_decode_dsv4.cu
@@ -101,19 +174,27 @@ index 0628e6f6..092394ca 100644
  // ============================================================================
  
 diff --git a/tests/attention/test_sparse_mla_sm120.py b/tests/attention/test_sparse_mla_sm120.py
-index ba96062b..e95855da 100644
+index ba96062b..73c1c896 100644
 --- a/tests/attention/test_sparse_mla_sm120.py
 +++ b/tests/attention/test_sparse_mla_sm120.py
-@@ -295,6 +295,8 @@ _DSV4_DECODE_CONFIGS = [
+@@ -292,11 +292,16 @@ def _make_decode_scratch(
+ 
+ _DSV4_DECODE_CONFIGS = [
+     (8, 128),
++    (8, 192),
      (8, 512),
      (8, 1024),
      (16, 128),
 +    (16, 192),
 +    (32, 192),
      (32, 512),
++    (64, 192),
      (64, 1024),
++    (128, 192),
      (128, 1024),
-@@ -368,12 +370,14 @@ def test_sparse_mla_sm120_decode_dsv4(
+ ]
+ 
+@@ -368,12 +373,14 @@ def test_sparse_mla_sm120_decode_dsv4(
      torch.testing.assert_close(out_lse, ref_lse, atol=5e-2, rtol=5e-2)
  
  
@@ -131,21 +212,24 @@ index ba96062b..e95855da 100644
      d_qk, d_v = 512, 512
      page_block_size = 64
      num_blocks = 64
-@@ -890,6 +894,8 @@ def test_sparse_mla_sm120_prefill_glm_nsa_arbitrary_fp32(num_heads: int) -> None
+@@ -890,8 +897,12 @@ def test_sparse_mla_sm120_prefill_glm_nsa_arbitrary_fp32(num_heads: int) -> None
  
  _DSV4_PREFILL_CONFIGS = [
      (16, 128),
 +    (16, 192),
 +    (32, 192),
      (32, 512),
++    (64, 192),
      (64, 1024),
++    (128, 192),
      (128, 1024),
-@@ -960,6 +966,58 @@ def test_sparse_mla_sm120_prefill_dsv4(
+ ]
+ 
+@@ -960,6 +971,57 @@ def test_sparse_mla_sm120_prefill_dsv4(
      torch.testing.assert_close(out_lse, ref_lse, atol=5e-2, rtol=5e-2)
  
  
 +def test_sparse_mla_sm120_prefill_dsv4_topk_length_truncation() -> None:
-+    """DSv4 prefill supports the padded top-k 192 / active length 133 shape."""
 +    torch.manual_seed(0)
 +    device = torch.device("cuda")
 +    num_heads, topk, topk_len, num_tokens = 32, 192, 133, 128
@@ -199,3 +283,61 @@ index ba96062b..e95855da 100644
  _DSV4_PREFILL_DUAL_CONFIGS = [
      (128, 64),
      (512, 64),
+diff --git a/tests/moe/test_trtllm_cutlass_fused_moe.py b/tests/moe/test_trtllm_cutlass_fused_moe.py
+index f88ed456..3eb63c02 100644
+--- a/tests/moe/test_trtllm_cutlass_fused_moe.py
++++ b/tests/moe/test_trtllm_cutlass_fused_moe.py
+@@ -1498,6 +1498,7 @@ def dequant_mxfp8_batches(
+ @pytest.mark.parametrize(
+     ("alpha", "beta", "limit"), [(None, None, None), (0.5, 0.0, 7.0), (1.702, 1.0, 7.0)]
+ )
++@pytest.mark.parametrize("use_autotune", [False, True])
+ @pytest.mark.skipif(
+     torch.cuda.get_device_capability()[0] not in [10, 11, 12],
+     reason="MXFP8xMXFP4 is only supported on SM100, SM110 and SM120/SM121",
+@@ -1512,6 +1513,7 @@ def test_moe_mxfp8_mxfp4(
+     alpha,
+     beta,
+     limit,
++    use_autotune,
+ ):
+     """
+     Test MoE with MXFP8 activations and MXFP4 weights.
+@@ -1562,21 +1564,22 @@ def test_moe_mxfp8_mxfp4(
+         beta_t = None
+ 
+     # Call cutlass_fused_moe with MXFP8 activations and MXFP4 weights
+-    _ = fused_moe.cutlass_fused_moe(
+-        mxfp8_x,
+-        selected_experts.to(torch.int),
+-        routing_weights,
+-        mxfp4_w1.contiguous().view(torch.long),
+-        mxfp4_w2.contiguous().view(torch.long),
+-        otype,
+-        swiglu_alpha=alpha_t,
+-        swiglu_limit=limit_t,
+-        swiglu_beta=beta_t,
+-        quant_scales=quant_scales,
+-        input_sf=mxfp8_x_sf,
+-        use_mxfp8_act_scaling=True,
+-        output=flash_output,
+-    )
++    with autotune(True) if use_autotune else nullcontext():
++        _ = fused_moe.cutlass_fused_moe(
++            mxfp8_x,
++            selected_experts.to(torch.int),
++            routing_weights,
++            mxfp4_w1.contiguous().view(torch.long),
++            mxfp4_w2.contiguous().view(torch.long),
++            otype,
++            swiglu_alpha=alpha_t,
++            swiglu_limit=limit_t,
++            swiglu_beta=beta_t,
++            quant_scales=quant_scales,
++            input_sf=mxfp8_x_sf,
++            use_mxfp8_act_scaling=True,
++            output=flash_output,
++        )
+ 
+     dq_mxfp8_x = (
+         mxfp8_dequantize_host(
