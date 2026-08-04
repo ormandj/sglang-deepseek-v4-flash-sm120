@@ -53,15 +53,6 @@ exec docker run --rm \
   --volume "${cache_dir}:/root/.cache" \
   --env CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
   --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
-  --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
-  --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
-  --env FLASHINFER_LOGGING_LEVEL=debug \
-  --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
-  --env SGLANG_DSV4_COMPRESS_STATE_DTYPE=bf16 \
-  --env SGLANG_OPT_DSV4_NONPAGED_INDEXER=1 \
-  --env SGLANG_OPT_USE_TILELANG_MHC_PRE=1 \
-  --env SGLANG_ENABLE_METRICS_DEVICE_TIMER=1 \
-  --env NCCL_P2P_LEVEL=SYS \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
@@ -72,13 +63,12 @@ exec docker run --rm \
   --trust-remote-code \
   --tensor-parallel-size 2 \
   --kv-cache-dtype fp8_e4m3 \
-  --mem-fraction-static 0.94 \
+  --mem-fraction-static 0.93 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
-  --disable-custom-all-reduce \
-  --enable-deepseek-v4-fp4-indexer \
   --fp8-gemm-backend auto \
   --speculative-algorithm DSPARK \
+  --speculative-dspark-block-size 5 \
   --reasoning-parser deepseek-v4 \
   --tool-call-parser deepseekv4 \
   --enable-metrics \

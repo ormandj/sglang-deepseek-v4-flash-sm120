@@ -70,7 +70,7 @@ curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
 
 ## Expected KV capacity at TP=2
 
-On the validated two-GPU configuration, SGLang reported `max_total_num_tokens=1108224` with FP8 KV cache and `mem-fraction-static=0.94`. This is the total scheduler KV pool shared by all active and cached sequences; it is not 1,108,224 tokens per GPU or per request. The same run reported `max_req_input_len=1048570`, reflecting the model's roughly 1M-token per-request context limit.
+On the validated two-GPU configuration, SGLang reported `max_total_num_tokens=774656` with FP8 KV cache and `mem-fraction-static=0.93` (0.94 leaves too little headroom for the FlashInfer MoE workspace on this composition and fails at the first real request). This is the total scheduler KV pool shared by all active and cached sequences; it is not 1,108,224 tokens per GPU or per request. The same run reported `context_len=1048576`, reflecting the model's roughly 1M-token per-request context limit.
 
 Confirm the values after startup:
 
