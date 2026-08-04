@@ -1,0 +1,2815 @@
+diff --git a/docs/docs/advanced_features/server_arguments.mdx b/docs/docs/advanced_features/server_arguments.mdx
+index 7117a7173b..bd1b6761b9 100644
+--- a/docs/docs/advanced_features/server_arguments.mdx
++++ b/docs/docs/advanced_features/server_arguments.mdx
+@@ -1894,7 +1894,7 @@ Please consult the documentation below and [server_args.py](https://github.com/s
+     </tr>
+     <tr>
+       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}>`--flashinfer-allreduce-fusion-backend`</td>
+-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Enable FlashInfer allreduce fusion and choose backend. Defaults to auto. 'auto': choose mnnvl on SM90 single-node systems and SM100/SM103 single-node or multi-node systems; choose trtllm otherwise. 'trtllm': available on single-node systems only. 'mnnvl': available on SM90 single-node systems and SM100/SM103 single-node or multi-node systems via MNNVL fabric. Fuses allreduce with Residual + RMSNorm for supported MoE models.</td>
++      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Enable FlashInfer allreduce fusion and choose backend. Requires SM90, SM10X, or SM12X (SM120/SM121) NVIDIA GPUs. Defaults to auto. 'auto': choose mnnvl on Blackwell (SM100/SM103) systems (single- and multi-node) and trtllm on SM90, SM120, and SM121 single-node systems. 'trtllm': available on single-node systems only. 'mnnvl': available on SM90 single-node systems and SM100/SM103 single-node or multi-node systems via MNNVL fabric. Fuses allreduce with Residual + RMSNorm for supported MoE models.</td>
+       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}>`None`</td>
+       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}><code>auto</code>, <code>trtllm</code>, <code>mnnvl</code></td>
+     </tr>
+diff --git a/docs/docs/references/environment_variables.mdx b/docs/docs/references/environment_variables.mdx
+index 6fe5246340..8674a267cb 100644
+--- a/docs/docs/references/environment_variables.mdx
++++ b/docs/docs/references/environment_variables.mdx
+@@ -712,7 +712,7 @@ SGLang supports various environment variables that can be used to configure its
+     </tr>
+     <tr>
+       <td style={{padding: "9px 12px", fontWeight: 500, backgroundColor: "rgba(255,255,255,0.02)"}}><code>SGLANG_DSV4_REASONING_EFFORT</code></td>
+-      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Default <code>reasoning_effort</code> for the DeepSeek V4 chat encoder when a request does not set it (accepts <code>max</code>, <code>high</code>; empty means unset).</td>
++      <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}>Default <code>reasoning_effort</code> for the DeepSeek V4 chat encoder when a request does not set it. The preview profile accepts <code>high</code> and <code>max</code>; the official profile accepts <code>low</code>, <code>high</code>, and <code>max</code>. The profile is detected from the bundled encoder. Override it with <code>--json-model-override-args '&#123;"dsv4_reasoning_effort_profile":"official"&#125;'</code>.</td>
+       <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>""</code></td>
+     </tr>
+     <tr>
+diff --git a/python/sglang/srt/arg_groups/overrides.py b/python/sglang/srt/arg_groups/overrides.py
+index 3ab05bcc4a..cb0b636a53 100644
+--- a/python/sglang/srt/arg_groups/overrides.py
++++ b/python/sglang/srt/arg_groups/overrides.py
+@@ -1623,6 +1623,7 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
+     {
+         "DeepseekV3ForCausalLM",
+         "DeepseekV32ForCausalLM",
++        "DeepseekV4ForCausalLM",
+         "GptOssForCausalLM",
+         "GlmMoeDsaForCausalLM",
+         "Glm4MoeForCausalLM",
+@@ -1644,23 +1645,24 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
+ @register_post_process
+ def _flashinfer_allreduce_fusion_auto_enable(view: Any) -> dict:
+     """Slot pass at the monolith tail: auto-enable FlashInfer AllReduce
+-    Fusion on SM90/SM100 for models with explicit support. auto resolves to
+-    mnnvl on Blackwell (single- and multi-node) and trtllm on SM90
+-    single-node systems. Reads the mid-resolution enable_dp_attention /
++    Fusion on SM90/SM100/SM12X (SM120/SM121) for models with explicit support.
++    auto resolves to mnnvl on SM100 (single- and multi-node) and trtllm on
++    SM90/SM12X single-node systems. Reads the mid-resolution enable_dp_attention /
+     moe_a2a_backend (after the DeepSeek CP and a2a declarations), exactly
+     like the legacy tail block."""
+     model_arch = view.get_model_config().hf_config.architectures[0]
+     if (
+         view.flashinfer_allreduce_fusion_backend is None
+         and model_arch in _FLASHINFER_ALLREDUCE_FUSION_ARCHS
+-        and (is_sm90_supported() or is_sm100_supported())
++        and (is_sm90_supported() or is_sm100_supported() or is_sm120_supported())
+         and view.tp_size > 1
+         and not view.enable_dp_attention
+         and (view.nnodes == 1 or is_sm100_supported())
+         and view.moe_a2a_backend == "none"
+     ):
+         logger.info(
+-            f"Auto-enabling FlashInfer AllReduce Fusion on SM90/SM10X for {model_arch}"
++            f"Auto-enabling FlashInfer AllReduce Fusion on "
++            f"SM90/SM10X/SM12X (SM120/SM121) for {model_arch}"
+         )
+         return {"flashinfer_allreduce_fusion_backend": "auto"}
+     return {}
+diff --git a/python/sglang/srt/distributed/bootstrap.py b/python/sglang/srt/distributed/bootstrap.py
+index e0c37793dd..fd5452fac4 100644
+--- a/python/sglang/srt/distributed/bootstrap.py
++++ b/python/sglang/srt/distributed/bootstrap.py
+@@ -16,9 +16,13 @@ from sglang.srt.distributed import (
+     init_distributed_environment,
+     initialize_model_parallel,
+     set_custom_all_reduce,
++    set_flashinfer_allreduce_only,
+     set_mscclpp_all_reduce,
+     set_torch_symm_mem_all_reduce,
+ )
++from sglang.srt.distributed.parallel_state import (
++    _tag_groups_for_flashinfer_allreduce_only,
++)
+ from sglang.srt.distributed.parallel_state_wrapper import ParallelState
+ from sglang.srt.environ import envs
+ from sglang.srt.layers.dp_attention import initialize_dp_attention
+@@ -164,6 +168,9 @@ def _set_all_reduce_flags(*, server_args: ServerArgs) -> None:
+     set_custom_all_reduce(not server_args.disable_custom_all_reduce)
+     set_mscclpp_all_reduce(server_args.enable_mscclpp)
+     set_torch_symm_mem_all_reduce(server_args.enable_torch_symm_mem)
++    set_flashinfer_allreduce_only(
++        server_args.flashinfer_allreduce_fusion_backend is not None
++    )
+ 
+ 
+ def _init_cpu_threads_env(
+@@ -233,6 +240,7 @@ def _init_parallel_groups(
+         rank_offset=rank_offset,
+         max_world_size=server_args.max_ep_size,
+     )
++    _tag_groups_for_flashinfer_allreduce_only()
+     initialize_dp_attention(
+         server_args=server_args,
+         model_config=model_config,
+diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
+index c90dc0a968..a9284fbc18 100644
+--- a/python/sglang/srt/distributed/parallel_state.py
++++ b/python/sglang/srt/distributed/parallel_state.py
+@@ -185,6 +185,22 @@ def outplace_all_reduce(
+     return group._all_reduce_out_place(tensor, outplace_all_reduce_method)
+ 
+ 
++@register_custom_op(out_shape="tensor")
++def flashinfer_allreduce(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
++    """FlashInfer kAllReduce over ``group_name``.
++
++    Registered as a custom op so it stays opaque under Dynamo and can run inside
++    piecewise CUDA graphs. Applicability is decided by
++    ``GroupCoordinator._can_use_flashinfer_allreduce`` before the call -- this op
++    has no fallback of its own.
++    """
++    assert group_name in _groups, f"Group {group_name} is not found."
++    group = _groups[group_name]()
++    if group is None:
++        raise ValueError(f"Group {group_name} is destroyed.")
++    return group._flashinfer_allreduce(tensor)
++
++
+ @register_custom_op(mutates_args=["output"])
+ def reg_all_gather_into_tensor(
+     output: torch.Tensor, input: torch.Tensor, group_name: str
+@@ -291,6 +307,10 @@ class GroupCoordinator:
+         self.local_rank = local_rank
+         self.device_group = None
+         self.cpu_group = None
++        # Which FlashInfer fusion workspace this group owns, or None when the
++        # group is not eligible for the allreduce-only kAllReduce path. Stamped
++        # by _tag_groups_for_flashinfer_allreduce_only() after group init.
++        self._fi_workspace_hint: Optional[str] = None
+         self.local_size = get_int_env_var("LOCAL_SIZE", 0)
+ 
+         if is_cuda_alike():
+@@ -666,6 +686,9 @@ class GroupCoordinator:
+             return self.npu_communicator.all_reduce(input_)
+ 
+         if torch.compiler.is_compiling():
++            if self._can_use_flashinfer_allreduce(input_):
++                return flashinfer_allreduce(input_, group_name=self.unique_name)
++
+             # Byte-size thresholds in method selection (e.g. `_pick_algo` or
+             # `should_mscclpp_allreduce`) would guard on the symbolic token dim
+             # and recompile per shape; defer the selection to runtime inside
+@@ -705,6 +728,9 @@ class GroupCoordinator:
+                 self.pynccl_comm.all_reduce(input_)
+                 return input_
+ 
++        if self._can_use_flashinfer_allreduce(input_):
++            return flashinfer_allreduce(input_, group_name=self.unique_name)
++
+         outplace_all_reduce_method = self._resolve_outplace_all_reduce_method(
+             input_=input_,
+             should_use_pymscclpp_allreduce=should_use_pymscclpp_allreduce,
+@@ -901,6 +927,29 @@ class GroupCoordinator:
+             return "pynccl"
+         return None
+ 
++    def _can_use_flashinfer_allreduce(self, input_: torch.Tensor) -> bool:
++        if self._fi_workspace_hint is None:
++            return False
++        from sglang.srt.layers.flashinfer_comm_fusion import (
++            can_use_flashinfer_allreduce,
++        )
++
++        return can_use_flashinfer_allreduce(
++            input_,
++            use_attn_tp_group=(self._fi_workspace_hint == "attn_tp"),
++            expected_world_size=self.world_size,
++            expected_group_key=(self.device_group, self.cpu_group),
++        )
++
++    def _flashinfer_allreduce(self, input_: torch.Tensor) -> torch.Tensor:
++        from sglang.srt.layers.flashinfer_comm_fusion import (
++            flashinfer_allreduce as _flashinfer_allreduce_impl,
++        )
++
++        return _flashinfer_allreduce_impl(
++            input_, use_attn_tp_group=(self._fi_workspace_hint == "attn_tp")
++        )
++
+     def _all_reduce_out_place(
+         self, input_: torch.Tensor, outplace_all_reduce_method: str
+     ) -> torch.Tensor:
+@@ -1984,6 +2033,7 @@ logger = logging.getLogger(__name__)
+ _ENABLE_CUSTOM_ALL_REDUCE = True
+ _ENABLE_MSCCLPP_ALL_REDUCE = False
+ _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = False
++_ENABLE_FLASHINFER_ALLREDUCE_ONLY = False
+ 
+ 
+ def set_custom_all_reduce(enable: bool):
+@@ -2001,6 +2051,41 @@ def set_torch_symm_mem_all_reduce(enable: bool):
+     _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = enable
+ 
+ 
++def set_flashinfer_allreduce_only(enable: bool):
++    global _ENABLE_FLASHINFER_ALLREDUCE_ONLY
++    _ENABLE_FLASHINFER_ALLREDUCE_ONLY = enable
++
++
++def _tag_groups_for_flashinfer_allreduce_only():
++    """Stamp _fi_workspace_hint on the group coordinators that own a FlashInfer
++    fusion workspace, so all_reduce() can dispatch to flashinfer_allreduce()
++    without touching the call sites.
++
++    Only two workspaces exist (see ``_get_workspace_manager``): one for
++    attention TP and one for MoE. A group may only be tagged for the workspace
++    that was rendezvoused on its own peers -- reducing over a workspace built
++    for a different set of peers silently returns wrong data.
++
++    - ``_TP`` is deliberately absent: it *is* ``_ATTN_TP`` when
++      ``attn_tp_size == tp_size``, and a strict superset of it otherwise (DP
++      attention), where the attention workspace addresses the wrong peers.
++    - The MoE workspace rendezvouses on the EP group when ``moe_ep_size > 1``
++      and on the MoE-TP group otherwise, so exactly one of ``_MOE_EP`` /
++      ``_MOE_TP`` is eligible. Tagging both makes a MoE-TP allreduce reduce
++      across the EP peers under hybrid EP+TP (e.g. tp=4, ep=2).
++    """
++    if not _ENABLE_FLASHINFER_ALLREDUCE_ONLY:
++        return
++
++    moe_group = _MOE_EP if (_MOE_EP is not None and _MOE_EP.world_size > 1) else _MOE_TP
++    # Attention is tagged last on purpose: when a coordinator backs both roles
++    # (e.g. _ATTN_TP is _MOE_EP is _TP at tp=4, ep=4) either workspace spans the
++    # same peers and is correct, so we just pick one deterministically.
++    for group, hint in ((moe_group, "moe"), (_ATTN_TP, "attn_tp")):
++        if group is not None:
++            group._fi_workspace_hint = hint
++
++
+ # TODO: refactor in-tree platforms to get rid of this wrapper
+ def get_default_distributed_backend(device: str) -> str:
+     # We deliberately go through ``platforms.current_platform`` (rather than
+diff --git a/python/sglang/srt/entrypoints/openai/chat_encoding.py b/python/sglang/srt/entrypoints/openai/chat_encoding.py
+index 9cb7769a9e..b6b136ca99 100644
+--- a/python/sglang/srt/entrypoints/openai/chat_encoding.py
++++ b/python/sglang/srt/entrypoints/openai/chat_encoding.py
+@@ -7,8 +7,103 @@ it here instead of re-deriving it from model architectures themselves.
+ 
+ from __future__ import annotations
+ 
++import ast
++import logging
++from pathlib import Path
+ from typing import Any, Dict, List, Optional
+ 
++from sglang.srt.entrypoints.openai import encoding_dsv4
++
++logger = logging.getLogger(__name__)
++
++DSV4_REASONING_EFFORT_PROFILE_OVERRIDE = "dsv4_reasoning_effort_profile"
++_DSV4_REASONING_EFFORT_ENCODER = "encoding/encoding_dsv4.py"
++_MAX_DSV4_ENCODER_BYTES = 1 << 20
++
++
++def _detect_dsv4_reasoning_effort_profile(
++    model_path: str, revision: Optional[str] = None
++) -> Optional[str]:
++    encoder_path = Path(model_path) / _DSV4_REASONING_EFFORT_ENCODER
++    try:
++        if not encoder_path.is_file():
++            from huggingface_hub import hf_hub_download
++
++            encoder_path = Path(
++                hf_hub_download(
++                    model_path,
++                    _DSV4_REASONING_EFFORT_ENCODER,
++                    revision=revision,
++                )
++            )
++        if encoder_path.stat().st_size > _MAX_DSV4_ENCODER_BYTES:
++            return None
++        tree = ast.parse(encoder_path.read_text(encoding="utf-8"))
++    except Exception as error:
++        logger.debug(
++            "Could not inspect DeepSeek-V4 checkpoint encoder at %s: %s",
++            encoder_path,
++            error,
++        )
++        return None
++
++    assignments = {}
++    for node in tree.body:
++        if isinstance(node, ast.Assign):
++            targets = node.targets
++            value = node.value
++        elif isinstance(node, ast.AnnAssign):
++            targets = [node.target]
++            value = node.value
++        else:
++            continue
++
++        for target in targets:
++            if not isinstance(target, ast.Name):
++                continue
++            try:
++                assignments[target.id] = ast.literal_eval(value)
++            except (TypeError, ValueError):
++                continue
++
++    prompts = assignments.get("REASONING_EFFORT_PROMPTS")
++    if (
++        assignments.get("DEFAULT_REASONING_EFFORT") == "low"
++        and isinstance(prompts, dict)
++        and {"low", "high", "max"} <= prompts.keys()
++    ):
++        return "official"
++    if "REASONING_EFFORT_MAX" in assignments:
++        return "preview"
++    return None
++
++
++def _validate_dsv4_reasoning_effort_profile(profile: str) -> str:
++    if profile not in encoding_dsv4.REASONING_EFFORT_PROFILES:
++        raise ValueError(
++            f"Invalid {DSV4_REASONING_EFFORT_PROFILE_OVERRIDE}: {profile!r}; "
++            f"expected one of {list(encoding_dsv4.REASONING_EFFORT_PROFILES)}"
++        )
++    return profile
++
++
++def resolve_dsv4_reasoning_effort_profile(
++    *,
++    model_path: str,
++    revision: Optional[str] = None,
++    override: Optional[str] = None,
++) -> str:
++    if override is not None:
++        return _validate_dsv4_reasoning_effort_profile(override)
++
++    return (
++        _detect_dsv4_reasoning_effort_profile(
++            model_path=model_path,
++            revision=revision,
++        )
++        or "preview"
++    )
++
+ 
+ def resolve_chat_encoding_spec(
+     *,
+diff --git a/python/sglang/srt/entrypoints/openai/encoding_dsv4.py b/python/sglang/srt/entrypoints/openai/encoding_dsv4.py
+index a19d1f4b10..d6477ba4e7 100644
+--- a/python/sglang/srt/entrypoints/openai/encoding_dsv4.py
++++ b/python/sglang/srt/entrypoints/openai/encoding_dsv4.py
+@@ -60,12 +60,30 @@ tool_calls_block_name: str = "tool_calls"
+ 
+ tool_output_template: str = "<tool_result>{content}</tool_result>"
+ 
+-REASONING_EFFORT_MAX = (
++REASONING_EFFORT_PREVIEW_MAX = (
+     "Reasoning Effort: Absolute maximum with no shortcuts permitted.\n"
+     "You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.\n"
+     "Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n"
+ )
+ 
++REASONING_EFFORT_OFFICIAL_MAX = (
++    "Reasoning Effort: Beyond maximum — exhaustive, relentless, and uncompromising.\n"
++    "You MUST reason with the utmost depth and rigor, leaving absolutely nothing to chance: exhaustively decompose the problem into its most fundamental components, trace every causal chain to its root, and resolve the underlying cause rather than any surface symptom.\n"
++    "Do not stop reasoning until you have independently verified the solution from multiple angles and are certain that no assumption remains unchecked and no error remains undiscovered.\n\n"
++)
++
++REASONING_EFFORT_PROFILES = {
++    "preview": {
++        "high": "",
++        "max": REASONING_EFFORT_PREVIEW_MAX,
++    },
++    "official": {
++        "low": "",
++        "high": REASONING_EFFORT_PREVIEW_MAX,
++        "max": REASONING_EFFORT_OFFICIAL_MAX,
++    },
++}
++
+ TOOLS_TEMPLATE = """## Tools
+ 
+ You have access to a set of tools to help answer the user's question. You can invoke tools by writing a "<{dsml_token}tool_calls>" block like the following:
+@@ -250,6 +268,7 @@ def render_message(
+     thinking_mode: str,
+     drop_thinking: bool = True,
+     reasoning_effort: Optional[str] = None,
++    reasoning_effort_profile: str = "preview",
+ ) -> str:
+     """
+     Render a single message at the given index into its encoded string form.
+@@ -262,7 +281,9 @@ def render_message(
+         messages: Full list of messages in the conversation.
+         thinking_mode: Either "chat" or "thinking".
+         drop_thinking: Whether to drop reasoning content from earlier turns.
+-        reasoning_effort: Optional reasoning effort level ("max", "high", or None).
++        reasoning_effort: Optional reasoning effort level. The preview profile accepts
++            "high" and "max"; the official profile accepts "low", "high", and "max".
++        reasoning_effort_profile: DeepSeek-V4 effort mapping ("preview" or "official").
+ 
+     Returns:
+         Encoded string for this message.
+@@ -290,14 +311,21 @@ def render_message(
+     if tool_calls:
+         tool_calls = tool_calls_from_openai_format(tool_calls)
+ 
+-    # Reasoning effort prefix (only at index 0 in thinking mode with max effort)
+-    assert reasoning_effort in [
+-        "max",
+-        None,
+-        "high",
+-    ], f"Invalid reasoning effort: {reasoning_effort}"
+-    if index == 0 and thinking_mode == "thinking" and reasoning_effort == "max":
+-        prompt += REASONING_EFFORT_MAX
++    if reasoning_effort_profile not in REASONING_EFFORT_PROFILES:
++        raise ValueError(
++            f"Invalid reasoning effort profile: {reasoning_effort_profile!r}; "
++            f"expected one of {list(REASONING_EFFORT_PROFILES)}"
++        )
++    effort_prompts = REASONING_EFFORT_PROFILES[reasoning_effort_profile]
++    if reasoning_effort is None:
++        reasoning_effort = "low" if reasoning_effort_profile == "official" else "high"
++    if reasoning_effort not in effort_prompts:
++        raise ValueError(
++            f"Invalid reasoning effort {reasoning_effort!r} for profile "
++            f"{reasoning_effort_profile!r}; expected one of {list(effort_prompts)}"
++        )
++    if index == 0 and thinking_mode == "thinking":
++        prompt += effort_prompts[reasoning_effort]
+ 
+     if role == "system":
+         prompt += system_msg_template.format(content=content or "")
+@@ -583,6 +611,7 @@ def encode_messages(
+     drop_thinking: bool = True,
+     add_default_bos_token: bool = True,
+     reasoning_effort: Optional[str] = None,
++    reasoning_effort_profile: str = "preview",
+ ) -> str:
+     """
+     Encode a list of messages into the DeepSeek-V4 prompt format.
+@@ -600,7 +629,9 @@ def encode_messages(
+         drop_thinking: If True, drop reasoning_content from earlier assistant turns
+                       (only keep reasoning for messages after the last user message).
+         add_default_bos_token: Whether to prepend BOS token at conversation start.
+-        reasoning_effort: Optional reasoning effort level ("max", "high", or None).
++        reasoning_effort: Optional reasoning effort level. The preview profile accepts
++            "high" and "max"; the official profile accepts "low", "high", and "max".
++        reasoning_effort_profile: DeepSeek-V4 effort mapping ("preview" or "official").
+ 
+     Returns:
+         The encoded prompt string.
+@@ -640,6 +671,7 @@ def encode_messages(
+             thinking_mode=thinking_mode,
+             drop_thinking=effective_drop_thinking,
+             reasoning_effort=reasoning_effort,
++            reasoning_effort_profile=reasoning_effort_profile,
+         )
+ 
+     return prompt
+diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
+index cb0256d0da..4e34c8fa06 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_chat.py
++++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
+@@ -24,7 +24,7 @@ from fastapi import Request
+ from fastapi.responses import ORJSONResponse, StreamingResponse
+ from jsonschema import Draft202012Validator, SchemaError
+ 
+-from sglang.srt.entrypoints.openai import encoding_dsv4, encoding_dsv32
++from sglang.srt.entrypoints.openai import chat_encoding, encoding_dsv4, encoding_dsv32
+ from sglang.srt.entrypoints.openai.protocol import (
+     ChatCompletionMessageGenericParam,
+     ChatCompletionRequest,
+@@ -252,6 +252,17 @@ class OpenAIServingChat(OpenAIServingBase):
+         # Which Python-based chat encoder (if any) bypasses apply_chat_template.
+         # Values: "dsv32", "dsv4", or custom values set by subclass. None for default.
+         self.chat_encoding_spec = self._resolve_chat_encoding_spec()
++        self._dsv4_reasoning_effort_profile = (
++            chat_encoding.resolve_dsv4_reasoning_effort_profile(
++                model_path=self.tokenizer_manager.model_path,
++                revision=self.tokenizer_manager.server_args.revision,
++                override=self.tokenizer_manager.model_config.hf_config.to_dict().get(
++                    chat_encoding.DSV4_REASONING_EFFORT_PROFILE_OVERRIDE
++                ),
++            )
++            if self.chat_encoding_spec == "dsv4"
++            else None
++        )
+ 
+         # Resolve the env-configured Inkling effort default once: the env var is
+         # frozen for the server's lifetime, and a misconfigured value should
+@@ -338,11 +349,7 @@ class OpenAIServingChat(OpenAIServingBase):
+ 
+         Override in subclass to add custom encoding specs.
+         """
+-        from sglang.srt.entrypoints.openai.chat_encoding import (
+-            resolve_chat_encoding_spec,
+-        )
+-
+-        return resolve_chat_encoding_spec(
++        return chat_encoding.resolve_chat_encoding_spec(
+             hf_config=self.tokenizer_manager.model_config.hf_config,
+             tokenizer=self.tokenizer_manager.tokenizer,
+             tool_call_parser=self.tool_call_parser,
+@@ -1203,20 +1210,28 @@ class OpenAIServingChat(OpenAIServingBase):
+                 # insert an empty system prompt to help render tool system prompt
+                 messages.insert(0, {"role": "system", "content": ""})
+             if request.tools:
+-                messages[0]["tools"] = [tool.model_dump() for tool in request.tools]
++                # exclude_unset keeps protocol-model defaults (e.g. strict=False)
++                # out of the rendered tool schemas so the prompt matches the
++                # checkpoint's reference encoding exactly.
++                messages[0]["tools"] = [
++                    tool.model_dump(exclude_unset=True, by_alias=True)
++                    for tool in request.tools
++                ]
+ 
+             # Default encoding (dsv4/dsv32)
+             if self.chat_encoding_spec == "dsv4":
+-                # V4 encoder only accepts "max" / "high" / None.
+-                # OpenAI protocol defaults to "medium" which V4 rejects; drop it.
+-                # Fallback: if request didn't set it, try env SGLANG_DSV4_REASONING_EFFORT.
+                 effort_source = request.reasoning_effort
+                 if effort_source is None:
+                     env_val = envs.SGLANG_DSV4_REASONING_EFFORT.get()
+                     if env_val:
+                         effort_source = env_val
++                reasoning_effort_profile = self._dsv4_reasoning_effort_profile
++                assert reasoning_effort_profile is not None
++                accepted_efforts = encoding_dsv4.REASONING_EFFORT_PROFILES[
++                    reasoning_effort_profile
++                ]
+                 v4_reasoning_effort = (
+-                    effort_source if effort_source in ("max", "high") else None
++                    effort_source if effort_source in accepted_efforts else None
+                 )
+                 if request.task is not None:
+                     encoding_dsv4.attach_task_to_last_user_message(
+@@ -1226,6 +1241,7 @@ class OpenAIServingChat(OpenAIServingBase):
+                     messages,
+                     thinking_mode=thinking_mode,
+                     reasoning_effort=v4_reasoning_effort,
++                    reasoning_effort_profile=reasoning_effort_profile,
+                 )
+                 prompt_ids = self.tokenizer_manager.tokenizer.encode(real_input)
+             else:
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 30c796851e..678eee3b0d 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1109,8 +1109,7 @@ class Envs:
+     # Copy rank-local MoE slices into independent CPU storage before H2D when
+     # they reference a larger mmap-backed checkpoint storage.
+     SGLANG_MOE_COPY_WEIGHT_VIEWS_BEFORE_H2D = EnvBool(False)
+-    # Default reasoning_effort for dsv4 chat encoder when request doesn't set it.
+-    # Accepts "", "max", "high" (empty string means unset); other values filtered to None.
++    # Flash-0731 also accepts "low"; the active profile is checkpoint-resolved.
+     SGLANG_DSV4_REASONING_EFFORT = EnvStr("")
+     # Quantize the SWA fp8 KV cache from bf16-rounded values (matches
+     # trainer-side QAT and the DSA-CP path) instead of fp32 registers.
+diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
+index f85b3bfc67..d9007fc9a8 100644
+--- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
++++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
+@@ -679,15 +679,39 @@ class DeepseekV4AttnBackend(
+                 out_cache_loc=out_cache_loc,
+             )
+ 
++        return self._make_forward_metadata_decode(
++            max_seq_len=max_seq_len,
++            req_pool_indices=req_pool_indices,
++            seq_lens=seq_lens,
++            out_cache_loc=out_cache_loc,
++        )
++
++    def _make_forward_metadata_decode(
++        self,
++        max_seq_len: int,
++        req_pool_indices: torch.Tensor,
++        seq_lens: torch.Tensor,
++        out_cache_loc: torch.Tensor,
++    ) -> DSV4Metadata:
++        # DSV4 draft models contain only the ratio-0 NextN/DSpark attention
++        # layer. Avoid materializing the full-context page table and compressed
++        # attention metadata that only ratio-4/128 target layers consume.
++        need_compress = not self.is_draft_runner
+         core_attn_metadata = self.make_core_attn_metadata(
+             req_to_token=self.req_to_token,
+             req_pool_indices_repeated=req_pool_indices,
+             seq_lens_casual=seq_lens,
+-            max_seq_len=max_seq_len,
++            max_seq_len=max_seq_len if need_compress else self.page_size,
+             out_loc=out_cache_loc,
+-            need_compress=True,
++            need_compress=need_compress,
+         )
+ 
++        if not need_compress:
++            return DSV4Metadata(
++                core_attn_metadata=core_attn_metadata,
++                indexer_metadata=None,
++            )
++
+         indexer_metadata = self.init_forward_metadata_indexer(core_attn_metadata)
+ 
+         create = functools.partial(
+@@ -1024,34 +1048,11 @@ class DeepseekV4AttnBackend(
+         self,
+         raw_metadata: DSV4RawDecodeMetadata,
+     ) -> DSV4Metadata:
+-        req_pool_indices = raw_metadata.req_pool_indices
+-        seq_lens = raw_metadata.seq_lens
+-        out_cache_loc = raw_metadata.out_cache_loc
+-
+-        core_attn_metadata = self.make_core_attn_metadata(
+-            req_to_token=self.req_to_token,
+-            req_pool_indices_repeated=req_pool_indices,
+-            seq_lens_casual=seq_lens,
++        return self._make_forward_metadata_decode(
+             max_seq_len=self.MAX_SEQ_LEN_FOR_CAPTURE,
+-            out_loc=out_cache_loc,
+-            need_compress=True,
+-        )
+-        indexer_metadata = self.init_forward_metadata_indexer(core_attn_metadata)
+-
+-        create = functools.partial(
+-            create_paged_compressor_data,
+-            is_prefill=False,
+-            token_to_kv_pool=self.token_to_kv_pool,
+-            req_to_token=self.req_to_token,
+-            req_pool_indices=req_pool_indices,
+-            seq_lens=seq_lens,
+-        )
+-
+-        return DSV4Metadata(
+-            core_attn_metadata,
+-            indexer_metadata,
+-            c4_compress_metadata=create(compress_ratio=4),
+-            c128_compress_metadata=create(compress_ratio=128),
++            req_pool_indices=raw_metadata.req_pool_indices,
++            seq_lens=raw_metadata.seq_lens,
++            out_cache_loc=raw_metadata.out_cache_loc,
+         )
+ 
+     def init_forward_metadata_draft_extend(
+@@ -1552,8 +1553,10 @@ class DeepseekV4AttnBackend(
+         ):
+             core = metadata.core_attn_metadata
+             core.c1_flashmla_metadata = _create_flashmla_metadata()
+-            core.c4_flashmla_metadata = _create_flashmla_metadata()
+-            core.c128_flashmla_metadata = _create_flashmla_metadata()
++            if core.c4_flashmla_metadata is not None:
++                core.c4_flashmla_metadata = _create_flashmla_metadata()
++            if core.c128_flashmla_metadata is not None:
++                core.c128_flashmla_metadata = _create_flashmla_metadata()
+ 
+         # PREP_IN_CUDA_GRAPH=True: warmup upgraded raw->full on the host;
+         # restore raw so capture re-runs the upgrade inside the graph.
+@@ -1617,6 +1620,11 @@ class DeepseekV4AttnBackend(
+         attn_sink: Optional[torch.Tensor] = None,
+         **_,
+     ) -> torch.Tensor:
++        assert not self.is_draft_runner or compress_ratio == 0, (
++            "DSV4 draft attention only supports compress_ratio == 0, "
++            f"got {compress_ratio=}"
++        )
++
+         if self.mtp_enabled and forward_batch.forward_mode.is_idle():
+             return q.new_empty(q.shape[0], q.shape[1], layer.v_head_dim)
+ 
+@@ -2059,8 +2067,8 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+             )
+ 
+     def init_forward_metadata_in_graph(self, forward_batch: ForwardBatch) -> None:
+-        for attn_backend in self.attn_backends:
+-            attn_backend.init_forward_metadata_in_graph(forward_batch)
++        for i in range(self.speculative_num_steps - 1):
++            self.attn_backends[i].init_forward_metadata_in_graph(forward_batch)
+ 
+     def init_forward_metadata_out_graph(
+         self,
+@@ -2088,7 +2096,7 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+             spec_info=forward_batch.spec_info,
+         )
+         if in_capture:
+-            for i in range(self.speculative_num_steps):
++            for i in range(self.speculative_num_steps - 1):
+                 self.attn_backends[i].init_forward_metadata_out_graph(
+                     inner_fb, in_capture=True
+                 )
+diff --git a/python/sglang/srt/layers/communicator.py b/python/sglang/srt/layers/communicator.py
+index bb99bdf1f9..80cf16e486 100644
+--- a/python/sglang/srt/layers/communicator.py
++++ b/python/sglang/srt/layers/communicator.py
+@@ -84,12 +84,14 @@ from sglang.srt.utils import (
+     is_npu,
+     is_sm90_supported,
+     is_sm100_supported,
++    is_sm120_supported,
+ )
+ 
+ _is_cuda = is_cuda()
+ _is_flashinfer_available = is_flashinfer_available()
+ _is_sm90_supported = _is_cuda and is_sm90_supported()
+ _is_sm100_supported = _is_cuda and is_sm100_supported()
++_is_sm120_supported = _is_cuda and is_sm120_supported()
+ _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and is_hip()
+ _is_gfx95_supported = is_gfx95_supported()
+ _is_npu = is_npu()
+@@ -166,7 +168,7 @@ def apply_flashinfer_allreduce_fusion(batch_size: int):
+     return (
+         # NOTE: flashinfer 0.6.1 caused performance regression on sm100 for allreduce fusion
+         # Ref: https://github.com/sgl-project/sglang/issues/17237
+-        (_is_sm90_supported or _is_sm100_supported)
++        (_is_sm90_supported or _is_sm100_supported or _is_sm120_supported)
+         and _is_flashinfer_available
+         and not is_dp_attention_enabled()
+         and get_exec().comm.flashinfer_allreduce_fusion_backend is not None
+@@ -816,6 +818,18 @@ class LayerCommunicator:
+         if is_enable_moe_cp_allgather():
+             return False
+ 
++        # Fusing makes the next layer's residual+LN absorb the post-experts
++        # all-reduce, and that fused kernel reduces over a single group. Under
++        # hybrid EP+TP the post-experts reduction spans two disjoint groups
++        # (moe_expert_parallel_all_reduce over _MOE_EP, then
++        # moe_tensor_model_parallel_all_reduce over _MOE_TP), and
++        # should_skip_post_experts_all_reduce() skips *both* once fusion is
++        # published -- so the fused reduce would cover only half the peers and
++        # silently return under-reduced activations.
++        parallel = get_parallel()
++        if parallel.moe_ep_size > 1 and parallel.moe_tp_size > 1:
++            return False
++
+         if (
+             is_dp_attention_enabled()
+             and self._speculative_algo is not None
+diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
+index dec6bb5124..5c7f983c70 100644
+--- a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
++++ b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
+@@ -4,7 +4,7 @@ import os
+ import time
+ from contextlib import contextmanager, nullcontext
+ from enum import IntEnum, auto
+-from typing import Dict, List, Tuple
++from typing import Dict, List, Optional, Tuple
+ 
+ import torch
+ from tqdm import tqdm
+@@ -155,6 +155,28 @@ def _maybe_compile_deep_gemm_one_type_all(
+         )
+ 
+ 
++def _select_max_m_within_budget(
++    kernel_type: DeepGemmKernelType,
++    m_list: List[int],
++    n: int,
++    k: int,
++    num_groups: int,
++    memory_budget: float,
++) -> Optional[int]:
++    # Reduce geometrically because the estimate is monotonic in max_m.
++    min_m, max_m = min(m_list), max(m_list)
++    while (
++        _BaseWarmupExecutor.get_memory_requirement(
++            kernel_type, max_m=max_m, n=n, k=k, num_groups=num_groups
++        )
++        > memory_budget
++    ):
++        if max_m <= min_m:
++            return None
++        max_m = max(max_m // 2, min_m)
++    return max_m
++
++
+ # NOTE(alcanderian): get_num_sms should be change when 2-batch-overlap is introduced
+ def _compile_deep_gemm_one_type_all(
+     kernel_type: DeepGemmKernelType,
+@@ -186,15 +208,20 @@ def _compile_deep_gemm_one_type_all(
+             f"Required memory for warmup: {required_memory}GB, Available memory: {memory_budget}GB"
+         )
+         if memory_budget < required_memory:
+-            # TODO: Maybe compute the max_m based on the memory budget
+-            while (
+-                _BaseWarmupExecutor.get_memory_requirement(
+-                    kernel_type, max_m=max_m, n=n, k=k, num_groups=num_groups
++            max_m = _select_max_m_within_budget(
++                kernel_type,
++                m_list=m_list,
++                n=n,
++                k=k,
++                num_groups=num_groups,
++                memory_budget=memory_budget,
++            )
++            if max_m is None:
++                logger.warning(
++                    f"Available memory {memory_budget}GB is not enough for warmup even at M={min(m_list)}, "
++                    f"skipping warmup for <{kernel_type.name}> N={n}, K={k}, num_groups={num_groups}"
+                 )
+-                > memory_budget
+-                and max_m > 4096
+-            ):
+-                max_m = max_m // 2
++                return
+             logger.warning(
+                 f"Available memory {memory_budget}GB is less than required memory {required_memory}GB for warmup, reducing max_m to {max_m} to avoid out of memory"
+             )
+diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
+index 09e14f69df..d86282ff6d 100644
+--- a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
++++ b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
+@@ -18,22 +18,32 @@ def _compute_enable_deep_gemm():
+     sm_version = get_device_sm()
+     if (_is_cuda and sm_version < 90) or (_is_musa and sm_version < 31):
+         return False
+-    # DeepGEMM requires TMEM/tcgen05 (SM100+datacenter), not available on SM120
+-    if sm_version == 120:
+-        return False
+     if not (_is_cuda or _is_musa):
+         return False
+ 
+     try:
+-        import deep_gemm  # noqa: F401
++        import deep_gemm
+     except ImportError:
+         return False
+ 
++    # SM120 support uses a separate mma.sync block-scale implementation.
++    if sm_version == 120 and not hasattr(
++        deep_gemm, "m_grouped_fp8_fp4_gemm_nt_contiguous"
++    ):
++        return False
++
+     return envs.SGLANG_ENABLE_JIT_DEEPGEMM.get()
+ 
+ 
+ ENABLE_JIT_DEEPGEMM = _compute_enable_deep_gemm()
+ 
++
++def _compute_scale_ue8m0():
++    return ENABLE_JIT_DEEPGEMM and (
++        is_sm100_supported() or get_device_sm() == 120
++    )
++
++
+ DEEPGEMM_BLACKWELL = ENABLE_JIT_DEEPGEMM and is_sm100_supported()
+-DEEPGEMM_SCALE_UE8M0 = DEEPGEMM_BLACKWELL
++DEEPGEMM_SCALE_UE8M0 = _compute_scale_ue8m0()
+ DEEPGEMM_NEED_TMA_ALIGNED_SCALES = not (DEEPGEMM_SCALE_UE8M0 or _is_musa)
+diff --git a/python/sglang/srt/layers/flashinfer_comm_fusion.py b/python/sglang/srt/layers/flashinfer_comm_fusion.py
+index 194d97e05f..c571a5a947 100644
+--- a/python/sglang/srt/layers/flashinfer_comm_fusion.py
++++ b/python/sglang/srt/layers/flashinfer_comm_fusion.py
+@@ -20,6 +20,7 @@ from sglang.srt.utils import (
+     is_flashinfer_available,
+     is_sm90_supported,
+     is_sm100_supported,
++    is_sm120_supported,
+ )
+ from sglang.srt.utils.custom_op import register_custom_op
+ 
+@@ -45,9 +46,10 @@ def _mnnvl_supported(is_multi_node: bool) -> bool:
+ 
+ def _resolve_backend(backend: str, is_multi_node: bool = False) -> str:
+     """Resolve the requested FlashInfer allreduce fusion backend."""
+-    if not (is_sm90_supported() or is_sm100_supported()):
++    if not (is_sm90_supported() or is_sm100_supported() or is_sm120_supported()):
+         raise ValueError(
+-            "FlashInfer allreduce fusion requires SM90 or SM10X NVIDIA GPUs."
++            "FlashInfer allreduce fusion requires SM90, SM10X, or SM12X "
++            "(SM120/SM121) NVIDIA GPUs."
+         )
+ 
+     if backend == "auto":
+@@ -55,8 +57,8 @@ def _resolve_backend(backend: str, is_multi_node: bool = False) -> str:
+             if is_sm100_supported():
+                 return "mnnvl"
+             raise ValueError(
+-                "FlashInfer allreduce fusion does not support multi-node on "
+-                "non-Blackwell systems."
++                "FlashInfer allreduce fusion does not support multi-node "
++                "outside SM100/SM103 systems."
+             )
+         if is_sm100_supported():
+             return "mnnvl"
+@@ -69,8 +71,8 @@ def _resolve_backend(backend: str, is_multi_node: bool = False) -> str:
+ 
+     if backend == "mnnvl" and not _mnnvl_supported(is_multi_node):
+         raise ValueError(
+-            "FlashInfer allreduce fusion mnnvl backend requires a Blackwell "
+-            "system, or SM90 single-node."
++            "FlashInfer allreduce fusion mnnvl backend requires SM100/SM103, "
++            "or SM90 single-node."
+         )
+     return backend
+ 
+@@ -198,16 +200,17 @@ if is_flashinfer_available():
+ # FlashInfer allreduce fusion backend support matrix for
+ # --flashinfer-allreduce-fusion-backend:
+ #
+-#   Backend   | SM103 | SM100 | SM90        | Single-Node | Multi-Node |
+-#   --------- | ----- | ----- | ----------- | ----------- | ---------- |
+-#   trtllm    | Yes   | Yes   | Yes         | Yes         | No         |
+-#   mnnvl     | Yes   | Yes   | Single-node | Yes         | Blackwell  |
++#   Backend   | SM103 | SM100 | SM90        | SM12X | Single-Node | Multi-Node  |
++#   --------- | ----- | ----- | ----------- | ----- | ----------- | ----------- |
++#   trtllm    | Yes   | Yes   | Yes         | Yes   | Yes         | No          |
++#   mnnvl     | Yes   | Yes   | Single-node | No    | Yes         | SM100/SM103 |
+ #
+-# FlashInfer allreduce fusion requires SM90 or SM10X. auto resolves to mnnvl
+-# on Blackwell (SM100/SM103) systems (single- and multi-node) and to trtllm on
+-# SM90 single-node systems. SM90 multi-node and non-SM90/SM10X configurations
+-# are rejected. Either mnnvl or trtllm can be requested explicitly on
+-# single-node systems, and mnnvl additionally on Blackwell multi-node.
++# FlashInfer allreduce fusion requires SM90, SM10X, or SM12X (SM120/SM121).
++# auto resolves to mnnvl on SM100/SM103 systems (single- and multi-node) and to
++# trtllm on SM90, SM120, and SM121 single-node systems. Multi-node outside
++# SM100/SM103 systems and non-SM90/SM10X/SM12X configurations are rejected.
++# trtllm can be requested explicitly on any supported single-node system, and
++# mnnvl on SM90 single-node plus SM100/SM103 single- or multi-node.
+ 
+ 
+ def is_flashinfer_allreduce_unavailable() -> bool:
+@@ -240,8 +243,16 @@ def _flashinfer_trtllm_workspace_allocation_sizes(
+     max_token_num: int,
+     hidden_dim: int,
+     dtype: torch.dtype,
++    align_multicast: bool = False,
+ ) -> list[int]:
+-    """Mirror FlashInfer TRTLLM SymmDeviceMemory local allocation sizes."""
++    """Mirror FlashInfer TRTLLM SymmDeviceMemory local allocation sizes.
++
++    TRT-LLM symmetric memory is created with multicast disabled, so its
++    allocations only round to the allocation granularity. The mnnvl backend
++    allocates through McastGPUBuffer, which additionally rounds each
++    allocation to the multicast granularity; pass ``align_multicast=True`` to
++    mirror that so the preflight probes at least the real allocation size.
++    """
+     elem_size = 4 if dtype == torch.float32 else 2
+     buffer_size = world_size * max_token_num * hidden_dim * 2
+     flag_size = world_size * 256 * 4
+@@ -275,22 +286,24 @@ def _flashinfer_trtllm_workspace_allocation_sizes(
+ 
+         allocation_size = ceil_align(buffer_size + signal_pad_size, alloc_granularity)
+ 
+-        mc_prop = cuda_driver.CUmulticastObjectProp()
+-        mc_prop.numDevices = world_size
+-        mc_prop.size = allocation_size
+-        mc_prop.handleTypes = prop.requestedHandleTypes
++        if align_multicast:
++            mc_prop = cuda_driver.CUmulticastObjectProp()
++            mc_prop.numDevices = world_size
++            mc_prop.size = allocation_size
++            mc_prop.handleTypes = prop.requestedHandleTypes
+ 
+-        err, mc_granularity = cuda_driver.cuMulticastGetGranularity(
+-            mc_prop,
+-            cuda_driver.CUmulticastGranularity_flags.CU_MULTICAST_GRANULARITY_RECOMMENDED,
+-        )
+-        if err != cuda_driver.CUresult.CUDA_SUCCESS:
+-            raise RuntimeError(
+-                "cuMulticastGetGranularity failed for FlashInfer "
+-                f"workspace preflight: {err}"
++            err, mc_granularity = cuda_driver.cuMulticastGetGranularity(
++                mc_prop,
++                cuda_driver.CUmulticastGranularity_flags.CU_MULTICAST_GRANULARITY_RECOMMENDED,
+             )
++            if err != cuda_driver.CUresult.CUDA_SUCCESS:
++                raise RuntimeError(
++                    "cuMulticastGetGranularity failed for FlashInfer "
++                    f"workspace preflight: {err}"
++                )
++
++            allocation_size = ceil_align(allocation_size, mc_granularity)
+ 
+-        allocation_size = ceil_align(allocation_size, mc_granularity)
+         allocation_sizes.append(allocation_size)
+     return allocation_sizes
+ 
+@@ -315,6 +328,7 @@ def _preflight_check_workspace_memory(
+     hidden_dim: int,
+     dtype: torch.dtype,
+     cpu_group: Optional["torch.distributed.ProcessGroup"] = None,
++    backend: str = "trtllm",
+ ) -> bool:
+     """Collectively decide whether to enter FlashInfer workspace creation.
+ 
+@@ -323,6 +337,11 @@ def _preflight_check_workspace_memory(
+     exits while peers enter handle exchange, peers can hang until the watchdog
+     aborts. Probe the same handle type and allocation sequence first, then vote
+     on a CPU group so all ranks proceed or skip together.
++
++    The mnnvl backend allocates multicast-backed buffers, so its probe sizes
++    are additionally rounded to the multicast granularity; trtllm symmetric
++    memory disables multicast and must not query it (the query fails on
++    devices without multicast support, such as SM120).
+     """
+     import torch.distributed as dist
+ 
+@@ -344,6 +363,7 @@ def _preflight_check_workspace_memory(
+             max_token_num,
+             hidden_dim,
+             dtype,
++            align_multicast=(backend == "mnnvl"),
+         )
+         local_ok = _probe_cumem_create_sequence(cuda_driver, allocation_sizes, prop)
+     except Exception as e:
+@@ -465,6 +485,7 @@ class FlashInferWorkspaceManager:
+             hidden_dim=hidden_dim,
+             dtype=dtype,
+             cpu_group=cpu_group,
++            backend=backend,
+         ):
+             _flashinfer_allreduce_unavailable = True
+             self.workspace = None
+@@ -860,6 +881,105 @@ def flashinfer_allreduce_residual_rmsnorm(
+     return norm_out, residual_out
+ 
+ 
++def can_use_flashinfer_allreduce(
++    input_: torch.Tensor,
++    *,
++    use_attn_tp_group: bool,
++    expected_world_size: int,
++    expected_group_key: Tuple[Optional[ProcessGroup], Optional[ProcessGroup]],
++) -> bool:
++    """Whether ``flashinfer_allreduce`` can service this all-reduce.
++
++    Split out from the kernel call so the decision happens in plain Python,
++    outside the custom op: the op is opaque to Dynamo and has to return a
++    tensor, so it cannot carry a data-dependent fallback of its own.
++
++    ``expected_world_size`` / ``expected_group_key`` describe the calling group;
++    the workspace is only usable when it was rendezvoused on exactly those peers.
++
++    Every check here is rank-invariant by construction, and must stay that way:
++    a rank that quietly falls back to NCCL while its peers enter the kernel
++    mismatches and hangs. The unavailable flag and workspace initialization are
++    cross-rank synced at init time (``_sync_allreduce_unavailable_across_tp``);
++    the rest are pure functions of the group identity and of tensor metadata,
++    which is identical on every rank of the group.
++    """
++    if _flashinfer_allreduce_unavailable or _flashinfer_comm is None:
++        return False
++
++    if input_.ndim != 2 or not input_.is_contiguous():
++        return False
++
++    workspace_manager = _get_workspace_manager(use_attn_tp_group)
++    if not workspace_manager.initialized or workspace_manager.workspace is None:
++        return False
++
++    # The two workspaces are keyed by attention-TP vs MoE, but the MoE one
++    # rendezvouses on either the EP or the MoE-TP group depending on topology.
++    # Under hybrid EP+TP those groups have equal world size but pair different
++    # ranks, so a mismatch here reduces across the wrong peers and silently
++    # produces garbage rather than failing. Require an exact match.
++    if (
++        workspace_manager.world_size != expected_world_size
++        or workspace_manager.group != expected_group_key
++    ):
++        return False
++
++    # Size checks stay last: they read the token dim, which is symbolic under
++    # Dynamo, so statically-off configs must short-circuit before reaching them
++    # (same ordering rule as apply_flashinfer_allreduce_fusion).
++    token_num, hidden_dim = input_.shape
++    if torch.compiler.is_compiling():
++        # Don't call into the flashinfer workspace object while tracing. The
++        # workspace was allocated for (max_token_num, hidden_dim, dtype) and
++        # vetted by is_buffer_size_sufficient() at init; the requirement is
++        # monotone in token_num/hidden_dim, so staying within the allocation
++        # (including dtype) is a conservative stand-in here.
++        return (
++            workspace_manager.max_token_num is not None
++            and workspace_manager.hidden_dim is not None
++            and workspace_manager.dtype is not None
++            and token_num <= workspace_manager.max_token_num
++            and hidden_dim <= workspace_manager.hidden_dim
++            and workspace_manager.dtype == input_.dtype
++        )
++
++    return workspace_manager.is_buffer_size_sufficient(
++        token_num=token_num,
++        hidden_dim=hidden_dim,
++        dtype=input_.dtype,
++    )
++
++
++def flashinfer_allreduce(
++    input_: torch.Tensor,
++    *,
++    use_attn_tp_group: bool,
++) -> torch.Tensor:
++    """Allreduce-only FlashInfer kAllReduce.
++
++    Assumes ``can_use_flashinfer_allreduce`` returned True for this call; there
++    is no fallback here. Kernel errors are deliberately not caught -- swallowing
++    one would put this rank on NCCL while its peers stay in the kernel, which
++    mismatch-hangs instead of failing.
++    """
++    workspace_manager = _get_workspace_manager(use_attn_tp_group)
++
++    output = torch.empty_like(input_)
++    kwargs = dict(
++        input=input_,
++        workspace=workspace_manager.workspace,
++        pattern=_flashinfer_comm.AllReduceFusionPattern.kAllReduce,
++        launch_with_pdl=True,
++        fp32_acc=False,
++        output=output,
++    )
++    if _flashinfer_allreduce_supports_trigger_completion:
++        kwargs["trigger_completion_at_end"] = False
++    _flashinfer_comm.allreduce_fusion(**kwargs)
++    return output
++
++
+ def pre_initialize_workspaces(
+     max_token_num: int,
+     hidden_dim: int,
+diff --git a/python/sglang/srt/model_executor/runner/base_runner.py b/python/sglang/srt/model_executor/runner/base_runner.py
+index 7664b66d5c..4088b2b0d6 100644
+--- a/python/sglang/srt/model_executor/runner/base_runner.py
++++ b/python/sglang/srt/model_executor/runner/base_runner.py
+@@ -256,8 +256,23 @@ class BaseRunner(ABC):
+         from sglang.srt.layers.communicator import FUSE_ALLREDUCE_MAX_BATCH_SIZE
+         from sglang.srt.layers.flashinfer_comm_fusion import pre_initialize_workspaces
+ 
++        # Prefill fusion sees the full forward batch. Allocate its maximum
++        # before CUDA graph capture so graph-held workspaces are never replaced.
++        chunked_prefill_size = mr.server_args.chunked_prefill_size
++        if (
++            mr.server_args.enable_dynamic_chunking
++            or chunked_prefill_size is None
++            or chunked_prefill_size <= 0
++        ):
++            prefill_token_capacity = mr.server_args.max_prefill_tokens
++        else:
++            prefill_token_capacity = chunked_prefill_size
++        workspace_token_capacity = max(
++            FUSE_ALLREDUCE_MAX_BATCH_SIZE, prefill_token_capacity or 0
++        )
++
+         pre_initialize_workspaces(
+-            max_token_num=FUSE_ALLREDUCE_MAX_BATCH_SIZE,
++            max_token_num=workspace_token_capacity,
+             hidden_dim=mr.model_config.hidden_size,
+             dtype=mr.dtype,
+         )
+diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
+index 1611b8fcce..c6c63b5cd7 100644
+--- a/python/sglang/srt/model_loader/utils.py
++++ b/python/sglang/srt/model_loader/utils.py
+@@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
+ 
+ from sglang.srt.configs.model_config import ModelConfig, ModelImpl
+ from sglang.srt.layers import deep_gemm_wrapper
++from sglang.srt.utils import get_device_sm
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -270,6 +271,10 @@ def should_deepgemm_weight_requant_ue8m0(
+         and weight_block_size is not None
+     ):
+         return False
++    # SM120 dense block-FP8 GEMMs retain fp32 scales; its DeepGEMM layout is
++    # consumed by the grouped FP4 MoE path.
++    if get_device_sm() == 120:
++        return False
+     if output_dtype is not None and output_dtype != torch.bfloat16:
+         return False
+     if weight_shape is not None and (
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index d4d4ae66ea..a1cbbe9b27 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -412,6 +412,20 @@ def add_linear_attn_kernel_backend_choices(choices):
+     LINEAR_ATTN_KERNEL_BACKEND_CHOICES.extend(choices)
+ 
+ 
++def _apply_sm120_fp8_wo_a_gemm_default() -> None:
++    """Gate the SM120 FP8 W_o_A GEMM override on the DeepGEMM ue8m0 capability.
++
++    Builds that cannot run the GEMM (DEEPGEMM_SCALE_UE8M0 false) get
++    SGLANG_OPT_FP8_WO_A_GEMM forced off. Capable builds are left untouched, so
++    they keep the global default or an explicit setting. The capability check in
++    `_handle_environment_variables` stays authoritative.
++    """
++    from sglang.srt.layers.deep_gemm_wrapper.configurer import DEEPGEMM_SCALE_UE8M0
++
++    if not DEEPGEMM_SCALE_UE8M0:
++        envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
++
++
+ @dataclasses.dataclass
+ class ServerArgs:
+     """Server-wide configuration for SGLang.
+@@ -1951,10 +1965,11 @@ class ServerArgs:
+         Arg(
+             help=(
+                 "Enable FlashInfer allreduce fusion and choose backend. "
+-                "Requires SM90 or SM10X NVIDIA GPUs. "
++                "Requires SM90, SM10X, or SM12X (SM120/SM121) NVIDIA GPUs. "
+                 "Defaults to auto. "
+                 "'auto': choose mnnvl on Blackwell (SM100/SM103) systems "
+-                "(single- and multi-node) and trtllm on SM90 single-node systems. "
++                "(single- and multi-node) and trtllm on SM90, SM120, and SM121 "
++                "single-node systems. "
+                 "'trtllm': available on single-node systems only. "
+                 "'mnnvl': available on SM90 single-node systems and SM100/SM103 "
+                 "single-node or multi-node systems via MNNVL fabric. "
+@@ -5290,9 +5305,10 @@ class ServerArgs:
+ 
+             run_post_process_pass(self, _deepseek_v4_sm120_moe)
+             if is_sm120_supported():
+-                # SM120 lacks tcgen05/TMEM: disable features that depend on
+-                # DeepGEMM or require >99KB SMEM (topk_v2).
+-                envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
++                # Keep the W_o_A DeepGEMM default only when the installed build
++                # supports SM120; disable features that require >99KB SMEM
++                # (topk_v2).
++                _apply_sm120_fp8_wo_a_gemm_default()
+                 envs.SGLANG_OPT_USE_TOPK_V2.set(False)
+                 envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
+                 envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
+diff --git a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
+index eb150e7c98..3531d7eb06 100644
+--- a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
++++ b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
+@@ -142,6 +142,9 @@ class EagleDraftCudaGraphRunnerAdapter:
+     init_eager_metadata: Callable[
+         [Any, ForwardBatch, EagleDraftRunnerSettings], None
+     ] = None
++    assert_backend_state: Callable[[Any, Any, EagleDraftRunnerSettings, str], None] = (
++        lambda _testcase, _backend, _settings, _phase: None
++    )
+ 
+ 
+ @dataclass(frozen=True)
+@@ -517,6 +520,12 @@ def run_eagle_draft_cuda_graph_runner_case(
+             init_eager_metadata=adapter.init_eager_metadata,
+             settings=settings,
+         )
++        adapter.assert_backend_state(
++            testcase,
++            eager_worker.draft_attn_backend,
++            settings,
++            "eager",
++        )
+ 
+         graph_fixture, graph_worker, graph_backend = _build_eagle_draft_fixture(
+             testcase,
+@@ -532,10 +541,22 @@ def run_eagle_draft_cuda_graph_runner_case(
+             graph_backend,
+             settings,
+         )
++        adapter.assert_backend_state(
++            testcase,
++            graph_backend,
++            settings,
++            "capture",
++        )
+         adapter.prepare_replay_state(graph_fixture, case, draft_inputs, settings)
+ 
+         testcase.assertTrue(graph_runner.can_run_graph(graph_batch))
+         actual = graph_runner.execute(graph_batch)
++        adapter.assert_backend_state(
++            testcase,
++            graph_backend,
++            settings,
++            "replay",
++        )
+         adapter.assert_outputs_close(actual, expected, settings)
+     finally:
+         _reset_cuda_graph_test_buffers()
+@@ -1412,17 +1433,76 @@ def _init_dsv4_eager_metadata(
+     batch: ForwardBatch,
+     settings: EagleDraftRunnerSettings,
+ ) -> None:
+-    """Per-step DSV4 init for the eager comparison path.
++    """Aggregate DSV4 init for the eager comparison path.
+ 
+     After PR #26239 `DeepseekV4AttnBackend.init_forward_metadata` slices the
+     multi-step `out_cache_loc` internally using `self.speculative_step_id`
+     (each per-step backend in `multi_step_backend.attn_backends[i]` was
+-    constructed with `speculative_step_id=i`). Pass the full
+-    `bs * topk * num_steps` buffer through each per-step init unchanged.
++    constructed with `speculative_step_id=i`). The aggregate backend initializes
++    only the `num_steps - 1` backends that execute a draft forward.
+     """
+-    multi_step_backend = worker.draft_attn_backend
+-    for attn_backend in multi_step_backend.attn_backends:
+-        attn_backend.init_forward_metadata(batch)
++    del settings
++    worker.draft_attn_backend.init_forward_metadata(batch)
++
++
++def _assert_dsv4_draft_backend_state(
++    testcase,
++    multi_step_backend,
++    settings: EagleDraftRunnerSettings,
++    phase: str,
++) -> None:
++    from sglang.srt.layers.attention.deepseek_v4_backend import (
++        DSV4Metadata,
++        DSV4RawDecodeMetadata,
++    )
++
++    expected_step_ids = list(range(max(settings.speculative_num_steps - 1, 0)))
++    active_backends = [
++        backend
++        for backend in multi_step_backend.attn_backends
++        if backend.forward_metadata is not None
++    ]
++    testcase.assertEqual(
++        [backend.speculative_step_id for backend in active_backends],
++        expected_step_ids,
++        f"{phase}: only draft steps that execute forwards should prepare metadata",
++    )
++
++    for backend in active_backends:
++        metadata = backend.forward_metadata
++        if isinstance(metadata, DSV4RawDecodeMetadata):
++            # PREP_IN_CUDA_GRAPH restores raw metadata after capture. The
++            # patched compression builders in the caller prove that its
++            # recorded Raw->Full upgrade remains SWA-only.
++            continue
++        testcase.assertIsInstance(metadata, DSV4Metadata)
++        testcase.assertIsNone(metadata.indexer_metadata)
++        testcase.assertIsNone(metadata.c4_compress_metadata)
++        testcase.assertIsNone(metadata.c128_compress_metadata)
++
++        core = metadata.core_attn_metadata
++        testcase.assertEqual(
++            core.page_table.shape[-1],
++            1,
++            f"{phase}: draft SWA metadata should use a one-page table",
++        )
++        for field_name in (
++            "c4_out_loc",
++            "c4_topk_lengths_raw",
++            "c4_topk_lengths_clamp1",
++            "c4_sparse_topk_lengths",
++            "c4_sparse_page_indices",
++            "c4_sparse_raw_indices",
++            "c128_out_loc",
++            "c128_page_indices",
++            "c128_topk_lengths_clamp1",
++            "c4_flashmla_metadata",
++            "c128_flashmla_metadata",
++        ):
++            testcase.assertIsNone(
++                getattr(core, field_name),
++                f"{phase}: draft metadata unexpectedly populated {field_name}",
++            )
+ 
+ 
+ def _make_dsv4_eagle_draft_forward_batch(
+@@ -1522,18 +1602,44 @@ def run_dsv4_eagle_draft_cuda_graph_runner_case(
+         make_forward_batch=_make_forward_batch,
+         check_case=_check_dsv4_draft_cache_layout,
+         init_eager_metadata=_init_dsv4_eager_metadata,
++        assert_backend_state=_assert_dsv4_draft_backend_state,
+     )
+-    run_eagle_draft_cuda_graph_runner_case(
+-        testcase,
+-        case,
+-        adapter=adapter,
+-        build_kwargs=dict(
+-            max_context_len=max_context_len,
+-            dtype=dtype,
+-            device=device,
++    from sglang.srt.layers.attention import deepseek_v4_backend
++
++    with (
++        patch.object(
++            deepseek_v4_backend.DSV4AttnMetadata,
++            "init_compression_metadata",
++            side_effect=AssertionError(
++                "DSV4 draft decode must not initialize compression metadata"
++            ),
+         ),
+-        settings=settings,
+-    )
++        patch.object(
++            deepseek_v4_backend.DeepseekV4AttnBackend,
++            "init_forward_metadata_indexer",
++            side_effect=AssertionError(
++                "DSV4 draft decode must not initialize indexer metadata"
++            ),
++        ),
++        patch.object(
++            deepseek_v4_backend,
++            "create_paged_compressor_data",
++            side_effect=AssertionError(
++                "DSV4 draft decode must not initialize compressor metadata"
++            ),
++        ),
++    ):
++        run_eagle_draft_cuda_graph_runner_case(
++            testcase,
++            case,
++            adapter=adapter,
++            build_kwargs=dict(
++                max_context_len=max_context_len,
++                dtype=dtype,
++                device=device,
++            ),
++            settings=settings,
++        )
+ 
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/test/registered/attention/unittests/dsv4/test_deepseek_v4.py b/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
+index afc19f73e1..be34b3d9cf 100644
+--- a/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
++++ b/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
+@@ -304,6 +304,253 @@ class TestDSV4AttentionBackendCorrectness(CustomTestCase):
+                 )
+ 
+ 
++class TestDSV4DraftMetadataPlanning(CustomTestCase):
++    """Lightweight guards for DSV4 draft metadata preparation."""
++
++    class _StepBackendSpy:
++        def __init__(self, step_id):
++            self.speculative_step_id = step_id
++            self.calls = []
++
++        def init_forward_metadata(self, forward_batch):
++            self.calls.append(("eager", forward_batch))
++
++        def init_forward_metadata_in_graph(self, forward_batch):
++            self.calls.append(("in_graph", forward_batch))
++
++        def init_forward_metadata_out_graph(self, forward_batch, in_capture=False):
++            self.calls.append(("out_graph", forward_batch, in_capture))
++
++    @staticmethod
++    def _make_multi_step_backend(num_steps):
++        from sglang.srt.layers.attention.deepseek_v4_backend import (
++            DeepseekV4MultiStepBackend,
++        )
++
++        backend = object.__new__(DeepseekV4MultiStepBackend)
++        backend.speculative_num_steps = num_steps
++        backend.attn_backends = [
++            TestDSV4DraftMetadataPlanning._StepBackendSpy(i) for i in range(num_steps)
++        ]
++        return backend
++
++    @staticmethod
++    def _make_multi_step_forward_batch():
++        return SimpleNamespace(
++            batch_size=2,
++            forward_mode=ForwardMode.DECODE,
++            input_ids=None,
++            positions=torch.zeros(2, dtype=torch.int64),
++            req_pool_indices=torch.arange(2, dtype=torch.int32),
++            seq_lens=torch.ones(2, dtype=torch.int32),
++            seq_lens_sum=2,
++            seq_lens_cpu=None,
++            out_cache_loc=torch.arange(6, dtype=torch.int64),
++            spec_info=SimpleNamespace(),
++        )
++
++    def test_multi_step_metadata_only_initializes_executed_steps(self):
++        batch = self._make_multi_step_forward_batch()
++        for num_steps in (1, 3):
++            expected_step_ids = list(range(max(num_steps - 1, 0)))
++            with self.subTest(num_steps=num_steps, phase="eager"):
++                backend = self._make_multi_step_backend(num_steps)
++                backend.init_forward_metadata(batch)
++                self.assertEqual(
++                    [
++                        spy.speculative_step_id
++                        for spy in backend.attn_backends
++                        if spy.calls
++                    ],
++                    expected_step_ids,
++                )
++
++            with self.subTest(num_steps=num_steps, phase="capture_out_graph"):
++                backend = self._make_multi_step_backend(num_steps)
++                backend.init_forward_metadata_out_graph(batch, in_capture=True)
++                self.assertEqual(
++                    [
++                        spy.speculative_step_id
++                        for spy in backend.attn_backends
++                        if spy.calls
++                    ],
++                    expected_step_ids,
++                )
++
++            with self.subTest(num_steps=num_steps, phase="in_graph"):
++                backend = self._make_multi_step_backend(num_steps)
++                backend.init_forward_metadata_in_graph(batch)
++                self.assertEqual(
++                    [
++                        spy.speculative_step_id
++                        for spy in backend.attn_backends
++                        if spy.calls
++                    ],
++                    expected_step_ids,
++                )
++
++    @staticmethod
++    def _make_decode_backend(*, is_draft_runner):
++        from sglang.srt.layers.attention.deepseek_v4_backend import (
++            DeepseekV4AttnBackend,
++        )
++
++        backend = object.__new__(DeepseekV4AttnBackend)
++        backend.is_draft_runner = is_draft_runner
++        backend.page_size = DSV4_PAGE_SIZE
++        backend.MAX_SEQ_LEN_FOR_CAPTURE = 4096
++        backend.req_to_token = torch.zeros((2, 4096), dtype=torch.int32)
++        backend.token_to_kv_pool = object()
++        core_metadata = SimpleNamespace(
++            page_table=torch.zeros((2, 1), dtype=torch.int32)
++        )
++        backend.make_core_attn_metadata = mock.Mock(return_value=core_metadata)
++        backend.init_forward_metadata_indexer = mock.Mock(
++            side_effect=AssertionError(
++                "draft decode must not initialize indexer metadata"
++            )
++        )
++        return backend, core_metadata
++
++    def _assert_draft_decode_metadata(self, metadata, core_metadata):
++        from sglang.srt.layers.attention.deepseek_v4_backend import DSV4Metadata
++
++        self.assertIsInstance(metadata, DSV4Metadata)
++        self.assertIs(metadata.core_attn_metadata, core_metadata)
++        self.assertIsNone(metadata.indexer_metadata)
++        self.assertIsNone(metadata.c4_compress_metadata)
++        self.assertIsNone(metadata.c128_compress_metadata)
++
++    def test_draft_decode_skips_compression_direct_and_raw_upgrade(self):
++        from sglang.srt.environ import envs
++        from sglang.srt.layers.attention import deepseek_v4_backend
++        from sglang.srt.layers.attention.deepseek_v4_backend import (
++            DSV4RawDecodeMetadata,
++        )
++
++        req_pool_indices = torch.tensor([0, 1], dtype=torch.int32)
++        seq_lens = torch.tensor([32, 64], dtype=torch.int32)
++        out_cache_loc = torch.tensor([7, 11], dtype=torch.int64)
++
++        backend, core_metadata = self._make_decode_backend(is_draft_runner=True)
++        with (
++            envs.SGLANG_PREP_IN_CUDA_GRAPH.override(False),
++            mock.patch.object(
++                deepseek_v4_backend,
++                "create_paged_compressor_data",
++                side_effect=AssertionError(
++                    "draft decode must not initialize compressor metadata"
++                ),
++            ),
++        ):
++            metadata = backend.init_forward_metadata_decode(
++                max_seq_len=2048,
++                req_pool_indices=req_pool_indices,
++                seq_lens=seq_lens,
++                out_cache_loc=out_cache_loc,
++            )
++        self._assert_draft_decode_metadata(metadata, core_metadata)
++        self.assertEqual(
++            backend.make_core_attn_metadata.call_args.kwargs["max_seq_len"],
++            DSV4_PAGE_SIZE,
++        )
++        self.assertFalse(
++            backend.make_core_attn_metadata.call_args.kwargs["need_compress"]
++        )
++
++        backend.make_core_attn_metadata.reset_mock()
++        raw_metadata = DSV4RawDecodeMetadata(
++            req_pool_indices=req_pool_indices,
++            seq_lens=seq_lens,
++            out_cache_loc=out_cache_loc,
++        )
++        with mock.patch.object(
++            deepseek_v4_backend,
++            "create_paged_compressor_data",
++            side_effect=AssertionError(
++                "draft raw decode must not initialize compressor metadata"
++            ),
++        ):
++            metadata = backend.make_forward_metadata_from_raw_decode(raw_metadata)
++        self._assert_draft_decode_metadata(metadata, core_metadata)
++        self.assertEqual(
++            backend.make_core_attn_metadata.call_args.kwargs["max_seq_len"],
++            DSV4_PAGE_SIZE,
++        )
++        self.assertFalse(
++            backend.make_core_attn_metadata.call_args.kwargs["need_compress"]
++        )
++
++    def test_target_decode_keeps_full_compression_metadata(self):
++        from sglang.srt.environ import envs
++        from sglang.srt.layers.attention import deepseek_v4_backend
++
++        backend, core_metadata = self._make_decode_backend(is_draft_runner=False)
++        indexer_metadata = object()
++        backend.init_forward_metadata_indexer = mock.Mock(return_value=indexer_metadata)
++
++        def _make_compressor_metadata(*, compress_ratio, **_kwargs):
++            return f"c{compress_ratio}"
++
++        with (
++            envs.SGLANG_PREP_IN_CUDA_GRAPH.override(False),
++            mock.patch.object(
++                deepseek_v4_backend,
++                "create_paged_compressor_data",
++                side_effect=_make_compressor_metadata,
++            ) as create_compressor,
++        ):
++            metadata = backend.init_forward_metadata_decode(
++                max_seq_len=2048,
++                req_pool_indices=torch.tensor([0, 1], dtype=torch.int32),
++                seq_lens=torch.tensor([32, 64], dtype=torch.int32),
++                out_cache_loc=torch.tensor([7, 11], dtype=torch.int64),
++            )
++
++        self.assertIs(metadata.core_attn_metadata, core_metadata)
++        self.assertIs(metadata.indexer_metadata, indexer_metadata)
++        self.assertEqual(metadata.c4_compress_metadata, "c4")
++        self.assertEqual(metadata.c128_compress_metadata, "c128")
++        self.assertTrue(
++            backend.make_core_attn_metadata.call_args.kwargs["need_compress"]
++        )
++        self.assertEqual(
++            backend.make_core_attn_metadata.call_args.kwargs["max_seq_len"], 2048
++        )
++        self.assertEqual(create_compressor.call_count, 2)
++
++    def test_graph_warmup_keeps_draft_compression_schedules_absent(self):
++        from sglang.srt.layers.attention import deepseek_v4_backend
++        from sglang.srt.layers.attention.deepseek_v4_backend import (
++            DeepseekV4AttnBackend,
++            DSV4AttnMetadata,
++            DSV4Metadata,
++        )
++
++        backend = object.__new__(DeepseekV4AttnBackend)
++        core_metadata = object.__new__(DSV4AttnMetadata)
++        core_metadata.c1_flashmla_metadata = object()
++        core_metadata.c4_flashmla_metadata = None
++        core_metadata.c128_flashmla_metadata = None
++        backend.forward_metadata = DSV4Metadata(
++            core_attn_metadata=core_metadata,
++            indexer_metadata=None,
++        )
++        backend._current_capture_raw = None
++
++        with mock.patch.object(
++            deepseek_v4_backend,
++            "_create_flashmla_metadata",
++            return_value="new-c1",
++        ) as create_flashmla_metadata:
++            backend.on_after_cuda_graph_warmup()
++
++        self.assertEqual(core_metadata.c1_flashmla_metadata, "new-c1")
++        self.assertIsNone(core_metadata.c4_flashmla_metadata)
++        self.assertIsNone(core_metadata.c128_flashmla_metadata)
++        create_flashmla_metadata.assert_called_once_with()
++
++
+ class TestDSV4BreakableCudaGraphMetadataContract(CustomTestCase):
+     """CPU-only checks for the DSV4 BCG metadata replay contract."""
+ 
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+index 2496f7defb..5d5430d814 100644
+--- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
++++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+@@ -11,14 +11,19 @@ from sglang.test.test_utils import maybe_stub_sgl_kernel
+ maybe_stub_sgl_kernel()  # must precede any import that pulls in sgl_kernel
+ 
+ import json
++import tempfile
+ import unittest
+ import uuid
+ from http import HTTPStatus
++from pathlib import Path
+ from typing import Optional
+ from unittest.mock import Mock, patch
+ 
+ from fastapi import Request
+ 
++from sglang.srt.entrypoints.openai.chat_encoding import (
++    resolve_dsv4_reasoning_effort_profile,
++)
+ from sglang.srt.entrypoints.openai.protocol import (
+     ChatCompletionRequest,
+     MessageProcessingResult,
+@@ -35,6 +40,22 @@ from sglang.test.ci.ci_register import register_cpu_ci
+ 
+ register_cpu_ci(est_time=11, suite="base-a-test-cpu")
+ 
++_DSV4_PREVIEW_ENCODER = 'REASONING_EFFORT_MAX = "preview"\n'
++_DSV4_OFFICIAL_ENCODER = (
++    "REASONING_EFFORT_PROMPTS: Dict[str, str] = "
++    '{"low": "", "high": "h", "max": "m"}\n'
++    'DEFAULT_REASONING_EFFORT = "low"\n'
++)
++
++
++def _create_dsv4_checkpoint(test_case: unittest.TestCase, source: str) -> str:
++    model_dir = tempfile.TemporaryDirectory()
++    test_case.addCleanup(model_dir.cleanup)
++    encoder_path = Path(model_dir.name) / "encoding" / "encoding_dsv4.py"
++    encoder_path.parent.mkdir(parents=True)
++    encoder_path.write_text(source, encoding="utf-8")
++    return model_dir.name
++
+ 
+ class _MockTokenizerManager:
+     """Minimal mock that satisfies OpenAIServingChat."""
+@@ -42,18 +63,22 @@ class _MockTokenizerManager:
+     def __init__(self):
+         self.model_config = Mock(is_multimodal=False)
+         self.server_args = Mock(
++            model_path="deepseek-ai/DeepSeek-V4-Flash",
++            revision=None,
+             enable_cache_report=False,
+             tool_call_parser="hermes",
+             reasoning_parser=None,
+             stream_response_default_include_usage=False,
+             default_chat_template_kwargs=None,
+         )
++        self.model_path = self.server_args.model_path
+         # The manager tracks the served name itself; a weight update rewrites it.
+         self.served_model_name = "test-model"
+ 
+         # Mock hf_config for _resolve_chat_encoding_spec check
+         mock_hf_config = Mock()
+         mock_hf_config.architectures = ["LlamaForCausalLM"]
++        mock_hf_config.to_dict.return_value = {}
+         self.model_config.hf_config = mock_hf_config
+ 
+         self.chat_template_name: Optional[str] = "llama-3"
+@@ -1000,6 +1025,7 @@ class ServingChatTestCase(unittest.TestCase):
+         """DeepSeek encoders should reject history tool call scalars as BadRequest."""
+         self.template_manager.chat_template_name = None
+         self.template_manager.jinja_template_content_format = "string"
++        self.chat._dsv4_reasoning_effort_profile = "preview"
+ 
+         for chat_encoding_spec in ("dsv4", "dsv32"):
+             with self.subTest(chat_encoding_spec=chat_encoding_spec):
+@@ -1037,6 +1063,7 @@ class ServingChatTestCase(unittest.TestCase):
+         """DeepSeek encoders accept object-shaped OpenAI JSON string arguments."""
+         self.template_manager.chat_template_name = None
+         self.template_manager.jinja_template_content_format = "string"
++        self.chat._dsv4_reasoning_effort_profile = "preview"
+ 
+         for chat_encoding_spec in ("dsv4", "dsv32"):
+             with self.subTest(chat_encoding_spec=chat_encoding_spec):
+@@ -1513,6 +1540,7 @@ class ServingChatTestCase(unittest.TestCase):
+ 
+         mock_hf_config = Mock()
+         mock_hf_config.architectures = ["DeepseekV32ForCausalLM"]
++        mock_hf_config.to_dict.return_value = {}
+         tm.model_config.hf_config = mock_hf_config
+ 
+         # Case 1: No chat template + DeepSeek V3.2 arch -> should use dsv32 encoding
+@@ -1534,6 +1562,10 @@ class ServingChatTestCase(unittest.TestCase):
+         # Case 4: DeepseekV4 arch -> always dsv4, even with chat_template
+         # (release ships a stale V3 jinja we deliberately override).
+         mock_hf_config.architectures = ["DeepseekV4ForCausalLM"]
++        mock_hf_config.to_dict.return_value = {
++            "dsv4_reasoning_effort_profile": "preview"
++        }
++        tm.model_path = "deepseek-ai/DeepSeek-V4-Flash"
+         tm.tokenizer.chat_template = "stale v3 jinja"
+         serving_chat = OpenAIServingChat(tm, TemplateManager())
+         self.assertEqual(serving_chat.chat_encoding_spec, "dsv4")
+@@ -1705,6 +1737,135 @@ class ServingChatTestCase(unittest.TestCase):
+         )
+         self.assertIn("<｜Assistant｜>", out)
+ 
++    def test_dsv4_reasoning_effort_profiles(self):
++        from sglang.srt.entrypoints.openai import encoding_dsv4
++
++        messages = [
++            {"role": "system", "content": ""},
++            {"role": "user", "content": "Solve this."},
++        ]
++        absolute_maximum = (
++            "Reasoning Effort: Absolute maximum with no shortcuts permitted.\n"
++            "You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.\n"
++            "Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n"
++        )
++        beyond_maximum = (
++            "Reasoning Effort: Beyond maximum — exhaustive, relentless, and uncompromising.\n"
++            "You MUST reason with the utmost depth and rigor, leaving absolutely nothing to chance: exhaustively decompose the problem into its most fundamental components, trace every causal chain to its root, and resolve the underlying cause rather than any surface symptom.\n"
++            "Do not stop reasoning until you have independently verified the solution from multiple angles and are certain that no assumption remains unchecked and no error remains undiscovered.\n\n"
++        )
++
++        def encode(profile, effort):
++            return encoding_dsv4.encode_messages(
++                messages,
++                thinking_mode="thinking",
++                reasoning_effort=effort,
++                reasoning_effort_profile=profile,
++            )
++
++        preview_high = encode("preview", "high")
++        preview_max = encode("preview", "max")
++        official_low = encode("official", "low")
++        official_high = encode("official", "high")
++        official_max = encode("official", "max")
++
++        self.assertNotIn("Reasoning Effort:", preview_high)
++        self.assertTrue(
++            preview_max.startswith(encoding_dsv4.bos_token + absolute_maximum)
++        )
++        self.assertNotIn("Reasoning Effort:", official_low)
++        self.assertEqual(
++            official_high,
++            encoding_dsv4.bos_token
++            + absolute_maximum
++            + official_low.removeprefix(encoding_dsv4.bos_token),
++        )
++        self.assertEqual(
++            official_max,
++            encoding_dsv4.bos_token
++            + beyond_maximum
++            + official_low.removeprefix(encoding_dsv4.bos_token),
++        )
++        self.assertEqual(encode("preview", None), preview_high)
++        self.assertEqual(encode("official", None), official_low)
++        self.assertEqual(len({official_low, official_high, official_max}), 3)
++
++        with self.assertRaises(ValueError):
++            encode("preview", "low")
++
++    def test_dsv4_reasoning_effort_profile_resolution(self):
++        resolve = resolve_dsv4_reasoning_effort_profile
++        preview_model_path = _create_dsv4_checkpoint(self, _DSV4_PREVIEW_ENCODER)
++        official_model_path = _create_dsv4_checkpoint(self, _DSV4_OFFICIAL_ENCODER)
++        inconclusive_model_path = _create_dsv4_checkpoint(
++            self, 'UNRELATED_METADATA = "value"\n'
++        )
++        self.assertEqual(resolve(model_path=preview_model_path), "preview")
++        self.assertEqual(resolve(model_path=official_model_path), "official")
++        self.assertEqual(resolve(model_path=inconclusive_model_path), "preview")
++
++        self.assertEqual(
++            resolve(model_path="renamed/model", override="official"), "official"
++        )
++        self.assertEqual(
++            resolve(model_path="renamed/model", override="preview"), "preview"
++        )
++        with self.assertRaisesRegex(ValueError, "dsv4_reasoning_effort_profile"):
++            resolve(model_path="renamed/model", override="auto")
++
++    def test_dsv4_reasoning_effort_profile_from_checkpoint(self):
++        from sglang.srt.parser.template_manager import TemplateManager
++
++        official_model_path = _create_dsv4_checkpoint(self, _DSV4_OFFICIAL_ENCODER)
++        tm = _MockTokenizerManager()
++        tm.model_config.hf_config.architectures = ["DeepseekV4ForCausalLM"]
++        tm.model_config.hf_config.to_dict.return_value = {}
++        tm.model_config.hf_config.dspark_block_size = 5
++        tm.model_config.hf_config.dspark_markov_rank = 256
++        tm.model_path = official_model_path
++        tm.server_args.model_path = tm.model_path
++        serving_chat = OpenAIServingChat(tm, TemplateManager())
++
++        request = ChatCompletionRequest(
++            model="x",
++            messages=[{"role": "user", "content": "Hello"}],
++            reasoning_effort="max",
++        )
++        serving_chat._process_messages(request, is_multimodal=False)
++        prompt = tm.tokenizer.encode.call_args.args[0]
++        self.assertIn("Reasoning Effort: Beyond maximum", prompt)
++
++    def test_dsv4_reasoning_effort_profile_override_from_model_config(self):
++        from sglang.srt.parser.template_manager import TemplateManager
++
++        tm = _MockTokenizerManager()
++        tm.model_config.hf_config.architectures = ["DeepseekV4ForCausalLM"]
++        tm.model_config.hf_config.to_dict.return_value = {
++            "dsv4_reasoning_effort_profile": "official"
++        }
++        serving_chat = OpenAIServingChat(tm, TemplateManager())
++        request = ChatCompletionRequest(
++            model="x",
++            messages=[{"role": "user", "content": "Hello"}],
++            reasoning_effort="max",
++        )
++
++        serving_chat._process_messages(request, is_multimodal=False)
++
++        prompt = tm.tokenizer.encode.call_args.args[0]
++        self.assertIn("Reasoning Effort: Beyond maximum", prompt)
++
++    def test_dsv4_invalid_profile_override_fails_at_construction(self):
++        from sglang.srt.parser.template_manager import TemplateManager
++
++        tm = _MockTokenizerManager()
++        tm.model_config.hf_config.architectures = ["DeepseekV4ForCausalLM"]
++        tm.model_config.hf_config.to_dict.return_value = {
++            "dsv4_reasoning_effort_profile": "invalid"
++        }
++        with self.assertRaisesRegex(ValueError, "dsv4_reasoning_effort_profile"):
++            OpenAIServingChat(tm, TemplateManager())
++
+     def test_streaming_abort_yields_error(self):
+         """Test that an abort finish reason during streaming correctly yields an error and stops."""
+         err_msg = "Aborted by scheduler"
+diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
+new file mode 100644
+index 0000000000..7ef29c2ab4
+--- /dev/null
++++ b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
+@@ -0,0 +1,138 @@
++"""Tests for DeepGEMM warmup memory-budget selection."""
++
++import unittest
++from contextlib import ExitStack
++from typing import Optional
++from unittest.mock import MagicMock, call, patch
++
++from sglang.srt.layers.deep_gemm_wrapper import compile_utils
++from sglang.srt.layers.deep_gemm_wrapper.compile_utils import (
++    DeepGemmKernelType,
++    _BaseWarmupExecutor,
++    _compile_deep_gemm_one_type_all,
++    _select_max_m_within_budget,
++)
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++_M_LIST = list(range(1, 16 * 1024 + 1))
++_KERNEL_TYPE = DeepGemmKernelType.GEMM_NT_F8F8BF16
++
++
++def _select(memory_budget: float) -> Optional[int]:
++    return _select_max_m_within_budget(
++        _KERNEL_TYPE,
++        m_list=_M_LIST,
++        n=4096,
++        k=7168,
++        num_groups=1,
++        memory_budget=memory_budget,
++    )
++
++
++class TestSelectMaxMWithinBudget(CustomTestCase):
++    def _patch_memory_requirement(self, fn):
++        return patch.object(
++            _BaseWarmupExecutor, "get_memory_requirement", staticmethod(fn)
++        )
++
++    def test_original_max_m_fits(self):
++        with self._patch_memory_requirement(lambda *a, **kw: 1.0):
++            self.assertEqual(_select(memory_budget=8.0), max(_M_LIST))
++
++    def test_reduces_below_4096(self):
++        with self._patch_memory_requirement(lambda *a, max_m, **kw: max_m / 1024):
++            self.assertEqual(_select(memory_budget=2.5), 2048)
++
++    def test_returns_none_when_min_m_does_not_fit(self):
++        with self._patch_memory_requirement(lambda *a, **kw: 100.0):
++            self.assertIsNone(_select(memory_budget=8.0))
++
++
++class TestCompileDeepGemmOneTypeAll(CustomTestCase):
++    """Covers how the caller reacts to the max_m selection outcome."""
++
++    def _patch_common(self, stack, available_memory: float, memory_requirement):
++        stack.enter_context(
++            patch.object(
++                _BaseWarmupExecutor,
++                "get_memory_requirement",
++                staticmethod(memory_requirement),
++            )
++        )
++        saved_context = object()
++        stack.enter_context(
++            patch.object(
++                compile_utils,
++                "disable_symmetric_memory_context",
++                return_value=saved_context,
++            )
++        )
++        restore = stack.enter_context(
++            patch.object(compile_utils, "restore_symmetric_memory_context")
++        )
++        stack.enter_context(
++            patch.object(
++                compile_utils, "get_available_gpu_memory", return_value=available_memory
++            )
++        )
++        return saved_context, restore
++
++    def test_skips_warmup_when_min_m_does_not_fit(self):
++        with ExitStack() as stack:
++            saved_context, restore = self._patch_common(
++                stack, available_memory=1.0, memory_requirement=lambda *a, **kw: 100.0
++            )
++            create = stack.enter_context(
++                patch.object(_BaseWarmupExecutor, "create", MagicMock())
++            )
++            with self.assertLogs(compile_utils.logger, level="WARNING") as logs:
++                _compile_deep_gemm_one_type_all(
++                    kernel_type=_KERNEL_TYPE,
++                    n=4096,
++                    k=7168,
++                    num_groups=1,
++                    m_list=[1024, 2048, 4096],
++                )
++
++        create.assert_not_called()
++        self.assertIn("skipping warmup", "\n".join(logs.output))
++        restore.assert_called_once_with(saved_context)
++
++    def test_warms_up_reduced_m_list(self):
++        with ExitStack() as stack:
++            saved_context, restore = self._patch_common(
++                stack,
++                available_memory=2.5,
++                memory_requirement=lambda *a, max_m, **kw: max_m / 1024,
++            )
++            executor = MagicMock()
++            create = stack.enter_context(
++                patch.object(_BaseWarmupExecutor, "create", MagicMock())
++            )
++            create.return_value = executor
++            stack.enter_context(
++                patch.object(compile_utils, "deep_gemm", MagicMock(), create=True)
++            )
++            stack.enter_context(patch("torch.cuda.current_stream"))
++            stack.enter_context(patch("torch.cuda.empty_cache"))
++
++            _compile_deep_gemm_one_type_all(
++                kernel_type=_KERNEL_TYPE,
++                n=4096,
++                k=7168,
++                num_groups=1,
++                m_list=[1024, 2048, 4096],
++            )
++
++        create.assert_called_once_with(
++            _KERNEL_TYPE, max_m=2048, n=4096, k=7168, num_groups=1
++        )
++        self.assertEqual(executor.execute.call_args_list, [call(m=1024), call(m=2048)])
++        restore.assert_called_once_with(saved_context)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py b/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py
+new file mode 100644
+index 0000000000..bd590188c3
+--- /dev/null
++++ b/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py
+@@ -0,0 +1,59 @@
++import sys
++import types
++import unittest
++from unittest.mock import patch
++
++from sglang.srt.layers.deep_gemm_wrapper import configurer
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class TestDeepGemmConfigurer(unittest.TestCase):
++    def _compute(self, *, sm, symbol_present=True, enabled=True):
++        deep_gemm = types.ModuleType("deep_gemm")
++        if symbol_present:
++            deep_gemm.m_grouped_fp8_fp4_gemm_nt_contiguous = object()
++
++        with (
++            patch.object(configurer, "_is_cuda", True),
++            patch.object(configurer, "_is_musa", False),
++            patch.object(configurer, "get_device_sm", return_value=sm),
++            patch.object(
++                configurer.envs.SGLANG_ENABLE_JIT_DEEPGEMM,
++                "get",
++                return_value=enabled,
++            ),
++            patch.dict(sys.modules, {"deep_gemm": deep_gemm}),
++        ):
++            return configurer._compute_enable_deep_gemm()
++
++    def test_sm120_requires_grouped_fp8_fp4_entrypoint(self):
++        self.assertTrue(self._compute(sm=120, symbol_present=True))
++        self.assertFalse(self._compute(sm=120, symbol_present=False))
++
++    def test_sm120_preserves_environment_gate(self):
++        self.assertFalse(self._compute(sm=120, symbol_present=True, enabled=False))
++
++    def test_other_supported_cuda_arch_does_not_require_sm120_entrypoint(self):
++        self.assertTrue(self._compute(sm=100, symbol_present=False))
++
++    def test_enabled_sm120_uses_ue8m0_scales(self):
++        with (
++            patch.object(configurer, "ENABLE_JIT_DEEPGEMM", True),
++            patch.object(configurer, "is_sm100_supported", return_value=False),
++            patch.object(configurer, "get_device_sm", return_value=120),
++        ):
++            self.assertTrue(configurer._compute_scale_ue8m0())
++
++    def test_disabled_sm120_does_not_use_ue8m0_scales(self):
++        with (
++            patch.object(configurer, "ENABLE_JIT_DEEPGEMM", False),
++            patch.object(configurer, "is_sm100_supported", return_value=False),
++            patch.object(configurer, "get_device_sm", return_value=120),
++        ):
++            self.assertFalse(configurer._compute_scale_ue8m0())
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/layers/test_flashinfer_comm_fusion.py b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
+index c2ad459fd2..d0449db898 100644
+--- a/test/registered/unit/layers/test_flashinfer_comm_fusion.py
++++ b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
+@@ -1,3 +1,4 @@
++import contextlib
+ import types
+ import unittest
+ from unittest.mock import patch
+@@ -7,6 +8,7 @@ import torch
+ from sglang.srt.layers import flashinfer_comm_fusion as fusion
+ from sglang.srt.runtime_context import get_parallel
+ from sglang.test.ci.ci_register import register_cuda_ci
++from sglang.test.test_utils import CustomTestCase
+ 
+ register_cuda_ci(est_time=30, stage="base-c", runner_config="4-gpu-h100")
+ register_cuda_ci(est_time=30, stage="base-c", runner_config="4-gpu-b200")
+@@ -24,6 +26,7 @@ class _FakeWorkspace:
+ 
+ class _FakeFlashInferComm:
+     class AllReduceFusionPattern:
++        kAllReduce = object()
+         kARResidualRMSNorm = object()
+ 
+     def __init__(self):
+@@ -38,13 +41,25 @@ class _FakeFlashInferComm:
+         *,
+         input,
+         workspace,
+-        residual_out,
+-        norm_out,
+-        residual_in,
+-        rms_gamma,
+-        rms_eps,
++        pattern,
++        output=None,
++        residual_out=None,
++        norm_out=None,
++        residual_in=None,
++        rms_gamma=None,
++        rms_eps=None,
+         **_kwargs,
+     ):
++        if pattern is self.AllReduceFusionPattern.kAllReduce:
++            allreduced = input * workspace.world_size
++            if output is None:
++                return allreduced
++            output.copy_(allreduced)
++            return output
++
++        if pattern is not self.AllReduceFusionPattern.kARResidualRMSNorm:
++            raise ValueError(f"Unexpected pattern: {pattern}")
++
+         allreduced = input * workspace.world_size
+         expected_residual = allreduced + residual_in
+         variance = expected_residual.to(torch.float32).pow(2).mean(dim=-1, keepdim=True)
+@@ -71,7 +86,115 @@ def _torch_allreduce_residual_rmsnorm_baseline(
+     return norm_out, residual_out
+ 
+ 
+-class TestFlashInferCommFusion(unittest.TestCase):
++class TestFlashInferCommFusion(CustomTestCase):
++    def test_preinitialized_workspace_covers_largest_prefill_forward(self):
++        from sglang.srt.model_executor.runner.base_runner import BaseRunner
++
++        cases = (
++            (8192, False, 16384, 8192),
++            (8192, True, 16384, 16384),
++            (-1, False, 16384, 16384),
++        )
++        for (
++            chunked_prefill_size,
++            enable_dynamic_chunking,
++            max_prefill_tokens,
++            expected,
++        ) in cases:
++            with self.subTest(
++                chunked_prefill_size=chunked_prefill_size,
++                enable_dynamic_chunking=enable_dynamic_chunking,
++            ):
++                model_runner = types.SimpleNamespace(
++                    server_args=types.SimpleNamespace(
++                        flashinfer_allreduce_fusion_backend="auto",
++                        chunked_prefill_size=chunked_prefill_size,
++                        enable_dynamic_chunking=enable_dynamic_chunking,
++                        max_prefill_tokens=max_prefill_tokens,
++                    ),
++                    model_config=types.SimpleNamespace(hidden_size=4096),
++                    dtype=torch.bfloat16,
++                )
++                runner = types.SimpleNamespace(model_runner=model_runner)
++
++                with patch(
++                    "sglang.srt.layers.flashinfer_comm_fusion.pre_initialize_workspaces"
++                ) as pre_initialize:
++                    BaseRunner._pre_initialize_flashinfer_allreduce_workspace(runner)
++
++                pre_initialize.assert_called_once_with(
++                    max_token_num=expected,
++                    hidden_dim=4096,
++                    dtype=torch.bfloat16,
++                )
++
++    def test_trtllm_workspace_preflight_does_not_require_multicast(self):
++        class _FakeCudaDriver:
++            CUresult = types.SimpleNamespace(CUDA_SUCCESS=0)
++            CUmemAllocationGranularity_flags = types.SimpleNamespace(
++                CU_MEM_ALLOC_GRANULARITY_RECOMMENDED=0
++            )
++
++            @staticmethod
++            def cuMemGetAllocationGranularity(_prop, _flag):
++                return 0, 65536
++
++            @staticmethod
++            def cuMulticastGetGranularity(*_args):
++                raise AssertionError("TRT-LLM symmetric memory has multicast disabled")
++
++        sizes = fusion._flashinfer_trtllm_workspace_allocation_sizes(
++            _FakeCudaDriver(),
++            object(),
++            world_size=2,
++            max_token_num=32,
++            hidden_dim=16,
++            dtype=torch.bfloat16,
++        )
++        self.assertEqual(sizes, [2162688, 2162688, 2162688])
++
++    def test_mnnvl_workspace_preflight_keeps_multicast_granularity(self):
++        multicast_queries = []
++
++        class _FakeMulticastProp:
++            numDevices = None
++            size = None
++            handleTypes = None
++
++        class _FakeCudaDriver:
++            CUresult = types.SimpleNamespace(CUDA_SUCCESS=0)
++            CUmemAllocationGranularity_flags = types.SimpleNamespace(
++                CU_MEM_ALLOC_GRANULARITY_RECOMMENDED=0
++            )
++            CUmulticastGranularity_flags = types.SimpleNamespace(
++                CU_MULTICAST_GRANULARITY_RECOMMENDED=0
++            )
++            CUmulticastObjectProp = _FakeMulticastProp
++
++            @staticmethod
++            def cuMemGetAllocationGranularity(_prop, _flag):
++                return 0, 65536
++
++            @staticmethod
++            def cuMulticastGetGranularity(mc_prop, _flag):
++                multicast_queries.append(mc_prop.size)
++                return 0, 1 << 25
++
++        prop = types.SimpleNamespace(requestedHandleTypes=object())
++        sizes = fusion._flashinfer_trtllm_workspace_allocation_sizes(
++            _FakeCudaDriver(),
++            prop,
++            world_size=2,
++            max_token_num=32,
++            hidden_dim=16,
++            dtype=torch.bfloat16,
++            align_multicast=True,
++        )
++        # McastGPUBuffer rounds each allocation up to the multicast
++        # granularity (32 MiB here), on top of the allocation granularity.
++        self.assertEqual(sizes, [1 << 25, 1 << 25, 1 << 25])
++        self.assertEqual(multicast_queries, [2162688, 2162688, 2162688])
++
+     def test_auto_backend_resolves_by_arch(self):
+         single_node = types.SimpleNamespace(
+             flashinfer_allreduce_fusion_backend="auto", nnodes=1
+@@ -81,7 +204,10 @@ class TestFlashInferCommFusion(unittest.TestCase):
+         )
+ 
+         # Blackwell: mnnvl on both single-node and multi-node.
+-        with patch.object(fusion, "is_sm100_supported", return_value=True):
++        with (
++            patch.object(fusion, "is_sm100_supported", return_value=True),
++            patch.object(fusion, "is_sm120_supported", return_value=False),
++        ):
+             self.assertEqual(
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(single_node),
+                 "mnnvl",
+@@ -94,6 +220,21 @@ class TestFlashInferCommFusion(unittest.TestCase):
+         with (
+             patch.object(fusion, "is_sm100_supported", return_value=False),
+             patch.object(fusion, "is_sm90_supported", return_value=True),
++            patch.object(fusion, "is_sm120_supported", return_value=False),
++        ):
++            self.assertEqual(
++                fusion.resolve_flashinfer_allreduce_fusion_backend(single_node),
++                "trtllm",
++            )
++            with self.assertRaises(ValueError):
++                fusion.resolve_flashinfer_allreduce_fusion_backend(multi_node)
++
++        # SM12X (SM120/SM121): auto uses trtllm on single-node, multi-node is
++        # unsupported.
++        with (
++            patch.object(fusion, "is_sm100_supported", return_value=False),
++            patch.object(fusion, "is_sm90_supported", return_value=False),
++            patch.object(fusion, "is_sm120_supported", return_value=True),
+         ):
+             self.assertEqual(
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(single_node),
+@@ -102,13 +243,13 @@ class TestFlashInferCommFusion(unittest.TestCase):
+             with self.assertRaises(ValueError):
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(multi_node)
+ 
+-        # Architectures outside SM90/SM10X are unsupported. Both pre-SM90
+-        # and post-SM10X devices (e.g. SM120) must fail closed.
+-        for arch in ("pre_sm90", "post_sm10x"):
++        # Architectures outside SM90/SM10X/SM12X (SM120/SM121) are unsupported.
++        for arch in ("pre_sm90", "post_sm120"):
+             with (
+                 self.subTest(arch=arch),
+                 patch.object(fusion, "is_sm100_supported", return_value=False),
+                 patch.object(fusion, "is_sm90_supported", return_value=False),
++                patch.object(fusion, "is_sm120_supported", return_value=False),
+             ):
+                 with self.assertRaises(ValueError):
+                     fusion.resolve_flashinfer_allreduce_fusion_backend(single_node)
+@@ -132,6 +273,7 @@ class TestFlashInferCommFusion(unittest.TestCase):
+         with (
+             patch.object(fusion, "is_sm100_supported", return_value=False),
+             patch.object(fusion, "is_sm90_supported", return_value=True),
++            patch.object(fusion, "is_sm120_supported", return_value=False),
+         ):
+             self.assertEqual(
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(single_node_mnnvl),
+@@ -146,7 +288,10 @@ class TestFlashInferCommFusion(unittest.TestCase):
+             with self.assertRaises(ValueError):
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(multi_node_trtllm)
+ 
+-        with patch.object(fusion, "is_sm100_supported", return_value=True):
++        with (
++            patch.object(fusion, "is_sm100_supported", return_value=True),
++            patch.object(fusion, "is_sm120_supported", return_value=False),
++        ):
+             self.assertEqual(
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(multi_node_mnnvl),
+                 "mnnvl",
+@@ -154,11 +299,24 @@ class TestFlashInferCommFusion(unittest.TestCase):
+             with self.assertRaises(ValueError):
+                 fusion.resolve_flashinfer_allreduce_fusion_backend(multi_node_trtllm)
+ 
+-        for arch in ("pre_sm90", "post_sm10x"):
++        with (
++            patch.object(fusion, "is_sm100_supported", return_value=False),
++            patch.object(fusion, "is_sm90_supported", return_value=False),
++            patch.object(fusion, "is_sm120_supported", return_value=True),
++        ):
++            self.assertEqual(
++                fusion.resolve_flashinfer_allreduce_fusion_backend(single_node_trtllm),
++                "trtllm",
++            )
++            with self.assertRaises(ValueError):
++                fusion.resolve_flashinfer_allreduce_fusion_backend(single_node_mnnvl)
++
++        for arch in ("pre_sm90", "post_sm120"):
+             with (
+                 self.subTest(arch=arch),
+                 patch.object(fusion, "is_sm100_supported", return_value=False),
+                 patch.object(fusion, "is_sm90_supported", return_value=False),
++                patch.object(fusion, "is_sm120_supported", return_value=False),
+             ):
+                 for args in (
+                     single_node_mnnvl,
+@@ -240,5 +398,190 @@ class TestFlashInferCommFusion(unittest.TestCase):
+             fusion._flashinfer_allreduce_unavailable = original_unavailable
+ 
+ 
++_GROUP_KEY = ("device_group", "cpu_group")
++_OTHER_GROUP_KEY = ("other_device_group", "other_cpu_group")
++
++
++class TestFlashInferAllReduceOnly(CustomTestCase):
++    def _make_manager(self, world_size, group_key=_GROUP_KEY):
++        manager = fusion.FlashInferWorkspaceManager()
++        manager.workspace = _FakeWorkspace(None, world_size)
++        manager.initialized = True
++        manager.world_size = world_size
++        manager.group = group_key
++        manager.max_token_num = 2048
++        manager.hidden_dim = 4096
++        manager.dtype = torch.float32
++        return manager
++
++    @contextlib.contextmanager
++    def _patched_attn_workspace(self, manager):
++        from sglang.srt.runtime_context import get_resources
++
++        buffers = get_resources().buffers
++        manager_key = "flashinfer_fusion_attn_tp_workspace"
++        original_manager = buffers.get(manager_key)
++        original_comm = fusion._flashinfer_comm
++        original_unavailable = fusion._flashinfer_allreduce_unavailable
++
++        buffers[manager_key] = manager
++        fusion._flashinfer_comm = _FakeFlashInferComm()
++        fusion._flashinfer_allreduce_unavailable = False
++        try:
++            yield
++        finally:
++            fusion._flashinfer_comm = original_comm
++            fusion._flashinfer_allreduce_unavailable = original_unavailable
++            if original_manager is None:
++                buffers.pop(manager_key, None)
++            else:
++                buffers[manager_key] = original_manager
++
++    def _can_use(self, input_, world_size=4, group_key=_GROUP_KEY):
++        return fusion.can_use_flashinfer_allreduce(
++            input_,
++            use_attn_tp_group=True,
++            expected_world_size=world_size,
++            expected_group_key=group_key,
++        )
++
++    def test_allreduce_output_equals_input_times_world_size(self):
++        if not torch.cuda.is_available():
++            self.skipTest("CUDA required for flashinfer custom op")
++        world_size = 4
++        with self._patched_attn_workspace(self._make_manager(world_size)):
++            input_ = torch.randn(8, 16, dtype=torch.bfloat16, device="cuda")
++            expected = input_ * world_size
++
++            with get_parallel().override(attn_tp_size=world_size):
++                self.assertTrue(self._can_use(input_, world_size=world_size))
++                result = fusion.flashinfer_allreduce(input_, use_attn_tp_group=True)
++
++            torch.testing.assert_close(result, expected)
++
++    def test_shape_guard_rejects_non_2d(self):
++        with self._patched_attn_workspace(self._make_manager(4)):
++            self.assertFalse(self._can_use(torch.randn(16)))
++            self.assertFalse(self._can_use(torch.randn(2, 8, 16)))
++
++    def test_shape_guard_rejects_non_contiguous(self):
++        with self._patched_attn_workspace(self._make_manager(4)):
++            non_contiguous = torch.randn(16, 8).t()
++            self.assertFalse(non_contiguous.is_contiguous())
++            self.assertFalse(self._can_use(non_contiguous))
++
++    def test_rejects_when_unavailable(self):
++        original_unavailable = fusion._flashinfer_allreduce_unavailable
++        try:
++            fusion._flashinfer_allreduce_unavailable = True
++            self.assertFalse(self._can_use(torch.randn(8, 16)))
++        finally:
++            fusion._flashinfer_allreduce_unavailable = original_unavailable
++
++    def test_rejects_when_workspace_uninitialized(self):
++        with self._patched_attn_workspace(fusion.FlashInferWorkspaceManager()):
++            with get_parallel().override(attn_tp_size=4):
++                self.assertFalse(self._can_use(torch.randn(8, 16)))
++
++    def test_rejects_when_workspace_group_differs(self):
++        """A workspace rendezvoused on other peers must not be reused.
++
++        Under hybrid EP+TP (e.g. tp=4, ep=2) the MoE-TP and MoE-EP groups have
++        the same world size but pair different ranks, so a workspace built for
++        one silently reduces across the wrong peers when used by the other --
++        wrong output rather than a crash.
++        """
++        with self._patched_attn_workspace(self._make_manager(2)):
++            self.assertFalse(
++                self._can_use(
++                    torch.randn(8, 16), world_size=2, group_key=_OTHER_GROUP_KEY
++                )
++            )
++
++    def test_rejects_when_workspace_world_size_differs(self):
++        with self._patched_attn_workspace(self._make_manager(4)):
++            self.assertFalse(self._can_use(torch.randn(8, 16), world_size=2))
++
++    def test_rejects_when_token_num_exceeds_workspace_capacity(self):
++        """Under Dynamo the capacity check replaces is_buffer_size_sufficient().
++
++        _FakeWorkspace.is_buffer_size_sufficient() always says yes, so this only
++        passes if the compiling branch consults the manager's own allocation.
++        """
++        manager = self._make_manager(4)
++        manager.max_token_num = 8
++        with self._patched_attn_workspace(manager):
++            with patch.object(torch.compiler, "is_compiling", return_value=True):
++                self.assertTrue(self._can_use(torch.randn(8, 16)))
++                self.assertFalse(self._can_use(torch.randn(9, 16)))
++
++    def test_rejects_when_hidden_dim_exceeds_workspace_capacity(self):
++        manager = self._make_manager(4)
++        manager.hidden_dim = 16
++        with self._patched_attn_workspace(manager):
++            with patch.object(torch.compiler, "is_compiling", return_value=True):
++                self.assertTrue(self._can_use(torch.randn(8, 16)))
++                self.assertFalse(self._can_use(torch.randn(8, 17)))
++
++    def test_rejects_when_dtype_mismatches_workspace(self):
++        manager = self._make_manager(4)
++        manager.dtype = torch.bfloat16
++        with self._patched_attn_workspace(manager):
++            with patch.object(torch.compiler, "is_compiling", return_value=True):
++                self.assertTrue(self._can_use(torch.randn(8, 16, dtype=torch.bfloat16)))
++                self.assertFalse(self._can_use(torch.randn(8, 16, dtype=torch.float32)))
++
++
++class _FakeGroupCoordinator:
++    def __init__(self, world_size):
++        self.world_size = world_size
++        self._fi_workspace_hint = None
++
++
++class TestTagGroupsForFlashInferAllReduceOnly(CustomTestCase):
++    """The MoE workspace rendezvouses on the EP group when moe_ep_size > 1 and
++    on the MoE-TP group otherwise, so only that one group may be tagged."""
++
++    def _tag(self, *, attn_tp, moe_ep, moe_tp):
++        from sglang.srt.distributed import parallel_state as ps
++
++        with patch.object(ps, "_ENABLE_FLASHINFER_ALLREDUCE_ONLY", True), patch.object(
++            ps, "_ATTN_TP", attn_tp
++        ), patch.object(ps, "_MOE_EP", moe_ep), patch.object(ps, "_MOE_TP", moe_tp):
++            ps._tag_groups_for_flashinfer_allreduce_only()
++
++    def test_hybrid_ep_tp_tags_only_the_ep_group(self):
++        attn_tp = _FakeGroupCoordinator(4)
++        moe_ep = _FakeGroupCoordinator(2)
++        moe_tp = _FakeGroupCoordinator(2)
++
++        self._tag(attn_tp=attn_tp, moe_ep=moe_ep, moe_tp=moe_tp)
++
++        self.assertEqual(attn_tp._fi_workspace_hint, "attn_tp")
++        self.assertEqual(moe_ep._fi_workspace_hint, "moe")
++        self.assertIsNone(moe_tp._fi_workspace_hint)
++
++    def test_pure_moe_tp_tags_only_the_moe_tp_group(self):
++        attn_tp = _FakeGroupCoordinator(4)
++        moe_ep = _FakeGroupCoordinator(1)
++        moe_tp = _FakeGroupCoordinator(4)
++
++        self._tag(attn_tp=attn_tp, moe_ep=moe_ep, moe_tp=moe_tp)
++
++        self.assertEqual(moe_tp._fi_workspace_hint, "moe")
++        self.assertIsNone(moe_ep._fi_workspace_hint)
++
++    def test_shared_coordinator_prefers_attn_tp(self):
++        # tp=4, ep=4: _ATTN_TP is _MOE_EP is _TP. Either workspace spans the
++        # same peers, but the choice must be deterministic.
++        shared = _FakeGroupCoordinator(4)
++        moe_tp = _FakeGroupCoordinator(1)
++
++        self._tag(attn_tp=shared, moe_ep=shared, moe_tp=moe_tp)
++
++        self.assertEqual(shared._fi_workspace_hint, "attn_tp")
++        self.assertIsNone(moe_tp._fi_workspace_hint)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/test/registered/unit/layers/test_layer_communicator_fusion_gate.py b/test/registered/unit/layers/test_layer_communicator_fusion_gate.py
+new file mode 100644
+index 0000000000..128df2aaa3
+--- /dev/null
++++ b/test/registered/unit/layers/test_layer_communicator_fusion_gate.py
+@@ -0,0 +1,100 @@
++import types
++import unittest
++from unittest.mock import patch
++
++from sglang.srt.layers import communicator as comm
++from sglang.srt.layers.communicator import LayerCommunicator, ScatterMode
++from sglang.srt.runtime_context import get_parallel
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++def _fake_communicator():
++    return types.SimpleNamespace(
++        _speculative_algo=None,
++        layer_scatter_modes=types.SimpleNamespace(mlp_mode=ScatterMode.TP_ATTN_FULL),
++        is_last_layer=False,
++        _context=types.SimpleNamespace(tp_size=4),
++    )
++
++
++class TestFuseMlpAllReduceGate(CustomTestCase):
++    """Hybrid EP+TP must not fuse the post-experts all-reduce away.
++
++    The fused residual+LN reduces over a single group, but with moe_ep_size > 1
++    and moe_tp_size > 1 the post-experts reduction spans two disjoint groups
++    (_MOE_EP then _MOE_TP) and should_skip_post_experts_all_reduce() drops both
++    once fusion is published. The result is activations reduced over only half
++    the peers -- wrong output, no crash. Observed as garbage completions on
++    Qwen3-30B-A3B with --tp-size 4 --ep-size 2.
++    """
++
++    def _should_fuse(self, *, moe_ep_size, moe_tp_size):
++        forward_batch = types.SimpleNamespace(
++            input_ids=types.SimpleNamespace(shape=(8,))
++        )
++        with (
++            patch.object(comm, "is_enable_moe_cp_allgather", return_value=False),
++            patch.object(comm, "apply_flashinfer_allreduce_fusion", return_value=True),
++            patch.object(
++                comm,
++                "get_attn_tp_context",
++                return_value=types.SimpleNamespace(input_scattered=False),
++            ),
++            get_parallel().override(
++                moe_ep_size=moe_ep_size, moe_tp_size=moe_tp_size, tp_size=4
++            ),
++        ):
++            return LayerCommunicator.should_fuse_mlp_allreduce_with_next_layer(
++                _fake_communicator(), forward_batch
++            )
++
++    def test_hybrid_ep_tp_does_not_fuse(self):
++        self.assertFalse(self._should_fuse(moe_ep_size=2, moe_tp_size=2))
++
++    def test_pure_tp_still_fuses(self):
++        self.assertTrue(self._should_fuse(moe_ep_size=1, moe_tp_size=4))
++
++    def test_pure_ep_still_fuses(self):
++        self.assertTrue(self._should_fuse(moe_ep_size=4, moe_tp_size=1))
++
++
++class TestFlashInferAllReduceArchitectureGate(CustomTestCase):
++    def _enabled(self, *, sm90=False, sm100=False, sm120=False):
++        with (
++            patch.multiple(
++                comm,
++                _is_sm90_supported=sm90,
++                _is_sm100_supported=sm100,
++                _is_sm120_supported=sm120,
++                _is_flashinfer_available=True,
++            ),
++            patch.object(comm, "is_dp_attention_enabled", return_value=False),
++            patch.object(
++                comm, "is_flashinfer_allreduce_unavailable", return_value=False
++            ),
++            patch.object(
++                comm,
++                "get_exec",
++                return_value=types.SimpleNamespace(
++                    comm=types.SimpleNamespace(
++                        flashinfer_allreduce_fusion_backend="trtllm"
++                    )
++                ),
++            ),
++        ):
++            return comm.apply_flashinfer_allreduce_fusion(batch_size=1)
++
++    def test_supported_architectures_pass(self):
++        self.assertTrue(self._enabled(sm90=True))
++        self.assertTrue(self._enabled(sm100=True))
++        self.assertTrue(self._enabled(sm120=True))
++
++    def test_unsupported_architecture_does_not_pass(self):
++        self.assertFalse(self._enabled())
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/model_loader/test_deepgemm_sm120.py b/test/registered/unit/model_loader/test_deepgemm_sm120.py
+new file mode 100644
+index 0000000000..6152b83682
+--- /dev/null
++++ b/test/registered/unit/model_loader/test_deepgemm_sm120.py
+@@ -0,0 +1,50 @@
++import unittest
++from unittest.mock import patch
++
++import torch
++
++from sglang.srt.layers import deep_gemm_wrapper
++from sglang.srt.model_loader import utils
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=5, suite="base-a-test-cpu")
++
++
++class TestDeepGemmSm120WeightRequant(unittest.TestCase):
++    def test_sm120_keeps_dense_block_fp8_scales(self):
++        with (
++            patch.multiple(
++                deep_gemm_wrapper,
++                ENABLE_JIT_DEEPGEMM=True,
++                DEEPGEMM_SCALE_UE8M0=True,
++            ),
++            patch.object(utils, "get_device_sm", return_value=120),
++        ):
++            self.assertFalse(
++                utils.should_deepgemm_weight_requant_ue8m0(
++                    [128, 128],
++                    output_dtype=torch.bfloat16,
++                    weight_shape=(64, 128),
++                )
++            )
++
++    def test_other_supported_arch_preserves_requantization(self):
++        with (
++            patch.multiple(
++                deep_gemm_wrapper,
++                ENABLE_JIT_DEEPGEMM=True,
++                DEEPGEMM_SCALE_UE8M0=True,
++            ),
++            patch.object(utils, "get_device_sm", return_value=100),
++        ):
++            self.assertTrue(
++                utils.should_deepgemm_weight_requant_ue8m0(
++                    [128, 128],
++                    output_dtype=torch.bfloat16,
++                    weight_shape=(64, 128),
++                )
++            )
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/test_model_overrides.py b/test/registered/unit/test_model_overrides.py
+index 3c3e2630ec..3f5dede0cc 100644
+--- a/test/registered/unit/test_model_overrides.py
++++ b/test/registered/unit/test_model_overrides.py
+@@ -873,6 +873,34 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+         with patch.object(overrides_module, "is_sm120_supported", return_value=False):
+             self.assertEqual(_deepseek_v4_sm120_moe(_view()), {})
+ 
++    def test_sm120_fp8_wo_a_gemm_default_gates_on_deepgemm_capability(self):
++        """The SM120 FP8 W_o_A GEMM override is capability-gated, not a force.
++
++        Only a build without the DeepGEMM ue8m0 capability gets the GEMM turned
++        off; a capable build must be left untouched so the global default or an
++        explicit setting survives to the later DeepGEMM capability check.
++        """
++        from sglang.srt.environ import envs
++        from sglang.srt.layers.deep_gemm_wrapper import configurer
++        from sglang.srt.server_args import _apply_sm120_fp8_wo_a_gemm_default
++
++        field = envs.SGLANG_OPT_FP8_WO_A_GEMM
++
++        def _run(capable):
++            """Call the helper with a stubbed capability; return recorded set()."""
++            with (
++                patch.object(configurer, "DEEPGEMM_SCALE_UE8M0", capable),
++                patch.object(field, "set") as mock_set,
++            ):
++                _apply_sm120_fp8_wo_a_gemm_default()
++                return mock_set
++
++        # Incapable build: forced off.
++        _run(capable=False).assert_called_once_with(False)
++
++        # Capable build: untouched, keeping the default or explicit setting.
++        _run(capable=True).assert_not_called()
++
+     def test_nemotron_h_overrides_at_callable_level(self):
+         from sglang.srt.arg_groups.overrides import _nemotron_h_overrides
+ 
+@@ -1087,6 +1115,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+         with (
+             patch.object(overrides_module, "is_sm90_supported", return_value=True),
+             patch.object(overrides_module, "is_sm100_supported", return_value=False),
++            patch.object(overrides_module, "is_sm120_supported", return_value=False),
+         ):
+             self.assertEqual(
+                 _flashinfer_allreduce_fusion_auto_enable(_view()),
+@@ -1126,6 +1155,19 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+                 {},
+             )
+ 
++        with (
++            patch.object(overrides_module, "is_sm90_supported", return_value=False),
++            patch.object(overrides_module, "is_sm100_supported", return_value=False),
++            patch.object(overrides_module, "is_sm120_supported", return_value=True),
++        ):
++            self.assertEqual(
++                _flashinfer_allreduce_fusion_auto_enable(_view()),
++                {"flashinfer_allreduce_fusion_backend": "auto"},
++            )
++            self.assertEqual(
++                _flashinfer_allreduce_fusion_auto_enable(_view(nnodes=2)), {}
++            )
++
+         # enforce-disable wins over everything
+         self.assertEqual(
+             _enforce_disable_allreduce_fusion(
