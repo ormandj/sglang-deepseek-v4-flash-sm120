@@ -54,6 +54,8 @@ exec docker run --rm \
   --env CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
   --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
+  --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
@@ -70,6 +72,7 @@ exec docker run --rm \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
   --fp8-gemm-backend auto \
+  --enable-deepseek-v4-fp4-indexer \
   --speculative-algorithm DSPARK \
   --speculative-dspark-block-size 5 \
   --reasoning-parser deepseek-v4 \

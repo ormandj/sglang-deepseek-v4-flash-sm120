@@ -52,6 +52,23 @@ The first start compiles the patched SM120 FlashInfer modules and the TileLang a
 
 The script pins `--chunked-prefill-size 8192`, the value the validated configuration resolves to. Prefill-throughput comparisons against other engines or builds are only meaningful at the same chunk size.
 
+It also selects the DeepGEMM DSA indexer with `--enable-deepseek-v4-fp4-indexer`
+and `SGLANG_OPT_USE_TILELANG_INDEXER=0` / `SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0`.
+On SM120 SGLang otherwise forces the TileLang indexer, which works against stock
+DeepGEMM; this image ships the SM120-capable DeepGEMM that exposes
+`fp8_fp4_paged_mqa_logits`, so it can use the DeepGEMM path instead. Measured on
+the validated configuration with raw `input_ids`, warmup discarded, n=5 prefill
+and n=10 decode at roughly 1k context:
+
+| cell | TileLang | DeepGEMM | delta |
+|---|---:|---:|---|
+| prefill 128k | 6,310 | 6,581 | +4.3% |
+| decode C1 | 296.4 | 303.5 | +2.4% |
+
+Both indexers make the context-scaled allocation described under KV capacity
+below, so this choice does not affect that requirement. Remove the three
+settings to fall back to the TileLang default.
+
 ## Health check
 
 `SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a plain liveness check rather than a generation request:
