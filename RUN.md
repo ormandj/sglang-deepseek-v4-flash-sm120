@@ -72,7 +72,31 @@ curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
 
 ## Expected KV capacity at TP=2
 
-On the validated two-GPU configuration, SGLang reported `max_total_num_tokens=774656` with FP8 KV cache and `mem-fraction-static=0.93` (0.94 leaves too little headroom for the FlashInfer MoE workspace on this composition and fails at the first real request). This is the total scheduler KV pool shared by all active and cached sequences; it is not 1,108,224 tokens per GPU or per request. The same run reported `context_len=1048576`, reflecting the model's roughly 1M-token per-request context limit.
+On the validated two-GPU configuration, SGLang reported `max_total_num_tokens=774656` with FP8 KV cache and `mem-fraction-static=0.93` (0.94 leaves too little headroom for the FlashInfer MoE workspace on this composition and fails at the first real request). This is the total scheduler KV pool shared by all active and cached sequences; it is not 1,108,224 tokens per GPU or per request. The checkpoint's own window is 1,048,576 tokens, which is larger than that pool.
+
+The script passes `--context-length 774656` to match that pool. Left unset, SGLang
+uses the checkpoint's full 1,048,576-token window, and the DSA paged-MQA-logits
+indexer sizes a float32 `(batch_size, max_seq_len)` buffer from it — roughly
+1.4 GiB — irrespective of how long the actual request is. With
+`mem-fraction-static 0.93` that allocation does not fit, and the scheduler exits
+with a CUDA OOM on the first sufficiently large request:
+
+```text
+tilelang_kernel.py:1504 in tilelang_fp8_paged_mqa_logits
+    logits = page_table.new_empty((batch_size, max_seq_len), dtype=torch.float32)
+torch.OutOfMemoryError: Tried to allocate 1.38 GiB
+```
+
+The same allocation exists on the DeepGEMM indexer path, so the failure is not
+specific to either implementation. Because a 1M window is larger than the KV pool
+can serve anyway, bounding it to the pool size costs no usable context.
+
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set for the same reason: the
+OOM reports over 1.5 GiB reserved but unallocated, and expandable segments returns
+that fragmentation to the allocator.
+
+If you change `mem-fraction-static`, `kv-cache-dtype`, or the GPU count, re-read
+`max_total_num_tokens` from the startup log and set `--context-length` to match it.
 
 Confirm the values after startup:
 

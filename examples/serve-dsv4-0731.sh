@@ -53,6 +53,7 @@ exec docker run --rm \
   --volume "${cache_dir}:/root/.cache" \
   --env CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
   --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
+  --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
@@ -64,6 +65,7 @@ exec docker run --rm \
   --tensor-parallel-size 2 \
   --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.93 \
+  --context-length 774656 \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
