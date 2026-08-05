@@ -1,10 +1,11 @@
 # DeepSeek-V4-Flash-0731 on SGLang for 2x RTX PRO 6000 Blackwell (SM120, TP=2).
 #
 # The image starts from the official CUDA 13 SGLang nightly by immutable digest
-# and inherits nothing else. SGLang is main 8f2a3ad6 plus a single source patch
-# carrying the pinned heads of PRs #33140, #32194, #30700, #32330 (rebased, with
-# an mnnvl preflight multicast-granularity fix), #32686 and #32815, three local
-# SM120 fixes, and a local DSV4/DSV32 tool-schema encoding fix. FlashInfer is
+# and inherits nothing else. SGLang is main d2c405f1 plus a single source patch
+# carrying the pinned heads of PRs #29927, #33614, #33140, #32194, #30700,
+# #32330 (rebased, with an mnnvl preflight multicast-granularity fix), #32686
+# and #32815, three local SM120 fixes, and a local DSV4/DSV32 tool-schema
+# encoding fix. FlashInfer is
 # current main 67f76379 built from source with a single patch carrying PRs #4308
 # and #4309 (#3903 is already in main); the matching cubin wheel is installed by
 # URL and pinned by SHA256, and the stale JIT-cache wheel is removed so the
@@ -14,9 +15,11 @@
 # checks against this file and against the patch bytes.
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86@sha256:687efca081e85f4e3126456ff389b1af515fc08a604de4c61f947f531963aba7
 ARG DSV4_0731_SGLANG_BASE_HEAD=12eadf86f12aec2e6f81a6e38b61b964a4c6b529
-ARG DSV4_0731_SGLANG_MAIN_HEAD=8f2a3ad6d7d68c58ae65b61a75bb2115449addca
-ARG DSV4_0731_SGLANG_MAIN_TREE=5be26db1f559064c0f9e724e78c1a8f619754867
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=3c4610a67da960fdff90dbbf35a4a3003d5d3316
+ARG DSV4_0731_SGLANG_MAIN_HEAD=d2c405f19df918c542c6cea9b1ddd59880e1e888
+ARG DSV4_0731_SGLANG_MAIN_TREE=b2b423131b41ef7ce4e458ac7384e49541c46ed6
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=da4365573ba76da34ba91cc650a763d7d2a9a382
+ARG DSV4_0731_SGLANG_PR29927_HEAD=21a5bc8e4e05909a7c946d3467561a8e024a108a
+ARG DSV4_0731_SGLANG_PR33614_HEAD=56eae704773c168c687603dcb24b40130d1a9594
 ARG DSV4_0731_SGLANG_PR33140_HEAD=a580251a16cfad47e8f97a535f9aab7d1f01477b
 ARG DSV4_0731_SGLANG_PR32194_HEAD=f8fac3913dbfbbc9048692d79de3587d226fa421
 ARG DSV4_0731_SGLANG_PR30700_HEAD=c2439af9c47c25a0eeea2ee6f0b98094a70c9b70
@@ -40,6 +43,8 @@ ARG DSV4_0731_SGLANG_BASE_HEAD
 ARG DSV4_0731_SGLANG_MAIN_HEAD
 ARG DSV4_0731_SGLANG_MAIN_TREE
 ARG DSV4_0731_SGLANG_EFFECTIVE_TREE
+ARG DSV4_0731_SGLANG_PR29927_HEAD
+ARG DSV4_0731_SGLANG_PR33614_HEAD
 ARG DSV4_0731_SGLANG_PR33140_HEAD
 ARG DSV4_0731_SGLANG_PR32194_HEAD
 ARG DSV4_0731_SGLANG_PR30700_HEAD
@@ -58,7 +63,7 @@ ARG DSV4_0731_FLASHINFER_VERSION
 ARG DSV4_0731_FLASHINFER_CUBIN_URL
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
 
-COPY patches/sglang/0001-sglang-dsv4-0731-perf-refresh.patch /tmp/sglang-perf-refresh.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-perf-r4.patch /tmp/sglang-perf-r4.patch
 # The tree check pins the single source patch: the pinned PR heads, the three
 # local SM120 fixes, and the tool-schema encoding fix, applied as one diff.
 RUN set -e; cd /sgl-workspace/sglang; \
@@ -67,7 +72,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
     git reset --hard "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD)" = "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD^{tree})" = "${DSV4_0731_SGLANG_MAIN_TREE}"; \
-    git apply --index --binary /tmp/sglang-perf-refresh.patch; \
+    git apply --index --binary /tmp/sglang-perf-r4.patch; \
     test "$(git write-tree)" = "${DSV4_0731_SGLANG_EFFECTIVE_TREE}"; \
     uv run --no-project python -m compileall -q \
       python/sglang/srt/arg_groups/overrides.py \
@@ -87,7 +92,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       test/registered/unit/layers/test_layer_communicator_fusion_gate.py \
       test/registered/unit/model_loader/test_deepgemm_sm120.py \
       test/registered/unit/test_model_overrides.py; \
-    rm /tmp/sglang-perf-refresh.patch
+    rm /tmp/sglang-perf-r4.patch
 
 COPY patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch /tmp/flashinfer-perf-refresh.patch
 # SOURCE_DATE_EPOCH comes from the checked-out commit so the wheel build is
@@ -147,6 +152,8 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.main.head=${DSV4_0731_SGLANG_MAIN_HEAD} \
       ai.sglang.main.tree=${DSV4_0731_SGLANG_MAIN_TREE} \
       ai.sglang.effective.tree=${DSV4_0731_SGLANG_EFFECTIVE_TREE} \
+      ai.sglang.pr29927.head=${DSV4_0731_SGLANG_PR29927_HEAD} \
+      ai.sglang.pr33614.head=${DSV4_0731_SGLANG_PR33614_HEAD} \
       ai.sglang.pr33140.head=${DSV4_0731_SGLANG_PR33140_HEAD} \
       ai.sglang.pr32194.head=${DSV4_0731_SGLANG_PR32194_HEAD} \
       ai.sglang.pr30700.head=${DSV4_0731_SGLANG_PR30700_HEAD} \

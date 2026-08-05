@@ -27,18 +27,28 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "8f2a3ad6d7d68c58ae65b61a75bb2115449addca",
+      "value": "d2c405f19df918c542c6cea9b1ddd59880e1e888",
       "description": "SGLang main commit checked out in the image."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "5be26db1f559064c0f9e724e78c1a8f619754867",
+      "value": "b2b423131b41ef7ce4e458ac7384e49541c46ed6",
       "description": "Tree of the SGLang main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "3c4610a67da960fdff90dbbf35a4a3003d5d3316",
+      "value": "da4365573ba76da34ba91cc650a763d7d2a9a382",
       "description": "Final SGLang tree in the image, after the single source patch."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR29927_HEAD",
+      "value": "21a5bc8e4e05909a7c946d3467561a8e024a108a",
+      "description": "SGLang PR #29927 head included in the source patch."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR33614_HEAD",
+      "value": "56eae704773c168c687603dcb24b40130d1a9594",
+      "description": "SGLang PR #33614 head included in the source patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR33140_HEAD",
@@ -128,11 +138,11 @@
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-refresh.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r4.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "a3f31a76f25c899dc8b00d0082a00be8a6580c94d709cf05868e2e7c65cd6b3b",
-      "description": "SGLang PRs #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, the three local SM120 fixes, and the DSV4/DSV32 tool-schema encoding fix."
+      "sha256": "8753900198d54cfc4074e6282c9297287132b2f115506192899a1eca91e92a81",
+      "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, the three local SM120 fixes, and the DSV4/DSV32 tool-schema encoding fix."
     },
     {
       "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch",
