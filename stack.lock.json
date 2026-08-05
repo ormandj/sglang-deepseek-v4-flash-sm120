@@ -37,7 +37,7 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "da4365573ba76da34ba91cc650a763d7d2a9a382",
+      "value": "b845e816dc7ddd34413834dc7a5b46586b2f5f49",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -96,6 +96,11 @@
       "description": "Local fix: admit SM120 through the all-reduce execution gate for the backend enabled by PR #32330."
     },
     {
+      "arg": "DSV4_0731_SGLANG_ALLREDUCE_TOKEN_CAP_HEAD",
+      "value": "f99f4a0bbc34ca250071a51d1159e76c1a5d2d88",
+      "description": "Local fix: bound the allreduce-only kAllReduce path by the same token cap as the fused path, so prefill-sized all-reduces use NCCL."
+    },
+    {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
       "value": "67f76379a145f19793896394974e29e610cda912",
       "description": "FlashInfer main commit the Python wheel is built from."
@@ -138,11 +143,11 @@
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r4.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r5.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "8753900198d54cfc4074e6282c9297287132b2f115506192899a1eca91e92a81",
-      "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, the three local SM120 fixes, and the DSV4/DSV32 tool-schema encoding fix."
+      "sha256": "034c1214ae90de6ff4684e6a8211065571f65ac18e44eab47264685da6ecf271",
+      "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, four local SM120 fixes, and the DSV4/DSV32 tool-schema encoding fix."
     },
     {
       "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch",

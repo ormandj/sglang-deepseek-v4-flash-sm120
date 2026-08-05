@@ -15,7 +15,7 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
-- SGLang: main `d2c405f1`, plus a single source patch carrying the pinned heads of eight upstream pull requests, three local SM120 fixes, and a local tool-schema encoding fix. The final tree in the image is `da436557`.
+- SGLang: main `d2c405f1`, plus a single source patch carrying the pinned heads of eight upstream pull requests, four local SM120 fixes, and a local tool-schema encoding fix. The final tree in the image is `b845e816`.
 - FlashInfer: main `67f76379` (version `0.6.17.dev20260804`), rebuilt from source with a single patch carrying upstream PRs #4308 and #4309, giving tree `d8567dec`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
@@ -42,6 +42,7 @@ Image-local fixes:
 | SGLang SM120 DeepGEMM capability probe | `d4dc7502` | Enables the SM120 DeepGEMM capability when the required grouped FP4 symbol is installed |
 | SGLang all-reduce prefill workspace | `73d125d0` | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
+| SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
 | SGLang DSV4/DSV32 tool-schema encoding | — | Keeps unset protocol-model defaults (most visibly `strict: false`) out of the rendered DSV4/DSV32 tool schemas, so served prompts match the checkpoint's reference encoder exactly; proposed upstream in SGLang PR #33568 |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
