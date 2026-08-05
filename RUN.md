@@ -50,6 +50,8 @@ It runs the container with `--shm-size 64g`. SGLang's TP workers exchange tensor
 
 The first start compiles the patched SM120 FlashInfer modules and the TileLang and DeepGEMM kernels into `$CACHE_DIR`, so it takes considerably longer than later starts. Subsequent starts with the same image and the same cache directory reuse those artifacts.
 
+The script pins `--chunked-prefill-size 8192`, the value the validated configuration resolves to. Prefill-throughput comparisons against other engines or builds are only meaningful at the same chunk size.
+
 ## Health check
 
 `SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a plain liveness check rather than a generation request:

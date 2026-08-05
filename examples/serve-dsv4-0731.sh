@@ -64,6 +64,7 @@ exec docker run --rm \
   --tensor-parallel-size 2 \
   --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.93 \
+  --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
   --fp8-gemm-backend auto \
