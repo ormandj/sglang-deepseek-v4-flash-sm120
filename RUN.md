@@ -135,42 +135,39 @@ Treat OpenCode and other tool-using coding harnesses as agentic workloads. Use `
   "reasoning_effort": "max",
   "temperature": 1.0,
   "top_p": 0.95,
-  "max_tokens": 70000
+  "max_tokens": 393216
 }
 ```
 
 Use `high` when lower latency is more important than maximum deliberation. DeepSeek's published code-agent evaluation setup used `max`.
 
-## Single-request generation ceiling
+`393216` is the numeric API value for the 384K-token output budget the model card requires at `high`/`max`. Do not lower it: long reasoning chains consume large output budgets, and a smaller `max_tokens` truncates the model mid-reasoning. This is a client-side request limit; the launch command does not impose it.
 
-Although the model card permits up to 384K output tokens at `high`/`max`, this
-deployment cannot generate that much in one request. During decode, SGLang's
-hybrid-SWA accounting holds sliding-window KV for every generated token
-(eviction does not run on this path), so a single request is limited to roughly
-the SWA pool: `swa-full-tokens-ratio (0.1) x max_total_num_tokens`, about
-**77,800 generated tokens** on the validated configuration. At that point the
-scheduler logs `KV cache pool is full. Retract requests.` and the generation is
-aborted. Reproduced exactly at 77,824 tokens (the SWA pool size); the prompt
-length does not count against this limit — prefill accounts SWA differently.
+## Known issue: single-request generation aborts near 78K generated tokens
 
-There is currently no launch configuration that removes the ceiling:
+This deployment currently cannot honor the full 384K output budget in a single
+request. During decode, SGLang's hybrid-SWA accounting holds sliding-window KV
+for every generated token (window eviction does not run on this path), so a
+single request aborts at roughly `swa-full-tokens-ratio (0.1) x
+max_total_num_tokens` — about **77,800 generated tokens** on the validated
+configuration. The scheduler logs `KV cache pool is full. Retract requests.`
+and the generation fails. Reproduced exactly at 77,824 tokens (the SWA pool
+size). Prompt length does not count against this limit; prefill accounts SWA
+correctly (a 131K prompt holds ~8.5K SWA tokens).
 
-- Raising `--swa-full-tokens-ratio` grows the per-request ceiling but shrinks
-  the total pool almost as fast (0.3 gives ~123K per request but only ~411K
-  total; 1.0 gives ~143K both). It never approaches 384K.
+This is a server-side bug, not a model or client limit, and no launch
+configuration currently works around it:
+
+- Raising `--swa-full-tokens-ratio` shrinks the total pool nearly as fast as it
+  raises the ceiling (0.3 gives ~123K per request but ~411K total; 1.0 gives
+  ~143K both) and never approaches 384K.
 - `--disable-hybrid-swa-memory` crashes at startup on this architecture: the
   DSV4 memory pool constructs its SWA pool unconditionally and receives
-  `size=None` (`deepseek_v4_memory_pool.py:602`, `TypeError` in
-  `_create_buffers`).
+  `size=None` (`deepseek_v4_memory_pool.py:602`).
 
-Keep `max_tokens` at or below ~70,000 per request, and split longer work across
-multiple requests. Multi-turn agentic sessions are unaffected as long as no
-single turn generates more than the ceiling; the prompt (including prior turns)
-is limited by the full pool, not the SWA pool.
-
-`max_tokens` is a client-side request limit; the launch command does not impose
-it. Requests must also fit within the server's available context and KV-cache
-capacity.
+Until it is fixed, generations that exceed the ceiling abort rather than
+degrade. Most turns — including long agentic coding turns — finish well under
+it; the abort affects only single turns generating beyond ~78K tokens.
 
 The following is only a deterministic health smoke test. Its `temperature=0` setting is not the model card's recommendation for normal inference:
 
