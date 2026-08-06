@@ -48,6 +48,22 @@ Image-local fixes:
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
+### Reported upstream, patches not yet filed
+
+The runtime settings in [RUN.md](RUN.md) work around three SGLang defaults that
+look wrong on SM120. Upstream changes for these are **TBD**; until they land the
+workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
+
+| Finding | Effect here | Upstream status |
+|---|---|---|
+| The SM120 branch disables both fused MHC pre-norm paths, forcing an eager float32 fallback measured at ~15% of a 128k prefill. The guard predates first-class SM120 support for the DeepGEMM `tf32_hc_prenorm_gemm` kernel | +19.6% prefill at 128k once re-enabled | TBD — the TileLang half of the same guard is justified and should stay (it fails CUDA graph capture on SM120) |
+| `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | Runs the slower top-k transform; no override possible | TBD — gating alone changes no default |
+| DSpark speculative decoding never accumulates presence/frequency/repetition penalties: `eagle_prepare_for_decode` calls `cumulate_penalty_output_tokens`, the dflash-family branch does not | Those sampling penalties are silently inert under DSpark | TBD |
+
+Separately, [sgl-project/sglang#33805](https://github.com/sgl-project/sglang/pull/33805)
+(sliding-window KV eviction on the dflash-family speculative decode path) is
+open; it is already carried in this image as the dspark SWA eviction fix above.
+
 ## Validated configuration
 
 - Hardware: 2× NVIDIA RTX PRO 6000 Blackwell (SM120), TP=2. SM121 is not validated.
