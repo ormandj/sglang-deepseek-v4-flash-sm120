@@ -56,6 +56,7 @@ exec docker run --rm \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
+  --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
@@ -74,7 +75,7 @@ exec docker run --rm \
   --fp8-gemm-backend auto \
   --enable-deepseek-v4-fp4-indexer \
   --speculative-algorithm DSPARK \
-  --speculative-dspark-block-size 5 \
+  --speculative-dspark-block-size 7 \
   --reasoning-parser deepseek-v4 \
   --tool-call-parser deepseekv4 \
   --enable-metrics \

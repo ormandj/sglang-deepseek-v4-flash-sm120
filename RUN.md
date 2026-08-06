@@ -69,6 +69,53 @@ Both indexers make the context-scaled allocation described under KV capacity
 below, so this choice does not affect that requirement. Remove the three
 settings to fall back to the TileLang default.
 
+## Speculative decoding depth
+
+The script passes `--speculative-dspark-block-size 7`, matching the model
+card's own serving example (`num_speculative_tokens: 7`). The checkpoint's
+`config.json` carries `dspark_block_size = 5`, so omitting the flag silently
+selects 5 instead.
+
+That distinction matters on this hardware.
+[sgl-project/sglang#33800](https://github.com/sgl-project/sglang/issues/33800)
+reports DSpark depth 5 corrupting output on SM120 under agentic load —
+repetition loops and `</think>` leakage with a normal `finish_reason` and no
+errors logged — while depths 3, 4, 6 and 7 are clean. The result is
+non-monotonic, so it is not "deeper is worse".
+
+Scoring the pinned GSM8K split five times at depth 5 on the validated
+configuration produced 4 repetition-loop responses with
+`finish_reason=length` in 5,276 requests (0.076%). Depth 7 measured no slower:
+128k prefill 8,029 tok/s and decode 308.4 tok/s, versus 8,034 and 302.7 at
+depth 5.
+
+## Fused MHC pre-norm on SM120
+
+The script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. SGLang's SM120 branch
+disables both fused MHC pre-norm paths, which forces an eager float32
+fallback: a `pow` + float cast + CUDA-core `SGEMM` + `mean` sequence measured
+at 2,893 ms, about 15% of a 128k prefill, attributed by a `with_stack` profile
+to `deepseek_v4.py` `hc_pre_torch_impl`. That guard predates first-class SM120
+support for the DeepGEMM `tf32_hc_prenorm_gemm` kernel, which this image ships.
+
+Re-enabling it measured, on the validated configuration with warmup discarded
+and n=5:
+
+| cell | default | fused pre-norm | delta |
+|---|---:|---:|---|
+| prefill 128k | 6,717 | 8,034 | +19.6% |
+| prefill 64k | 7,601 | 9,055 | +19.1% |
+| decode C1 | 306.0 | 302.7 | within noise |
+
+Activations are bfloat16 on both paths and bfloat16 is exactly representable
+in tf32, so only the float32 mixing weights are truncated; the squared sum and
+the GEMM accumulator stay float32 on both. GSM8K over five runs was
+indistinguishable from the default path.
+
+The other fused path, TileLang MHC pre-norm
+(`SGLANG_OPT_USE_TILELANG_MHC_PRE=1`), fails CUDA graph capture on SM120
+("invalid argument", both TP ranks). Leave it disabled.
+
 ## Health check
 
 `SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a plain liveness check rather than a generation request:
