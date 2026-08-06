@@ -91,15 +91,29 @@ limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
 against both this image and `voipmonitor/vllm` v20 r27 in its documented DSpark
 configuration, same client and same flags:
 
+### Decode: aggregate tokens/second, per-user tokens/second, TTFT p50
+
+| concurrency | SGLang agg | SGLang/user | SGLang TTFT | vLLM agg | vLLM/user | vLLM TTFT |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 177.9 | 177.9 | **0.178 s** | **199.5** | 199.5 | 0.493 s |
+| 2 | 266.1 | 133.0 | **0.178 s** | **291.3** | 145.6 | 0.642 s |
+| 4 | 365.7 | 91.4 | **0.195 s** | **410.7** | 102.7 | 0.835 s |
+| 8 | 520.7 | 65.1 | **0.187 s** | **589.5** | 73.7 | 0.845 s |
+| 16 | 792.9 | 49.6 | **0.197 s** | **821.4** | 51.3 | 0.942 s |
+| 32 | **1,149.2** | 35.9 | **0.205 s** | — | — | — |
+
+vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
+
+### Everything else
+
 | | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
-| decode @ concurrency 1 | 177.9 tok/s | **199.5 tok/s** |
-| decode @ concurrency 32 | **1,149.2 tok/s** | not reachable |
+| prefill @ 8k | 7,317 tok/s | **7,540 tok/s** |
+| prefill @ 64k | 8,312 tok/s | **8,945 tok/s** |
 | prefill @ 128k | 7,712 tok/s | **8,238 tok/s** |
-| **TTFT p50 @ concurrency 1** | **0.178 s** | 0.493 s |
-| **TTFT p50 @ concurrency 16** | **0.197 s** | 0.942 s |
 | GSM8K accuracy | 0.9416 | 0.9393 |
 | **GSM8K wall clock** | **341 s** | 749 s |
+| GSM8K aggregate | **340.7 tok/s** | 159.3 tok/s |
 | draft acceptance | **92.9%** (6.5 of 7) | 37.3% (1.86 of 5) |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
