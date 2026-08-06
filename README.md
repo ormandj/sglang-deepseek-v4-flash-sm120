@@ -83,6 +83,37 @@ Separately, [sgl-project/sglang#33805](https://github.com/sgl-project/sglang/pul
 (sliding-window KV eviction on the dflash-family speculative decode path) is
 open; it is already carried in this image as the dspark SWA eviction fix above.
 
+## Measured performance
+
+On the validated configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
+limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
+[llm-inference-bench](https://github.com/local-inference-lab/llm-inference-bench)
+against both this image and `voipmonitor/vllm` v20 r27 in its documented DSpark
+configuration, same client and same flags:
+
+| | SGLang (this image) | vLLM v20 r27 |
+|---|---:|---:|
+| decode @ concurrency 1 | 177.9 tok/s | **199.5 tok/s** |
+| decode @ concurrency 32 | **1,149.2 tok/s** | not reachable |
+| prefill @ 128k | 7,712 tok/s | **8,238 tok/s** |
+| **TTFT p50 @ concurrency 1** | **0.178 s** | 0.493 s |
+| **TTFT p50 @ concurrency 16** | **0.197 s** | 0.942 s |
+| GSM8K accuracy | 0.9416 | 0.9393 |
+| **GSM8K wall clock** | **341 s** | 749 s |
+| draft acceptance | **92.9%** (6.5 of 7) | 37.3% (1.86 of 5) |
+| **usable context** | **774,656 tokens** | 133,120 tokens |
+| KV cache | **778,496 tokens** | 143,439 tokens |
+
+vLLM leads sustained decode by 7-13% and prefill by 3-8%. SGLang answers 2.8x
+to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half the
+wall clock** at identical accuracy, and serves **5.4x the KV capacity** -- it
+accepts the 384K output budget the model card recommends for `high`/`max`
+reasoning, which vLLM rejects outright at `max_model_len 133120`.
+
+Absolute values are specific to Max-Q cards on PCIe Gen 4; a 600 W card on Gen 5
+has twice the power budget and twice the inter-GPU bandwidth. Full tables,
+methodology, and the KV-capacity analysis are in [RUN.md](RUN.md).
+
 ## Validated configuration
 
 - Hardware: 2× NVIDIA RTX PRO 6000 Blackwell (SM120), TP=2. SM121 is not validated.

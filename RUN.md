@@ -145,6 +145,117 @@ The other fused path, TileLang MHC pre-norm
 (`SGLANG_OPT_USE_TILELANG_MHC_PRE=1`), fails CUDA graph capture on SM120
 ("invalid argument", both TP ranks). Leave it disabled.
 
+## Measured performance and quality
+
+All numbers below were produced on the validated configuration with
+[llm-inference-bench](https://github.com/local-inference-lab/llm-inference-bench)
+(`llm_decode_bench.py`), the same client and the same flags against both
+engines, so the cells compare directly.
+
+**Hardware matters for the absolute values.** These are RTX PRO 6000 Blackwell
+**Max-Q** cards: a 300 W hard limit (not a configurable cap) and **PCIe Gen 4
+x16** (`pcie.link.gen.max = 4`, measured 28.2 GB/s unidirectional peer-to-peer).
+A 600 W card on PCIe Gen 5 has roughly twice the power budget and twice the
+inter-GPU bandwidth, and should be expected to produce higher numbers than
+these on both engines.
+
+The vLLM column is `voipmonitor/vllm:gilded-gnosis-v20-...-r27` in its
+documented DSpark configuration (K=5, b12x-a8 backend, `max_num_seqs 16`,
+`max_num_batched_tokens 8192`, `gpu_memory_utilization 0.975`). Both engines
+were given the same 8192-token batch size, which is the setting that makes
+prefill comparable.
+
+### Decode, aggregate tokens/second
+
+| concurrency | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| 1 | 177.9 | **199.5** |
+| 2 | 266.1 | **291.3** |
+| 4 | 365.7 | **410.7** |
+| 8 | 520.7 | **589.5** |
+| 16 | 792.9 | **821.4** |
+| 32 | **1,149.2** | not reachable (`max_num_seqs 16`) |
+
+### Time to first token, p50 seconds
+
+| concurrency | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| 1 | **0.178** | 0.493 |
+| 4 | **0.195** | 0.835 |
+| 16 | **0.197** | 0.942 |
+| 32 | **0.205** | — |
+
+SGLang answers 2.8x sooner at concurrency 1 and 4.8x sooner at 16, and its
+first-token latency is flat from 1 to 32 concurrent requests (0.178 to 0.205)
+while vLLM's nearly doubles across 1 to 16.
+
+### Prefill, tokens/second
+
+| context | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| 8k | 7,317 | **7,540** |
+| 64k | 8,312 | **8,945** |
+| 128k | 7,712 | **8,238** |
+
+### GSM8K, 1,319 questions, temperature 0, parallel 8
+
+| | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| accuracy | 0.9416 | 0.9393 |
+| wall clock | **341 s** | 749 s |
+| completion tokens | 116,297 | 119,238 |
+| aggregate throughput | **340.7 tok/s** | 159.3 tok/s |
+
+Accuracy is a tie: three questions apart, well inside this stack's run-to-run
+variance. Scoring the same split five times on one engine spanned 0.9363 to
+0.9401, and 64 of the 116 questions that were ever wrong changed answer between
+runs, so differences below roughly 0.4 points are not resolvable without
+replicates.
+
+Throughput on this workload is not a tie. The suite is 1,319 short requests
+averaging 88 output tokens, so total time is dominated by per-request latency
+rather than sustained token rate, and SGLang finishes **2.2x sooner**. This is
+the regime most agentic and coding traffic falls into, and it inverts the
+sustained-decode ranking above.
+
+### Speculative decoding
+
+| | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| draft tokens attempted | 7 | 5 |
+| acceptance rate | **92.9%** | 37.3% |
+| mean accepted per draft | **6.5** | 1.86 |
+
+vLLM's per-position acceptance falls off steeply (21,427 / 14,511 / 8,992 /
+5,273 / 2,960 across the five draft positions), which is why its own
+documentation finds K=5 outperforming K=7. SGLang's drafts land almost always,
+so the wider draft continues to pay.
+
+### Context and KV capacity
+
+| | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| KV cache | **778,496 tokens** | 143,439 tokens |
+| usable context | **774,656** | 133,120 |
+| concurrency at full context | 48 requests | 1.08x |
+| accepts `max_tokens=393216` | yes | **no, HTTP 400** |
+
+This is the largest difference between the two and it is a memory result, not a
+configuration preference. vLLM reports `Available KV cache memory: 7.95 GiB` and
+`GPU KV cache size: 143,439 tokens` at startup, and at `max_model_len 133120`
+its own log states `Maximum concurrency for 133,120 tokens per request: 1.08x`
+-- one full-length request very nearly exhausts the pool. Requesting the 384K
+output budget the model card recommends for `high`/`max` reasoning is rejected:
+
+```
+max_tokens=393216 cannot be greater than max_model_len=max_total_tokens=133120
+```
+
+SGLang reaches 5.4x the KV capacity on the same two cards through FP8 KV cache
+(half the bytes per token) and hybrid sliding-window memory, which sizes the
+SWA pool at a fraction of the full-attention pool rather than giving every layer
+full-size KV.
+
 ## Health check
 
 `SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a plain liveness check rather than a generation request:
