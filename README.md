@@ -15,7 +15,7 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
-- SGLang: main `d2c405f1`, plus a single source patch carrying the pinned heads of nine upstream pull requests, five local fixes, and a local tool-schema encoding fix. The final tree in the image is `85d0a01a`.
+- SGLang: main `4ad990ba`, plus a single source patch carrying the pinned heads of eight upstream pull requests, five local fixes, and a local tool-schema encoding fix. The final tree in the image is `d62dbaf3`.
 - FlashInfer: main `67f76379` (version `0.6.17.dev20260804`), rebuilt from source with a single patch carrying upstream PRs #4308 and #4309, giving tree `d8567dec`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
@@ -27,14 +27,32 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | SGLang PR #29927 | `21a5bc8e` | Complete SM120 DSV4 stack: DeepGEMM paged-MQA indexer, batched sparse-MLA prefill, and FP4 MoE. On this hardware it raises both prefill throughput and speculative acceptance length |
 | SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. At block size 7 the verify width is 8, so the planner rewrote only part of the window and compressed attention state was polluted every 4 tokens. Long single-file code generation went from 0/8 to 14/14 complete (closed code fence plus `node --check`), greedy 0/1 to 3/3, and decode rose from 237.5 to 319.8 tok/s with accept length 4.04 to 5.5 |
 | SGLang PR #33614 | `56eae704` | Keeps DSpark speculative sampling state identical across TP ranks |
-| SGLang PR #33140 | `a580251a` | Official DSV4 reasoning-effort support |
 | SGLang PR #32194 | `f8fac391` | Skip unused DSV4 draft metadata in speculative decoding |
-| SGLang PR #30700 | `c2439af9` | FlashInfer all-reduce-only dispatch and auto-enable |
+| SGLang PR #30700 | `aead319d` | FlashInfer all-reduce-only dispatch and auto-enable |
 | SGLang PR #32330 | `f330c748` | FlashInfer TRT-LLM all-reduce on SM12X; rebased with an mnnvl preflight multicast-granularity fix (trtllm still skips the multicast query, which fails on SM120) |
 | SGLang PR #32686 | `15c0902e` | DeepGEMM warmup: pick the largest warmup `M` that fits the memory budget |
 | SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
 | FlashInfer PR #4308 | `4ec7f230` | Makes the fused-MoE profiler's MXFP8 × MXFP4 quantization state match the runtime path, so autotuning stays enabled |
 | FlashInfer PR #4309 | `bf136350` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels |
+
+Every carried pull request, its owner, and when we can drop it:
+
+| Source | Pinned head | Owner | Drops when |
+|---|---|---|---|
+| SGLang PR #29927 | `21a5bc8e` | AliceChenyy | merged |
+| SGLang PR #33614 | `56eae704` | JackZeng0208 | merged |
+| SGLang PR #32194 | `f8fac391` | mattteochen | merged |
+| SGLang PR #30700 | `aead319d` | wenscarl | merged |
+| SGLang PR #32330 | `f330c748` | ormandj | merged |
+| SGLang PR #32686 | `15c0902e` | ormandj | merged |
+| SGLang PR #32815 | `1dbf09f6` | ormandj | merged |
+| SGLang PR #32183 | `22ef4312` | slchenchn | merged |
+| FlashInfer PR #4308 | `4ec7f230` | — | merged |
+| FlashInfer PR #4309 | `bf136350` | — | merged |
+
+SGLang PR #33140 (official DSV4 reasoning-effort support) was carried until it
+merged upstream as `059269594c`; it is present in this base and no longer
+patched in.
 
 Image-local fixes:
 

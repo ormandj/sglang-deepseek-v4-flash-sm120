@@ -15,15 +15,14 @@
 # checks against this file and against the patch bytes.
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86@sha256:687efca081e85f4e3126456ff389b1af515fc08a604de4c61f947f531963aba7
 ARG DSV4_0731_SGLANG_BASE_HEAD=12eadf86f12aec2e6f81a6e38b61b964a4c6b529
-ARG DSV4_0731_SGLANG_MAIN_HEAD=d2c405f19df918c542c6cea9b1ddd59880e1e888
-ARG DSV4_0731_SGLANG_MAIN_TREE=b2b423131b41ef7ce4e458ac7384e49541c46ed6
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=85d0a01ab4163c7703654fcdcecff4b3ffa5ee6e
+ARG DSV4_0731_SGLANG_MAIN_HEAD=4ad990ba7d75bb9f948f5f6bd8d79a66b5d3fd63
+ARG DSV4_0731_SGLANG_MAIN_TREE=671cb86de1275cfc17a4f48c5cea5bf86d3c82d6
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=d62dbaf3bb1dd402b0f08185248a15a78c7377b2
 ARG DSV4_0731_SGLANG_PR29927_HEAD=21a5bc8e4e05909a7c946d3467561a8e024a108a
 ARG DSV4_0731_SGLANG_PR32183_HEAD=22ef431215b1d8529eaebd8e8c6de9510390afaf
 ARG DSV4_0731_SGLANG_PR33614_HEAD=56eae704773c168c687603dcb24b40130d1a9594
-ARG DSV4_0731_SGLANG_PR33140_HEAD=a580251a16cfad47e8f97a535f9aab7d1f01477b
 ARG DSV4_0731_SGLANG_PR32194_HEAD=f8fac3913dbfbbc9048692d79de3587d226fa421
-ARG DSV4_0731_SGLANG_PR30700_HEAD=c2439af9c47c25a0eeea2ee6f0b98094a70c9b70
+ARG DSV4_0731_SGLANG_PR30700_HEAD=aead319d06c7a2ab2a21e575000fcdaea7c17675
 ARG DSV4_0731_SGLANG_PR32330_HEAD=f330c748ade470e806347f24dffae4eec38eb878
 ARG DSV4_0731_SGLANG_PR32686_HEAD=15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b
 ARG DSV4_0731_SGLANG_PR32815_HEAD=1dbf09f6e0157279f5350357d0309397f0257025
@@ -49,7 +48,6 @@ ARG DSV4_0731_SGLANG_EFFECTIVE_TREE
 ARG DSV4_0731_SGLANG_PR29927_HEAD
 ARG DSV4_0731_SGLANG_PR32183_HEAD
 ARG DSV4_0731_SGLANG_PR33614_HEAD
-ARG DSV4_0731_SGLANG_PR33140_HEAD
 ARG DSV4_0731_SGLANG_PR32194_HEAD
 ARG DSV4_0731_SGLANG_PR30700_HEAD
 ARG DSV4_0731_SGLANG_PR32330_HEAD
@@ -69,7 +67,7 @@ ARG DSV4_0731_FLASHINFER_VERSION
 ARG DSV4_0731_FLASHINFER_CUBIN_URL
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
 
-COPY patches/sglang/0001-sglang-dsv4-0731-perf-r7.patch /tmp/sglang-perf-r7.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-perf-r8.patch /tmp/sglang-perf-r8.patch
 # The tree check pins the single source patch: the pinned PR heads, the four
 # local fixes, and the tool-schema encoding fix, applied as one diff.
 RUN set -e; cd /sgl-workspace/sglang; \
@@ -78,7 +76,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
     git reset --hard "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD)" = "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD^{tree})" = "${DSV4_0731_SGLANG_MAIN_TREE}"; \
-    git apply --index --binary /tmp/sglang-perf-r7.patch; \
+    git apply --index --binary /tmp/sglang-perf-r8.patch; \
     test "$(git write-tree)" = "${DSV4_0731_SGLANG_EFFECTIVE_TREE}"; \
     uv run --no-project python -m compileall -q \
       python/sglang/srt/arg_groups/overrides.py \
@@ -98,7 +96,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       test/registered/unit/layers/test_layer_communicator_fusion_gate.py \
       test/registered/unit/model_loader/test_deepgemm_sm120.py \
       test/registered/unit/test_model_overrides.py; \
-    rm /tmp/sglang-perf-r7.patch
+    rm /tmp/sglang-perf-r8.patch
 
 COPY patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch /tmp/flashinfer-perf-refresh.patch
 # SOURCE_DATE_EPOCH comes from the checked-out commit so the wheel build is
@@ -161,7 +159,6 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.pr29927.head=${DSV4_0731_SGLANG_PR29927_HEAD} \
       ai.sglang.pr32183.head=${DSV4_0731_SGLANG_PR32183_HEAD} \
       ai.sglang.pr33614.head=${DSV4_0731_SGLANG_PR33614_HEAD} \
-      ai.sglang.pr33140.head=${DSV4_0731_SGLANG_PR33140_HEAD} \
       ai.sglang.pr32194.head=${DSV4_0731_SGLANG_PR32194_HEAD} \
       ai.sglang.pr30700.head=${DSV4_0731_SGLANG_PR30700_HEAD} \
       ai.sglang.pr32330.head=${DSV4_0731_SGLANG_PR32330_HEAD} \

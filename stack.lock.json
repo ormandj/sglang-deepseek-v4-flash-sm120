@@ -27,17 +27,17 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "d2c405f19df918c542c6cea9b1ddd59880e1e888",
+      "value": "4ad990ba7d75bb9f948f5f6bd8d79a66b5d3fd63",
       "description": "SGLang main commit checked out in the image."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "b2b423131b41ef7ce4e458ac7384e49541c46ed6",
+      "value": "671cb86de1275cfc17a4f48c5cea5bf86d3c82d6",
       "description": "Tree of the SGLang main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "85d0a01ab4163c7703654fcdcecff4b3ffa5ee6e",
+      "value": "d62dbaf3bb1dd402b0f08185248a15a78c7377b2",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -56,18 +56,13 @@
       "description": "SGLang PR #33614 head included in the source patch."
     },
     {
-      "arg": "DSV4_0731_SGLANG_PR33140_HEAD",
-      "value": "a580251a16cfad47e8f97a535f9aab7d1f01477b",
-      "description": "SGLang PR #33140 head included in the source patch."
-    },
-    {
       "arg": "DSV4_0731_SGLANG_PR32194_HEAD",
       "value": "f8fac3913dbfbbc9048692d79de3587d226fa421",
       "description": "SGLang PR #32194 head included in the source patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR30700_HEAD",
-      "value": "c2439af9c47c25a0eeea2ee6f0b98094a70c9b70",
+      "value": "aead319d06c7a2ab2a21e575000fcdaea7c17675",
       "description": "SGLang PR #30700 head included in the source patch."
     },
     {
@@ -153,10 +148,10 @@
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r7.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r8.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "524e27893a452e056f706f118f904aa511f0bad5ca9b1772ea923b388b3fb9ac",
+      "sha256": "8f6925f4920a497a95afdc0538cf3d909d59c4e605f52ca7691edd0cb1db6556",
       "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, five local fixes, and the DSV4/DSV32 tool-schema encoding fix."
     },
     {
