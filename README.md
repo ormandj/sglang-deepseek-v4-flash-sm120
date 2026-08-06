@@ -117,6 +117,7 @@ vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 | draft acceptance | **92.9%** (6.5 of 7) | 37.3% (1.86 of 5) |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
+| concurrent 128k requests in KV | **5.9** | 1.1 |
 
 vLLM leads sustained decode by 7-13% and prefill by 3-8%. SGLang answers 2.8x
 to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half the

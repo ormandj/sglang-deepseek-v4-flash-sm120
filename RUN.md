@@ -239,14 +239,21 @@ so the wider draft continues to pay.
 |---|---:|---:|
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | usable context | **774,656** | 133,120 |
-| concurrency at full context | 48 requests | 1.08x |
+| concurrent requests at 32k each | **23.8** | 4.4 |
+| concurrent requests at 64k each | **11.9** | 2.2 |
+| concurrent requests at 128k each | **5.9** | 1.1 |
 | accepts `max_tokens=393216` | yes | **no, HTTP 400** |
 
 This is the largest difference between the two and it is a memory result, not a
 configuration preference. vLLM reports `Available KV cache memory: 7.95 GiB` and
 `GPU KV cache size: 143,439 tokens` at startup, and at `max_model_len 133120`
 its own log states `Maximum concurrency for 133,120 tokens per request: 1.08x`
--- one full-length request very nearly exhausts the pool. Requesting the 384K
+-- one full-length request very nearly exhausts the pool. The concurrency rows
+above divide each engine's KV pool by a common per-request context so the two
+are comparable; they are not scheduler limits. SGLang's scheduler is separately
+capped at 48 running requests by `--max-running-requests`, and vLLM's at 16 by
+`max_num_seqs`, so short-request concurrency is bounded by those settings rather
+than by KV capacity. Requesting the 384K
 output budget the model card recommends for `high`/`max` reasoning is rejected:
 
 ```
