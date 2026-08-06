@@ -37,13 +37,18 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "0491c1f43351a7d4d25a466cb9c12fbc235d2b9f",
+      "value": "85d0a01ab4163c7703654fcdcecff4b3ffa5ee6e",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR29927_HEAD",
       "value": "21a5bc8e4e05909a7c946d3467561a8e024a108a",
       "description": "SGLang PR #29927 head included in the source patch."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR32183_HEAD",
+      "value": "22ef431215b1d8529eaebd8e8c6de9510390afaf",
+      "description": "sgl-project/sglang#32183: propagate the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded kMaxMTPDraftTokens = 4 rewrite window."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR33614_HEAD",
@@ -148,10 +153,10 @@
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r6.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r7.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "afc677bacbfd76509134a0410c1f74ec550f8c978945f2702cdcfc5785b31562",
+      "sha256": "524e27893a452e056f706f118f904aa511f0bad5ca9b1772ea923b388b3fb9ac",
       "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, five local fixes, and the DSV4/DSV32 tool-schema encoding fix."
     },
     {

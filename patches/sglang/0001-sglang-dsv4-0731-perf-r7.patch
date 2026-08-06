@@ -24,6 +24,53 @@ index 619e5af522..1161504445 100644
        <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.02)"}}><code>""</code></td>
      </tr>
      <tr>
+diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
+index c86b921354..484cb66393 100644
+--- a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
++++ b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
+@@ -448,6 +448,8 @@ using PrefillPlan = tvm::ffi::Tuple<tvm::ffi::Tensor, tvm::ffi::Tensor>;
+  * @param compress_plan     `[num_q_tokens, 16]` uint8 (output)
+  * @param write_plan        `[num_q_tokens,  8]` uint8 (output)
+  * @param compress_ratio 4 for c4, 128 for c128
++ * @param verify_width Number of verifier rows that must be rewritten; 0 keeps
++ *                     the default prefill behavior
+  * @param use_cuda_graph Whether the plans will be used with cuda graph (affects padding)
+  * @return (compress plan tensor, write plan tensor)
+  */
+@@ -462,6 +464,7 @@ inline PrefillPlan plan_compress_prefill(
+     const int32_t compress_ratio,
+     const int32_t swa_page_size,
+     const int32_t ring_size,
++    const int32_t verify_width,
+     const bool use_cuda_graph) {
+   auto B = SymbolicSize{"batch_size"};
+   auto N = SymbolicSize{"num_q_tokens"};
+@@ -507,12 +510,13 @@ inline PrefillPlan plan_compress_prefill(
+   RuntimeCheck(batch_size <= num_q_tokens && num_q_tokens <= kMaxTokens);
+   // `swa_page_size` >= `ring_size` >= `compress_ratio`
+   RuntimeCheck(swa_page_size % ring_size == 0 && ring_size % compress_ratio == 0);
++  RuntimeCheck(0 <= verify_width && verify_width <= ring_size - compress_ratio);
+ 
+   const auto device = device_.unwrap();
+   const auto stream = LaunchKernel::resolve_device(device);
+ 
+   constexpr int32_t kMaxMTPDraftTokens = 4;
+-  const auto mtp_pad = std::min(ring_size - compress_ratio, kMaxMTPDraftTokens);
++  const auto mtp_pad = verify_width > 0 ? verify_width : std::min(ring_size - compress_ratio, kMaxMTPDraftTokens);
+ 
+   if (cpu_or_gpu.unwrap().device_type == kDLGPU) {
+     // GPU input path: kernel0 builds the (CPU-loop-equivalent) plan metadata directly
+@@ -573,7 +577,9 @@ inline PrefillPlan plan_compress_prefill(
+     const int32_t extend_len = ext_ptr[i];
+     const int32_t prefix_len = seq_len - extend_len;
+     const int32_t last_c_pos = seq_len / compress_ratio * compress_ratio;
+-    const int32_t first_w_pos = last_c_pos - (is_overlap ? compress_ratio : 0);
++    const int32_t default_first_w_pos = last_c_pos - (is_overlap ? compress_ratio : 0);
++    const int32_t first_w_pos =
++        verify_width > 0 ? std::min(default_first_w_pos, seq_len - verify_width) : default_first_w_pos;
+     RuntimeCheck(0 < extend_len && extend_len <= seq_len);
+     const auto should_write = [=](int32_t position) {
+       if (position >= first_w_pos) return true;
 diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
 index 38be975558..7d72816127 100644
 --- a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
@@ -96,6 +143,39 @@ index 38be975558..7d72816127 100644
      const auto smem = use_smem ? (batch_size + 1) * sizeof(uint32_t) : 0;
      LaunchKernel(1, kBlockSize, device.unwrap(), smem)(kernel, params);
    }
+diff --git a/python/sglang/kernels/ops/attention/dsv4/compress.py b/python/sglang/kernels/ops/attention/dsv4/compress.py
+index bb3540076a..2abd28bf79 100644
+--- a/python/sglang/kernels/ops/attention/dsv4/compress.py
++++ b/python/sglang/kernels/ops/attention/dsv4/compress.py
+@@ -247,6 +247,7 @@ class CompressorPrefillPlan(NamedTuple):
+         ring_size: int,
+         num_q_tokens: int,
+         use_cuda_graph: bool = False,
++        verify_width: int = 0,
+     ) -> CompressorPrefillPlan:
+         is_gpu_input = seq_lens.device.type in ["cuda", "xpu"]
+         pin_buffer = torch.empty(
+@@ -274,7 +275,7 @@ class CompressorPrefillPlan(NamedTuple):
+             module = _jit_compress_plan_module()
+             fn = module.plan_prefill
+ 
+-        plan_c, plan_w = fn(
++        plan_args = (
+             req_pool_indices,
+             req_to_token,
+             full_to_state,
+@@ -285,8 +286,10 @@ class CompressorPrefillPlan(NamedTuple):
+             int(compress_ratio),
+             int(swa_page_size),
+             int(ring_size),
+-            bool(use_cuda_graph),
+         )
++        if not _is_xpu:
++            plan_args += (int(verify_width),)
++        plan_c, plan_w = fn(*plan_args, bool(use_cuda_graph))
+         return CompressorPrefillPlan(
+             compress_ratio,
+             torch.from_dlpack(plan_c) if not _is_xpu else plan_c,
 diff --git a/python/sglang/kernels/ops/attention/flash_mla_sm120.py b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 index ec43c55089..5ad6e13d09 100644
 --- a/python/sglang/kernels/ops/attention/flash_mla_sm120.py
@@ -918,10 +998,27 @@ index 820d0b3626..15209060e2 100644
      # Quantize the SWA fp8 KV cache from bf16-rounded values (matches
      # trainer-side QAT and the DSA-CP path) instead of fp32 registers.
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-index f85b3bfc67..aafcda5242 100644
+index f85b3bfc67..49b1295868 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 +++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-@@ -679,15 +679,39 @@ class DeepseekV4AttnBackend(
+@@ -562,13 +562,14 @@ class DeepseekV4AttnBackend(
+         self.online_c128_mtp = OnlineC128MTPController(self)
+         self.sparse_prefill_workspace = SparsePrefillWorkspace(self.device)
+         spec_alg = model_runner.spec_algorithm
+-        self.needs_cpu_seq_lens = not spec_alg.is_dspark() and (
++        self.is_dspark = spec_alg.is_dspark()
++        self.needs_cpu_seq_lens = not self.is_dspark and (
+             not _is_cuda
+             or not envs.SGLANG_PREP_IN_CUDA_GRAPH.get()
+             or self.online_c128_mtp.enabled()
+         )
+ 
+-        self.is_dspark_draft = model_runner.is_draft_worker and spec_alg.is_dspark()
++        self.is_dspark_draft = model_runner.is_draft_worker and self.is_dspark
+         self.is_draft_runner = model_runner.is_draft_worker
+         self._verify_mask = None
+ 
+@@ -679,15 +680,39 @@ class DeepseekV4AttnBackend(
                  out_cache_loc=out_cache_loc,
              )
  
@@ -963,7 +1060,47 @@ index f85b3bfc67..aafcda5242 100644
          indexer_metadata = self.init_forward_metadata_indexer(core_attn_metadata)
  
          create = functools.partial(
-@@ -1024,34 +1048,11 @@ class DeepseekV4AttnBackend(
+@@ -721,6 +746,7 @@ class DeepseekV4AttnBackend(
+         use_prefill_cuda_graph: bool = False,
+         online_c128_state_slot_offset: int = 0,
+         dspark_block_size: Optional[int] = None,
++        verify_width: int = 0,
+     ) -> DSV4Metadata:
+         seq_lens_casual, req_pool_indices_repeated = self.expand_prefill_casually(
+             num_tokens=num_tokens,
+@@ -774,6 +800,7 @@ class DeepseekV4AttnBackend(
+                         extend_lens_cpu=None,
+                         use_prefill_cuda_graph=True,
+                         num_q_tokens=out_cache_loc.shape[0],
++                        verify_width=verify_width,
+                         online_state_slot_offset=online_c128_state_slot_offset,
+                     )
+                 return create_paged_compressor_data(
+@@ -787,6 +814,7 @@ class DeepseekV4AttnBackend(
+                     extend_lens=extend_seq_lens,
+                     extend_lens_cpu=extend_seq_lens_cpu,
+                     use_prefill_cuda_graph=use_graph_plan,
++                    verify_width=verify_width,
+                     online_state_slot_offset=online_c128_state_slot_offset,
+                 )
+ 
+@@ -912,6 +940,7 @@ class DeepseekV4AttnBackend(
+             need_compress=True,
+             use_prefill_cuda_graph=use_prefill_cuda_graph,
+             online_c128_state_slot_offset=online_c128_state_slot_offset,
++            verify_width=(self.speculative_num_draft_tokens if self.is_dspark else 0),
+         )
+ 
+     def init_forward_metadata_dspark_draft_block(
+@@ -1008,6 +1037,7 @@ class DeepseekV4AttnBackend(
+             extend_lens_cpu=None,
+             use_prefill_cuda_graph=True,
+             num_q_tokens=num_q_tokens,
++            verify_width=(self.speculative_num_draft_tokens if self.is_dspark else 0),
+             online_state_slot_offset=online_c128_state_slot_offset,
+         )
+         c128_compress_metadata = raw_metadata.c128_compress_metadata
+@@ -1024,34 +1054,11 @@ class DeepseekV4AttnBackend(
          self,
          raw_metadata: DSV4RawDecodeMetadata,
      ) -> DSV4Metadata:
@@ -1002,7 +1139,7 @@ index f85b3bfc67..aafcda5242 100644
          )
  
      def init_forward_metadata_draft_extend(
-@@ -1552,8 +1553,10 @@ class DeepseekV4AttnBackend(
+@@ -1552,8 +1559,10 @@ class DeepseekV4AttnBackend(
          ):
              core = metadata.core_attn_metadata
              core.c1_flashmla_metadata = _create_flashmla_metadata()
@@ -1015,7 +1152,7 @@ index f85b3bfc67..aafcda5242 100644
  
          # PREP_IN_CUDA_GRAPH=True: warmup upgraded raw->full on the host;
          # restore raw so capture re-runs the upgrade inside the graph.
-@@ -1617,6 +1620,11 @@ class DeepseekV4AttnBackend(
+@@ -1617,6 +1626,11 @@ class DeepseekV4AttnBackend(
          attn_sink: Optional[torch.Tensor] = None,
          **_,
      ) -> torch.Tensor:
@@ -1027,7 +1164,7 @@ index f85b3bfc67..aafcda5242 100644
          if self.mtp_enabled and forward_batch.forward_mode.is_idle():
              return q.new_empty(q.shape[0], q.shape[1], layer.v_head_dim)
  
-@@ -1719,9 +1727,21 @@ class DeepseekV4AttnBackend(
+@@ -1719,9 +1733,21 @@ class DeepseekV4AttnBackend(
  
              if _is_sm120:
                  from sglang.kernels.ops.attention.flash_mla_sm120 import (
@@ -1049,7 +1186,7 @@ index f85b3bfc67..aafcda5242 100644
                  o = flash_mla_with_kvcache_sm120(
                      q=q,
                      k_cache=swa_k_cache,
-@@ -2059,8 +2079,8 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+@@ -2059,8 +2085,8 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
              )
  
      def init_forward_metadata_in_graph(self, forward_batch: ForwardBatch) -> None:
@@ -1060,7 +1197,7 @@ index f85b3bfc67..aafcda5242 100644
  
      def init_forward_metadata_out_graph(
          self,
-@@ -2088,7 +2108,7 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+@@ -2088,7 +2114,7 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
              spec_info=forward_batch.spec_info,
          )
          if in_capture:
@@ -1069,6 +1206,26 @@ index f85b3bfc67..aafcda5242 100644
                  self.attn_backends[i].init_forward_metadata_out_graph(
                      inner_fb, in_capture=True
                  )
+diff --git a/python/sglang/srt/layers/attention/dsv4/compressor_v2.py b/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
+index c70843a48b..33af7f180d 100644
+--- a/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
++++ b/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
+@@ -413,6 +413,7 @@ def create_paged_compressor_data(
+     extend_lens_cpu: Optional[List[int]] = None,
+     use_prefill_cuda_graph: bool = False,
+     num_q_tokens: Optional[int] = None,
++    verify_width: int = 0,
+     online_state_slot_offset: int = 0,
+ ) -> CompressMetadata:
+     """Build the paged compress metadata (= the plan).
+@@ -464,6 +465,7 @@ def create_paged_compressor_data(
+             swa_page_size=swa_page_size,
+             ring_size=ring_size,
+             num_q_tokens=num_q_tokens,
++            verify_width=verify_width,
+             use_cuda_graph=use_prefill_cuda_graph,
+         )
+     else:
 diff --git a/python/sglang/srt/layers/attention/dsv4/indexer.py b/python/sglang/srt/layers/attention/dsv4/indexer.py
 index f596caade6..6a637681ca 100644
 --- a/python/sglang/srt/layers/attention/dsv4/indexer.py
@@ -2937,6 +3094,75 @@ index afc19f73e1..be34b3d9cf 100644
  class TestDSV4BreakableCudaGraphMetadataContract(CustomTestCase):
      """CPU-only checks for the DSV4 BCG metadata replay contract."""
  
+diff --git a/test/registered/kernels/ops/attention/test_c4_v2.py b/test/registered/kernels/ops/attention/test_c4_v2.py
+index f05aaa9039..03a3785140 100644
+--- a/test/registered/kernels/ops/attention/test_c4_v2.py
++++ b/test/registered/kernels/ops/attention/test_c4_v2.py
+@@ -7,7 +7,10 @@ import pytest
+ import torch
+ import triton
+ 
+-from sglang.kernels.ops.attention.dsv4 import compress_forward
++from sglang.kernels.ops.attention.dsv4 import (
++    CompressorPrefillPlan,
++    compress_forward,
++)
+ from sglang.srt.utils import get_device
+ from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
+ from sglang.test.kernels.deepseek_v4.common import (
+@@ -122,6 +125,52 @@ def _make_inputs(
+ # -----------------------------------------------------------------------------
+ 
+ 
++@pytest.mark.parametrize(
++    "verify_width",
++    [
++        pytest.param(2, id="minimum"),
++        pytest.param(4, id="legacy-limit"),
++        pytest.param(5, id="first-over-limit"),
++        pytest.param(8, id="default"),
++        pytest.param(12, id="ring-capacity"),
++    ],
++)
++@pytest.mark.parametrize("planner_on_device", [False, True], ids=["cpu", "gpu"])
++def test_paged_prefill_dspark_rewrites_full_verify_window(
++    planner_on_device: bool,
++    verify_width: int,
++) -> None:
++    """Every valid DSpark verify width must be present in the write plan."""
++    ctx = make_paged_context(bs=1, compress_ratio=RATIO, ring_size=16)
++    seq_lens = torch.tensor([100], dtype=torch.int64)
++    extend_lens = torch.tensor([verify_width], dtype=torch.int64)
++    if planner_on_device:
++        seq_lens = seq_lens.to(get_device())
++        extend_lens = extend_lens.to(get_device())
++
++    plan = CompressorPrefillPlan.generate(
++        compress_ratio=RATIO,
++        req_pool_indices=ctx.req_pool_indices,
++        seq_lens=seq_lens,
++        extend_lens=extend_lens,
++        req_to_token=ctx.req_to_token,
++        full_to_state=ctx.full_to_swa,
++        swa_page_size=ctx.swa_page_size,
++        ring_size=ctx.ring_size,
++        num_q_tokens=verify_width,
++        verify_width=verify_width,
++    )
++
++    packed_ragged_ids = plan.plan_w.view(torch.int32)[:, 0]
++    ragged_ids = (packed_ragged_ids & 0xFFFF).cpu()
++    torch.testing.assert_close(
++        ragged_ids,
++        torch.arange(verify_width, dtype=torch.int32),
++        rtol=0,
++        atol=0,
++    )
++
++
+ @pytest.mark.parametrize("mode", ["legacy", "paged"])
+ @pytest.mark.parametrize("seq_len", [4, 8, 32, 256, 1024])
+ def test_prefill_no_context(mode: str, seq_len: int) -> None:
 diff --git a/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 new file mode 100644
 index 0000000000..5aee3f4dcc

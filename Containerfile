@@ -17,8 +17,9 @@ ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86@sha
 ARG DSV4_0731_SGLANG_BASE_HEAD=12eadf86f12aec2e6f81a6e38b61b964a4c6b529
 ARG DSV4_0731_SGLANG_MAIN_HEAD=d2c405f19df918c542c6cea9b1ddd59880e1e888
 ARG DSV4_0731_SGLANG_MAIN_TREE=b2b423131b41ef7ce4e458ac7384e49541c46ed6
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=0491c1f43351a7d4d25a466cb9c12fbc235d2b9f
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=85d0a01ab4163c7703654fcdcecff4b3ffa5ee6e
 ARG DSV4_0731_SGLANG_PR29927_HEAD=21a5bc8e4e05909a7c946d3467561a8e024a108a
+ARG DSV4_0731_SGLANG_PR32183_HEAD=22ef431215b1d8529eaebd8e8c6de9510390afaf
 ARG DSV4_0731_SGLANG_PR33614_HEAD=56eae704773c168c687603dcb24b40130d1a9594
 ARG DSV4_0731_SGLANG_PR33140_HEAD=a580251a16cfad47e8f97a535f9aab7d1f01477b
 ARG DSV4_0731_SGLANG_PR32194_HEAD=f8fac3913dbfbbc9048692d79de3587d226fa421
@@ -46,6 +47,7 @@ ARG DSV4_0731_SGLANG_MAIN_HEAD
 ARG DSV4_0731_SGLANG_MAIN_TREE
 ARG DSV4_0731_SGLANG_EFFECTIVE_TREE
 ARG DSV4_0731_SGLANG_PR29927_HEAD
+ARG DSV4_0731_SGLANG_PR32183_HEAD
 ARG DSV4_0731_SGLANG_PR33614_HEAD
 ARG DSV4_0731_SGLANG_PR33140_HEAD
 ARG DSV4_0731_SGLANG_PR32194_HEAD
@@ -67,7 +69,7 @@ ARG DSV4_0731_FLASHINFER_VERSION
 ARG DSV4_0731_FLASHINFER_CUBIN_URL
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
 
-COPY patches/sglang/0001-sglang-dsv4-0731-perf-r6.patch /tmp/sglang-perf-r6.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-perf-r7.patch /tmp/sglang-perf-r7.patch
 # The tree check pins the single source patch: the pinned PR heads, the four
 # local fixes, and the tool-schema encoding fix, applied as one diff.
 RUN set -e; cd /sgl-workspace/sglang; \
@@ -76,7 +78,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
     git reset --hard "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD)" = "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD^{tree})" = "${DSV4_0731_SGLANG_MAIN_TREE}"; \
-    git apply --index --binary /tmp/sglang-perf-r6.patch; \
+    git apply --index --binary /tmp/sglang-perf-r7.patch; \
     test "$(git write-tree)" = "${DSV4_0731_SGLANG_EFFECTIVE_TREE}"; \
     uv run --no-project python -m compileall -q \
       python/sglang/srt/arg_groups/overrides.py \
@@ -96,7 +98,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       test/registered/unit/layers/test_layer_communicator_fusion_gate.py \
       test/registered/unit/model_loader/test_deepgemm_sm120.py \
       test/registered/unit/test_model_overrides.py; \
-    rm /tmp/sglang-perf-r6.patch
+    rm /tmp/sglang-perf-r7.patch
 
 COPY patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch /tmp/flashinfer-perf-refresh.patch
 # SOURCE_DATE_EPOCH comes from the checked-out commit so the wheel build is
@@ -157,6 +159,7 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.main.tree=${DSV4_0731_SGLANG_MAIN_TREE} \
       ai.sglang.effective.tree=${DSV4_0731_SGLANG_EFFECTIVE_TREE} \
       ai.sglang.pr29927.head=${DSV4_0731_SGLANG_PR29927_HEAD} \
+      ai.sglang.pr32183.head=${DSV4_0731_SGLANG_PR32183_HEAD} \
       ai.sglang.pr33614.head=${DSV4_0731_SGLANG_PR33614_HEAD} \
       ai.sglang.pr33140.head=${DSV4_0731_SGLANG_PR33140_HEAD} \
       ai.sglang.pr32194.head=${DSV4_0731_SGLANG_PR32194_HEAD} \

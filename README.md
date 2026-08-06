@@ -15,7 +15,7 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
-- SGLang: main `d2c405f1`, plus a single source patch carrying the pinned heads of eight upstream pull requests, five local fixes, and a local tool-schema encoding fix. The final tree in the image is `0491c1f4`.
+- SGLang: main `d2c405f1`, plus a single source patch carrying the pinned heads of nine upstream pull requests, five local fixes, and a local tool-schema encoding fix. The final tree in the image is `85d0a01a`.
 - FlashInfer: main `67f76379` (version `0.6.17.dev20260804`), rebuilt from source with a single patch carrying upstream PRs #4308 and #4309, giving tree `d8567dec`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
@@ -25,6 +25,7 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | Source | Head | Scope in this image |
 |---|---|---|
 | SGLang PR #29927 | `21a5bc8e` | Complete SM120 DSV4 stack: DeepGEMM paged-MQA indexer, batched sparse-MLA prefill, and FP4 MoE. On this hardware it raises both prefill throughput and speculative acceptance length |
+| SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. At block size 7 the verify width is 8, so the planner rewrote only part of the window and compressed attention state was polluted every 4 tokens. Long single-file code generation went from 0/8 to 14/14 complete (closed code fence plus `node --check`), greedy 0/1 to 3/3, and decode rose from 237.5 to 319.8 tok/s with accept length 4.04 to 5.5 |
 | SGLang PR #33614 | `56eae704` | Keeps DSpark speculative sampling state identical across TP ranks |
 | SGLang PR #33140 | `a580251a` | Official DSV4 reasoning-effort support |
 | SGLang PR #32194 | `f8fac391` | Skip unused DSV4 draft metadata in speculative decoding |

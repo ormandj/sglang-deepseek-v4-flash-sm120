@@ -89,6 +89,35 @@ configuration produced 4 repetition-loop responses with
 128k prefill 8,029 tok/s and decode 308.4 tok/s, versus 8,034 and 302.7 at
 depth 5.
 
+## Long-generation corruption under DSpark
+
+Before the PR #32183 pin, long single-file code generation degraded under
+DSpark: the model leaked its own reasoning into the output, inserted `...`
+placeholders the prompt forbade, left the code fence unclosed, and terminated
+early with `finish_reason=stop` far below the token limit. Short answers were
+unaffected, so eval scores did not show it.
+
+The cause is in the DeepSeek-V4 compressed-state planner: the compressor-state
+rewrite window was fixed at `kMaxMTPDraftTokens = 4`, while DSpark verifies
+`block_size + 1` rows -- 8 at the depth this image uses. The planner therefore
+rewrote only part of the window and the compressed attention state accumulated
+pollution every 4 tokens, which only becomes visible once a generation is long
+enough for the indexer's 512-token top-k to start selecting from the polluted
+region.
+
+Measured on the validated configuration, scoring each generation by whether the
+code fence closes and the extracted script passes `node --check`:
+
+| cell | without #32183 | with #32183 |
+|---|---:|---:|
+| long write, temperature 1.0 | 0/8 | 14/14 |
+| long write, greedy | 0/1 | 3/3 |
+| decode throughput | 237.5 tok/s | 319.8 tok/s |
+| accept length | 4.04 | 5.5 |
+
+Throughput improves because the draft model is no longer verifying against a
+degraded target.
+
 ## Fused MHC pre-norm on SM120
 
 The script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. SGLang's SM120 branch
