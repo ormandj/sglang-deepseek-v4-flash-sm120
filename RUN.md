@@ -143,31 +143,19 @@ Use `high` when lower latency is more important than maximum deliberation. DeepS
 
 `393216` is the numeric API value for the 384K-token output budget the model card requires at `high`/`max`. Do not lower it: long reasoning chains consume large output budgets, and a smaller `max_tokens` truncates the model mid-reasoning. This is a client-side request limit; the launch command does not impose it.
 
-## Known issue: single-request generation aborts near 78K generated tokens
+## Fixed: single-request generation no longer aborts near 78K generated tokens
 
-This deployment currently cannot honor the full 384K output budget in a single
-request. During decode, SGLang's hybrid-SWA accounting holds sliding-window KV
-for every generated token (window eviction does not run on this path), so a
-single request aborts at roughly `swa-full-tokens-ratio (0.1) x
-max_total_num_tokens` — about **77,800 generated tokens** on the validated
-configuration. The scheduler logs `KV cache pool is full. Retract requests.`
-and the generation fails. Reproduced exactly at 77,824 tokens (the SWA pool
-size). Prompt length does not count against this limit; prefill accounts SWA
-correctly (a 131K prompt holds ~8.5K SWA tokens).
+Images before this composition aborted single requests at roughly
+`swa-full-tokens-ratio (0.1) x max_total_num_tokens` (~77,800) generated
+tokens: the DFLASH/DSPARK speculative decode path never ran sliding-window KV
+eviction, so SWA KV accumulated 1:1 with generated tokens until the scheduler
+logged `KV cache pool is full. Retract requests.` and killed the generation.
 
-This is a server-side bug, not a model or client limit, and no launch
-configuration currently works around it:
-
-- Raising `--swa-full-tokens-ratio` shrinks the total pool nearly as fast as it
-  raises the ceiling (0.3 gives ~123K per request but ~411K total; 1.0 gives
-  ~143K both) and never approaches 384K.
-- `--disable-hybrid-swa-memory` crashes at startup on this architecture: the
-  DSV4 memory pool constructs its SWA pool unconditionally and receives
-  `size=None` (`deepseek_v4_memory_pool.py:602`).
-
-Until it is fixed, generations that exceed the ceiling abort rather than
-degrade. Most turns — including long agentic coding turns — finish well under
-it; the abort affects only single turns generating beyond ~78K tokens.
+This image carries the fix (see the dspark SWA eviction entry in the README).
+Verified by generating 100,000 tokens in a single request with SWA usage
+holding at ~1% throughout; on the prior image the same request died at 77,809
+tokens. Single-request output is now bounded by the full KV pool, which
+accommodates the 384K budget above alongside a prompt.
 
 The following is only a deterministic health smoke test. Its `temperature=0` setting is not the model card's recommendation for normal inference:
 

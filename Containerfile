@@ -4,7 +4,7 @@
 # and inherits nothing else. SGLang is main d2c405f1 plus a single source patch
 # carrying the pinned heads of PRs #29927, #33614, #33140, #32194, #30700,
 # #32330 (rebased, with an mnnvl preflight multicast-granularity fix), #32686
-# and #32815, four local SM120 fixes, and a local DSV4/DSV32 tool-schema
+# and #32815, five local fixes, and a local DSV4/DSV32 tool-schema
 # encoding fix. FlashInfer is
 # current main 67f76379 built from source with a single patch carrying PRs #4308
 # and #4309 (#3903 is already in main); the matching cubin wheel is installed by
@@ -17,7 +17,7 @@ ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86@sha
 ARG DSV4_0731_SGLANG_BASE_HEAD=12eadf86f12aec2e6f81a6e38b61b964a4c6b529
 ARG DSV4_0731_SGLANG_MAIN_HEAD=d2c405f19df918c542c6cea9b1ddd59880e1e888
 ARG DSV4_0731_SGLANG_MAIN_TREE=b2b423131b41ef7ce4e458ac7384e49541c46ed6
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=b845e816dc7ddd34413834dc7a5b46586b2f5f49
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=0491c1f43351a7d4d25a466cb9c12fbc235d2b9f
 ARG DSV4_0731_SGLANG_PR29927_HEAD=21a5bc8e4e05909a7c946d3467561a8e024a108a
 ARG DSV4_0731_SGLANG_PR33614_HEAD=56eae704773c168c687603dcb24b40130d1a9594
 ARG DSV4_0731_SGLANG_PR33140_HEAD=a580251a16cfad47e8f97a535f9aab7d1f01477b
@@ -30,6 +30,7 @@ ARG DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD=d4dc7502cd4469c37e935d4fbce946b8a233121
 ARG DSV4_0731_SGLANG_PREFILL_WORKSPACE_HEAD=73d125d0432c80354380b77d729d2d686cda38c8
 ARG DSV4_0731_SGLANG_SM120_ALLREDUCE_GATE_HEAD=861b99ca17a021361963c6a3f43a65999252e41e
 ARG DSV4_0731_SGLANG_ALLREDUCE_TOKEN_CAP_HEAD=f99f4a0bbc34ca250071a51d1159e76c1a5d2d88
+ARG DSV4_0731_SGLANG_DSPARK_SWA_EVICTION_HEAD=bcc988b92823c5a1be8d6cee0a3527770f07c6cf
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD=67f76379a145f19793896394974e29e610cda912
 ARG DSV4_0731_FLASHINFER_MAIN_TREE=eb3d93ed91e895c40b5c8c8ebdcb6bfae88637a8
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=d8567dec0ff48f11c0ab1d17a05e944d50e48f7a
@@ -56,6 +57,7 @@ ARG DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD
 ARG DSV4_0731_SGLANG_PREFILL_WORKSPACE_HEAD
 ARG DSV4_0731_SGLANG_SM120_ALLREDUCE_GATE_HEAD
 ARG DSV4_0731_SGLANG_ALLREDUCE_TOKEN_CAP_HEAD
+ARG DSV4_0731_SGLANG_DSPARK_SWA_EVICTION_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_TREE
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE
@@ -65,16 +67,16 @@ ARG DSV4_0731_FLASHINFER_VERSION
 ARG DSV4_0731_FLASHINFER_CUBIN_URL
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
 
-COPY patches/sglang/0001-sglang-dsv4-0731-perf-r5.patch /tmp/sglang-perf-r5.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-perf-r6.patch /tmp/sglang-perf-r6.patch
 # The tree check pins the single source patch: the pinned PR heads, the four
-# local SM120 fixes, and the tool-schema encoding fix, applied as one diff.
+# local fixes, and the tool-schema encoding fix, applied as one diff.
 RUN set -e; cd /sgl-workspace/sglang; \
     git fetch --depth=1 origin "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     git checkout --detach FETCH_HEAD; \
     git reset --hard "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD)" = "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     test "$(git rev-parse HEAD^{tree})" = "${DSV4_0731_SGLANG_MAIN_TREE}"; \
-    git apply --index --binary /tmp/sglang-perf-r5.patch; \
+    git apply --index --binary /tmp/sglang-perf-r6.patch; \
     test "$(git write-tree)" = "${DSV4_0731_SGLANG_EFFECTIVE_TREE}"; \
     uv run --no-project python -m compileall -q \
       python/sglang/srt/arg_groups/overrides.py \
@@ -94,7 +96,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       test/registered/unit/layers/test_layer_communicator_fusion_gate.py \
       test/registered/unit/model_loader/test_deepgemm_sm120.py \
       test/registered/unit/test_model_overrides.py; \
-    rm /tmp/sglang-perf-r5.patch
+    rm /tmp/sglang-perf-r6.patch
 
 COPY patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch /tmp/flashinfer-perf-refresh.patch
 # SOURCE_DATE_EPOCH comes from the checked-out commit so the wheel build is
@@ -166,6 +168,7 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.local.prefill-workspace.head=${DSV4_0731_SGLANG_PREFILL_WORKSPACE_HEAD} \
       ai.sglang.local.sm120-allreduce-gate.head=${DSV4_0731_SGLANG_SM120_ALLREDUCE_GATE_HEAD} \
       ai.sglang.local.allreduce-token-cap.head=${DSV4_0731_SGLANG_ALLREDUCE_TOKEN_CAP_HEAD} \
+      ai.sglang.local.dspark-swa-eviction.head=${DSV4_0731_SGLANG_DSPARK_SWA_EVICTION_HEAD} \
       ai.flashinfer.version=${DSV4_0731_FLASHINFER_VERSION} \
       ai.flashinfer.main.head=${DSV4_0731_FLASHINFER_MAIN_HEAD} \
       ai.flashinfer.main.tree=${DSV4_0731_FLASHINFER_MAIN_TREE} \
