@@ -220,6 +220,34 @@ rather than sustained token rate, and SGLang finishes **2.2x sooner**. This is
 the regime most agentic and coding traffic falls into, and it inverts the
 sustained-decode ranking above.
 
+### Long single-file code generation
+
+Eight-to-four runs of one prompt asking for a complete single-file HTML5 game,
+`reasoning_effort=max`, `max_tokens=131072` (the largest budget vLLM accepts).
+A run counts as complete only if the code fence closes, the document reaches
+`</html>`, no placeholder text appears, and the extracted `<script>` bodies pass
+`node --check`.
+
+| | SGLang r8 | vLLM v20 r27 |
+|---|---:|---:|
+| complete | **4/4** | **4/4** |
+| median completion tokens | 57,281 | **40,764** |
+| median wall clock | 264 s | **180 s** |
+| median reasoning characters | 148,605 | **94,215** |
+| median content characters | 23,532 | 25,138 |
+
+Both engines produce valid, complete, parseable files. vLLM reaches an
+equivalent answer with roughly 30% fewer tokens and in about two-thirds the
+wall clock, spending noticeably less of the budget in the reasoning phase for
+the same amount of delivered code.
+
+This cell is what caught the DSpark compressed-state corruption that PR #32183
+fixes. Before that fix the same prompt produced 0 complete runs out of 8:
+leaked reasoning in the output, forbidden `...` placeholders, unclosed fences,
+and early termination at `finish_reason=stop`. GSM8K did not move at all across
+the same change, because short answers never reach the length where the
+corruption appears.
+
 ### Speculative decoding
 
 | | SGLang r8 | vLLM v20 r27 |

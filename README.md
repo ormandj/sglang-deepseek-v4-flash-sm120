@@ -115,6 +115,8 @@ vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 | **GSM8K wall clock** | **341 s** | 749 s |
 | GSM8K aggregate | **340.7 tok/s** | 159.3 tok/s |
 | draft acceptance | **92.9%** (6.5 of 7) | 37.3% (1.86 of 5) |
+| long-write complete (4 runs, 131k budget) | **4/4** | **4/4** |
+| long-write median tokens | 57,281 | **40,764** |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | concurrent 128k requests in KV | **5.9** | 1.1 |
