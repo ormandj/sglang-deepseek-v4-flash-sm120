@@ -71,14 +71,14 @@ settings to fall back to the TileLang default.
 
 ## Speculative decoding depth
 
-The script passes `--speculative-dspark-block-size 7`. The checkpoint's
-`config.json` carries `dspark_block_size = 5`, so omitting the flag selects 5
-instead, and the server logs a gamma mismatch when the two disagree.
+The script sets `--speculative-dspark-block-size` explicitly. The checkpoint's
+`config.json` carries `dspark_block_size = 5`, and the server logs a gamma
+mismatch when the flag and the checkpoint disagree.
 
 We do not currently publish a depth recommendation. An earlier revision of this
-section reported a depth-5 corruption rate and a depth-5 versus depth-7
-throughput comparison; neither is supported by the result artifacts it claimed
-to summarize, and both have been removed rather than restated.
+section reported a corruption rate and a throughput comparison across depths;
+neither is supported by the result artifacts it claimed to summarize, and both
+have been removed rather than restated.
 
 [sgl-project/sglang#33800](https://github.com/sgl-project/sglang/issues/33800)
 reported DSpark depth 5 corrupting output on SM120 and was root-caused on
@@ -98,7 +98,7 @@ unaffected, so eval scores did not show it.
 
 The cause is in the DeepSeek-V4 compressed-state planner: the compressor-state
 rewrite window was fixed at `kMaxMTPDraftTokens = 4`, while DSpark verifies
-`block_size + 1` rows -- 8 at the depth this image uses. The planner therefore
+`block_size + 1` rows, which exceeds 4 at any depth above 3. The planner therefore
 rewrote only part of the window and the compressed attention state accumulated
 pollution every 4 tokens, which only becomes visible once a generation is long
 enough for the indexer's 512-token top-k to start selecting from the polluted
@@ -112,7 +112,6 @@ code fence closes and the extracted script passes `node --check`:
 | long write, temperature 1.0 | 0/8 | 14/14 |
 | long write, greedy | 0/1 | 3/3 |
 | decode throughput | 237.5 tok/s | 319.8 tok/s |
-| accept length | 4.04 | 5.5 |
 
 Throughput improves because the draft model is no longer verifying against a
 degraded target.
