@@ -15,8 +15,8 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
-- SGLang: main `4ad990ba`, plus a single source patch carrying the pinned heads of eight upstream pull requests, five local fixes, and a local tool-schema encoding fix. The final tree in the image is `d62dbaf3`.
-- FlashInfer: main `67f76379` (version `0.6.17.dev20260804`), rebuilt from source with a single patch carrying upstream PRs #4308 and #4309, giving tree `d8567dec`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
+- SGLang: main `4ad990ba`, plus a single source patch carrying the pinned heads of ten upstream pull requests, five local fixes, a local tool-schema encoding fix, and a local consumer for FlashInfer PR #4393. The final tree in the image is `0933958e`.
+- FlashInfer: main `0263dc29` (version `0.6.18.dev20260807`), rebuilt from source with a single patch carrying upstream PRs #4308, #4380 and #4393, giving tree `931d1f65`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
 
@@ -33,7 +33,10 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | SGLang PR #32686 | `15c0902e` | DeepGEMM warmup: pick the largest warmup `M` that fits the memory budget |
 | SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
 | FlashInfer PR #4308 | `4ec7f230` | Makes the fused-MoE profiler's MXFP8 × MXFP4 quantization state match the runtime path, so autotuning stays enabled |
-| FlashInfer PR #4309 | `bf136350` | Top-k-192 decode and prefill dispatch for the SM120 sparse MLA kernels |
+| FlashInfer PR #4380 | `dc963cc0` | Maintainer-consolidated DSV4 sparse MLA top-k 192/256 support; replaces the earlier #4309 |
+| FlashInfer PR #4393 | `6573c652` | `pcie_ipc` all-reduce for intra-node PCIe machines with no NVLink or multicast. Present in the image; off by default |
+| SGLang PR #33616 | `3ed2a0ad` | FlashInfer mHC fusion for DSV4, behind `SGLANG_OPT_USE_FLASHINFER_MHC`. Merged upstream |
+| SGLang PR #33518 | `217d7f9c` | Per-request speculative statistics on the OpenAI endpoints, behind `return_spec_tokens_details` |
 
 Every carried pull request, its owner, and when we can drop it:
 
@@ -48,7 +51,10 @@ Every carried pull request, its owner, and when we can drop it:
 | SGLang PR #32815 | `1dbf09f6` | ormandj | merged |
 | SGLang PR #32183 | `22ef4312` | slchenchn | merged |
 | FlashInfer PR #4308 | `4ec7f230` | — | merged |
-| FlashInfer PR #4309 | `bf136350` | — | merged |
+| FlashInfer PR #4380 | `dc963cc0` | — | merged |
+| FlashInfer PR #4393 | `6573c652` | — | merged |
+| SGLang PR #33616 | `3ed2a0ad` | trevor-m | already merged; drops on rebase |
+| SGLang PR #33518 | `217d7f9c` | Muqi1029 | merged |
 
 SGLang PR #33140 (official DSV4 reasoning-effort support) was carried until it
 merged upstream as `059269594c`; it is present in this base and no longer
@@ -95,12 +101,15 @@ configuration, same client and same flags:
 
 | concurrency | SGLang agg | SGLang/user | SGLang TTFT | vLLM agg | vLLM/user | vLLM TTFT |
 |---|---:|---:|---:|---:|---:|---:|
-| 1 | 177.9 | 177.9 | **0.178 s** | **199.5** | 199.5 | 0.493 s |
-| 2 | 266.1 | 133.0 | **0.178 s** | **291.3** | 145.6 | 0.642 s |
-| 4 | 365.7 | 91.4 | **0.195 s** | **410.7** | 102.7 | 0.835 s |
-| 8 | 520.7 | 65.1 | **0.187 s** | **589.5** | 73.7 | 0.845 s |
-| 16 | 792.9 | 49.6 | **0.197 s** | **821.4** | 51.3 | 0.942 s |
-| 32 | **1,149.2** | 35.9 | **0.205 s** | — | — | — |
+| 1 | 194.1 | 191.2 | **0.179 s** | **199.5** | 199.5 | 0.493 s |
+| 2 | **295.6** | 147.3 | **0.177 s** | 291.3 | 145.6 | 0.642 s |
+| 4 | **439.9** | 108.3 | **0.185 s** | 410.7 | 102.7 | 0.835 s |
+| 8 | **597.7** | 73.2 | **0.195 s** | 589.5 | 73.2 | 0.845 s |
+| 16 | **909.3** | 55.3 | **0.194 s** | 821.4 | 51.3 | 0.942 s |
+| 32 | **1,315.0** | 39.4 | **0.201 s** | — | — | — |
+
+SGLang figures are medians of five runs; run-to-run spread was 1.7-3.3% at
+every concurrency except C1, where it was 7.2%.
 
 vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 
@@ -108,23 +117,19 @@ vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 
 | | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
-| prefill @ 8k | 7,317 tok/s | **7,540 tok/s** |
-| prefill @ 64k | 8,312 tok/s | **8,945 tok/s** |
-| prefill @ 128k | 7,712 tok/s | **8,238 tok/s** |
-| GSM8K accuracy | 0.9416 | 0.9393 |
-| **GSM8K wall clock** | **341 s** | 749 s |
-| GSM8K aggregate | **340.7 tok/s** | 159.3 tok/s |
-| draft acceptance | 24.5% (1.72 of 7) | **37.3%** (1.86 of 5) |
-| long-write complete (4 runs, 131k budget) | **4/4** | **4/4** |
-| long-write median tokens | 57,281 | **40,764** |
+| prefill @ 8k | 7,342 tok/s | **7,540 tok/s** |
+| prefill @ 64k | 8,320 tok/s | **8,945 tok/s** |
+| prefill @ 128k | 7,732 tok/s | **8,238 tok/s** |
+| GSM8K accuracy | 0.9375 | 0.9393 |
+| **GSM8K wall clock** | **315 s** | 749 s |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | concurrent 128k requests in KV | **5.9** | 1.1 |
 
-vLLM leads sustained decode by 7-13%, prefill by 3-8%, and draft acceptance
-(2.86 vs 2.72 tokens per verification). SGLang answers 2.8x
-to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half the
-wall clock** at identical accuracy, and serves **5.4x the KV capacity** -- it
+vLLM leads prefill by 3-8% and single-stream decode by 2.7%. SGLang leads
+sustained decode at every concurrency from 2 upward (+1.5% to +10.7%), answers
+2.8x to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half
+the wall clock** at comparable accuracy, and serves **5.4x the KV capacity** -- it
 accepts the 384K output budget the model card recommends for `high`/`max`
 reasoning, which vLLM rejects outright at `max_model_len 133120`.
 

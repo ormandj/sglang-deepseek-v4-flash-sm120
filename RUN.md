@@ -167,16 +167,20 @@ prefill comparable.
 
 | concurrency | SGLang agg | SGLang per-user | vLLM agg | vLLM per-user |
 |---|---:|---:|---:|---:|
-| 1 | 177.9 | 177.9 | **199.5** | 199.5 |
-| 2 | 266.1 | 133.0 | **291.3** | 145.6 |
-| 4 | 365.7 | 91.4 | **410.7** | 102.7 |
-| 8 | 520.7 | 65.1 | **589.5** | 73.7 |
-| 16 | 792.9 | 49.6 | **821.4** | 51.3 |
-| 32 | **1,149.2** | 35.9 | not reachable (`max_num_seqs 16`) | — |
+| 1 | 194.1 | 191.2 | **199.5** | 199.5 |
+| 2 | **295.6** | 147.3 | 291.3 | 145.6 |
+| 4 | **439.9** | 108.3 | 410.7 | 102.7 |
+| 8 | **597.7** | 73.2 | 589.5 | 73.2 |
+| 16 | **909.3** | 55.3 | 821.4 | 51.3 |
+| 32 | **1,315.0** | 39.4 | not reachable (`max_num_seqs 16`) | — |
+
+SGLang figures are medians of five runs. Run-to-run spread was 1.7-3.3% at every
+concurrency except C1, where it was 7.2%, so read the C1 gap as a tie rather
+than a 2.7% deficit.
 
 ### Time to first token, p50 seconds
 
-| concurrency | SGLang r8 | vLLM v20 r27 |
+| concurrency | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
 | 1 | **0.178** | 0.493 |
 | 2 | **0.178** | 0.642 |
@@ -191,7 +195,7 @@ while vLLM's nearly doubles across 1 to 16.
 
 ### Prefill, tokens/second
 
-| context | SGLang r8 | vLLM v20 r27 |
+| context | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
 | 8k | 7,317 | **7,540** |
 | 64k | 8,312 | **8,945** |
@@ -199,12 +203,11 @@ while vLLM's nearly doubles across 1 to 16.
 
 ### GSM8K, 1,319 questions, temperature 0, parallel 8
 
-| | SGLang r8 | vLLM v20 r27 |
+| | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
-| accuracy | 0.9416 | 0.9393 |
-| wall clock | **341 s** | 749 s |
-| completion tokens | 116,297 | 119,238 |
-| aggregate throughput | **340.7 tok/s** | 159.3 tok/s |
+| accuracy | 0.9375 (mean of 5; 0.9356-0.9401) | 0.9393 |
+| wall clock | **315 s** (mean of 5; 312-319) | 749 s |
+| completion tokens | 116,174-116,707 | 119,238 |
 
 Accuracy is a tie: three questions apart, well inside this stack's run-to-run
 variance. Scoring the same split five times on one engine spanned 0.9363 to
@@ -226,7 +229,7 @@ A run counts as complete only if the code fence closes, the document reaches
 `</html>`, no placeholder text appears, and the extracted `<script>` bodies pass
 `node --check`.
 
-| | SGLang r8 | vLLM v20 r27 |
+| | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
 | complete | **4/4** | **4/4** |
 | median completion tokens | 57,281 | **40,764** |
@@ -248,18 +251,17 @@ corruption appears.
 
 ### Speculative decoding
 
-| | SGLang r8 | vLLM v20 r27 |
-|---|---:|---:|
-| draft tokens attempted | 7 | 5 |
-| acceptance rate | 24.5% | **37.3%** |
-| mean accepted per draft | 1.72 | **1.86** |
-| tokens per verification (accept length, bonus included) | 2.72 | **2.86** |
+Both engines draft 5 tokens per step. We do not publish an acceptance
+comparison: acceptance is not a quality signal — speculative decoding is
+distribution-preserving, so a rejected draft token is replaced by the target
+model's own token and the output distribution is unchanged — and its effect on
+speed is already captured by the decode figures above.
 
-vLLM accepts a larger share of a narrower draft. Its per-position acceptance
-falls off steeply (21,427 / 14,511 / 8,992 / 5,273 / 2,960 across the five draft
-positions), which is why its own documentation finds K=5 outperforming K=7. On
-this hardware SGLang's wider K=7 draft ends up delivering slightly fewer tokens
-per verification, not more.
+Acceptance is observable per request on this image. SGLang PR #33518 is carried,
+so `"return_spec_tokens_details": true` on a chat completion returns
+`sglext.spec_tokens_details` with `spec_accept_rate`, `spec_accept_length`,
+`spec_verify_ct`, the correct/proposed draft counts, and a per-position
+histogram.
 
 The SGLang figures come from the engine's own `sglang:spec_accept_length` and
 `sglang:spec_accept_rate` gauges, cross-checked against the accept length SGLang
@@ -275,7 +277,7 @@ true per-draft counters (28,515 drafts, 142,575 draft tokens, 53,163 accepted).
 
 ### Context and KV capacity
 
-| | SGLang r8 | vLLM v20 r27 |
+| | SGLang (this image) | vLLM v20 r27 |
 |---|---:|---:|
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | usable context | **774,656** | 133,120 |

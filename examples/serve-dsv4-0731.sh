@@ -75,7 +75,7 @@ exec docker run --rm \
   --fp8-gemm-backend auto \
   --enable-deepseek-v4-fp4-indexer \
   --speculative-algorithm DSPARK \
-  --speculative-dspark-block-size 7 \
+  --speculative-dspark-block-size 5 \
   --reasoning-parser deepseek-v4 \
   --tool-call-parser deepseekv4 \
   --enable-metrics \

@@ -527,10 +527,32 @@ index e0c37793dd..fd5452fac4 100644
          server_args=server_args,
          model_config=model_config,
 diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
-index 6fb820082c..a3b845354f 100644
+index 6fb820082c..6366c6c0a8 100644
 --- a/python/sglang/srt/distributed/parallel_state.py
 +++ b/python/sglang/srt/distributed/parallel_state.py
-@@ -185,6 +185,22 @@ def outplace_all_reduce(
+@@ -81,6 +81,21 @@ TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
+ # use int value instead of ReduceOp.SUM to support torch compile
+ REDUCE_OP_SUM = int(torch.distributed.ReduceOp.SUM)
+ 
++# FlashInfer PCIe-IPC all-reduce (flashinfer-ai/flashinfer#4393): a CUDA-IPC
++# all-reduce for intra-node PCIe machines with no NVLink and no multicast.
++# FlashInfer ships the kernels and a workspace API but nothing selects them,
++# so this is the missing consumer. Off by default -- it is only expected to
++# pay on switch-free PCIe topologies, and only at the sizes its policy tables
++# cover.
++_PCIE_IPC_ALL_REDUCE = os.environ.get(
++    "SGLANG_OPT_USE_PCIE_IPC_ALL_REDUCE", "0"
++).lower() in ("1", "true", "yes", "on")
++# Cap on what gets routed through it. DSV4 TP2 decode all-reduces are ~112 KB
++# and sit inside the range #4393 benchmarked (<= ~1.5 MB); prefill reaches
++# ~112 MB, two orders of magnitude beyond it, so the default keeps prefill on
++# the existing path rather than assuming those speedups extrapolate.
++_PCIE_IPC_MAX_NUMEL = int(os.environ.get("SGLANG_PCIE_IPC_MAX_NUMEL", 1 << 21))
++
+ # Reuse the user-provided distributed timeout for model-parallel subgroup
+ # creation so runtime collectives do not silently fall back to backend defaults.
+ _MODEL_PARALLEL_GROUP_TIMEOUT: Optional[timedelta] = None
+@@ -185,6 +200,22 @@ def outplace_all_reduce(
      return group._all_reduce_out_place(tensor, outplace_all_reduce_method)
  
  
@@ -553,7 +575,7 @@ index 6fb820082c..a3b845354f 100644
  @register_custom_op(mutates_args=["output"])
  def reg_all_gather_into_tensor(
      output: torch.Tensor, input: torch.Tensor, group_name: str
-@@ -291,6 +307,10 @@ class GroupCoordinator:
+@@ -291,6 +322,10 @@ class GroupCoordinator:
          self.local_rank = local_rank
          self.device_group = None
          self.cpu_group = None
@@ -564,9 +586,69 @@ index 6fb820082c..a3b845354f 100644
          self.local_size = get_int_env_var("LOCAL_SIZE", 0)
  
          if is_cuda_alike():
-@@ -666,6 +686,9 @@ class GroupCoordinator:
+@@ -619,6 +654,52 @@ class GroupCoordinator:
+             with maybe_pynccl_context, maybe_pymscclpp_context:
+                 yield graph_capture_context
+ 
++    def _pcie_ipc_all_reduce(self, input_: torch.Tensor):
++        """Try FlashInfer's PCIe-IPC all-reduce; return None to fall through.
++
++        The workspace is built lazily and keyed by dtype: its buffers are
++        allocated for a single dtype at construction, so a second dtype needs
++        its own workspace rather than a reinterpretation of the first.
++
++        Every failure path returns None so the caller proceeds to the existing
++        selection. A backend that cannot serve a shape must not be able to
++        break the collective.
++        """
++        if not _PCIE_IPC_ALL_REDUCE or getattr(self, "_pcie_ipc_off", False):
++            return None
++        if input_.numel() > _PCIE_IPC_MAX_NUMEL:
++            return None
++
++        cache = getattr(self, "_pcie_ipc_ws", None)
++        if cache is None:
++            cache = {}
++            self._pcie_ipc_ws = cache
++
++        ws = cache.get(input_.dtype)
++        if ws is None:
++            try:
++                from flashinfer.comm.pcie_ipc_ar import PcieIpcAllReduceWorkspace
++
++                ws = PcieIpcAllReduceWorkspace(
++                    group=self.device_group,
++                    max_numel=_PCIE_IPC_MAX_NUMEL,
++                    dtype=input_.dtype,
++                )
++            except Exception as exc:  # noqa: BLE001 - must never be fatal
++                logger.warning("PCIe-IPC all-reduce unavailable (%s); using default path", exc)
++                self._pcie_ipc_off = True
++                return None
++            cache[input_.dtype] = ws
++
++        try:
++            if not ws.supports(input_):
++                return None
++            return ws.all_reduce(input_)
++        except Exception as exc:  # noqa: BLE001 - must never be fatal
++            logger.warning("PCIe-IPC all-reduce failed (%s); disabling for this group", exc)
++            self._pcie_ipc_off = True
++            return None
++
+     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+         """
+         User-facing all-reduce function before we actually call the
+@@ -665,7 +746,16 @@ class GroupCoordinator:
+         if self.npu_communicator is not None and not self.npu_communicator.disabled:
              return self.npu_communicator.all_reduce(input_)
  
++        # Selection must resolve outside any traced region, for the same
++        # reason the byte-size thresholds below are deferred under Dynamo.
++        pcie_ipc_out = self._pcie_ipc_all_reduce(input_)
++        if pcie_ipc_out is not None:
++            return pcie_ipc_out
++
          if torch.compiler.is_compiling():
 +            if self._can_use_flashinfer_allreduce(input_):
 +                return flashinfer_allreduce(input_, group_name=self.unique_name)
@@ -574,7 +656,7 @@ index 6fb820082c..a3b845354f 100644
              # Byte-size thresholds in method selection (e.g. `_pick_algo` or
              # `should_mscclpp_allreduce`) would guard on the symbolic token dim
              # and recompile per shape; defer the selection to runtime inside
-@@ -717,6 +740,9 @@ class GroupCoordinator:
+@@ -717,6 +807,9 @@ class GroupCoordinator:
                  self.pynccl_comm.all_reduce(input_)
                  return input_
  
@@ -584,7 +666,7 @@ index 6fb820082c..a3b845354f 100644
          outplace_all_reduce_method = self._resolve_outplace_all_reduce_method(
              input_=input_,
              should_use_pymscclpp_allreduce=should_use_pymscclpp_allreduce,
-@@ -913,6 +939,29 @@ class GroupCoordinator:
+@@ -913,6 +1006,29 @@ class GroupCoordinator:
              return "pynccl"
          return None
  
@@ -614,7 +696,7 @@ index 6fb820082c..a3b845354f 100644
      def _all_reduce_out_place(
          self, input_: torch.Tensor, outplace_all_reduce_method: str
      ) -> torch.Tensor:
-@@ -1999,6 +2048,7 @@ _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = False
+@@ -1999,6 +2115,7 @@ _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = False
  # Read once at import: whether CustomAllReduceV2 is opted in on a multi-node
  # (MNNVL) group. Used on the all_reduce hot path (see GroupCoordinator).
  _CA_V2_MULTINODE = envs.SGLANG_ENABLE_CUSTOM_ALL_REDUCE_V2_MULTINODE.get()
@@ -622,7 +704,7 @@ index 6fb820082c..a3b845354f 100644
  
  
  def set_custom_all_reduce(enable: bool):
-@@ -2016,6 +2066,41 @@ def set_torch_symm_mem_all_reduce(enable: bool):
+@@ -2016,6 +2133,41 @@ def set_torch_symm_mem_all_reduce(enable: bool):
      _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = enable
  
  
@@ -664,11 +746,67 @@ index 6fb820082c..a3b845354f 100644
  # TODO: refactor in-tree platforms to get rid of this wrapper
  def get_default_distributed_backend(device: str) -> str:
      # We deliberately go through ``platforms.current_platform`` (rather than
+diff --git a/python/sglang/srt/entrypoints/openai/protocol.py b/python/sglang/srt/entrypoints/openai/protocol.py
+index 2352e55313..2f0b4b4a49 100644
+--- a/python/sglang/srt/entrypoints/openai/protocol.py
++++ b/python/sglang/srt/entrypoints/openai/protocol.py
+@@ -342,6 +342,7 @@ class CompletionRequest(BaseModel):
+     return_routed_experts: bool = False
+     routed_experts_start_len: int = 0
+     return_cached_tokens_details: bool = False
++    return_spec_tokens_details: bool = False
+     return_token_ids: bool = False
+ 
+     # Extra parameters for SRT backend only and will be ignored by OpenAI models.
+@@ -403,6 +404,17 @@ class CompletionRequest(BaseModel):
+         return v
+ 
+ 
++class SpecTokensDetails(BaseModel):
++    """Per-request speculative decoding statistics."""
++
++    spec_accept_rate: float = 0.0
++    spec_accept_length: float = 0.0
++    spec_num_correct_drafts: int = 0
++    spec_num_proposed_drafts: int = 0
++    spec_verify_ct: int = 0
++    spec_correct_drafts_histogram: List[int] = Field(default_factory=list)
++
++
+ class SglExt(BaseModel):
+     """SGLang extension fields for OpenAI-compatible responses.
+ 
+@@ -412,6 +424,7 @@ class SglExt(BaseModel):
+ 
+     routed_experts: Optional[str] = None
+     cached_tokens_details: Optional[CachedTokensDetails] = None
++    spec_tokens_details: Optional[SpecTokensDetails] = None
+ 
+     @model_serializer(mode="wrap")
+     def _serialize(self, handler):
+@@ -775,6 +788,7 @@ class ChatCompletionRequest(BaseModel):
+     return_routed_experts: bool = False
+     routed_experts_start_len: int = 0
+     return_cached_tokens_details: bool = False
++    return_spec_tokens_details: bool = False
+     return_prompt_token_ids: bool = False
+     return_token_ids: bool = False
+     return_meta_info: bool = False
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index ddbb8f7e92..0932362734 100644
+index ddbb8f7e92..9e6a3ec348 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
-@@ -1217,7 +1217,13 @@ class OpenAIServingChat(OpenAIServingBase):
+@@ -58,7 +58,9 @@ from sglang.srt.entrypoints.openai.utils import (
+     process_hidden_states_for_response,
+     process_hidden_states_from_ret,
+     process_routed_experts_from_ret,
++    process_spec_tokens_details_from_ret,
+     should_include_usage,
++    spec_tokens_details_from_meta_info,
+     to_openai_style_logprobs,
+ )
+ from sglang.srt.environ import envs
+@@ -1217,7 +1219,13 @@ class OpenAIServingChat(OpenAIServingBase):
                  # insert an empty system prompt to help render tool system prompt
                  messages.insert(0, {"role": "system", "content": ""})
              if request.tools:
@@ -683,6 +821,248 @@ index ddbb8f7e92..0932362734 100644
  
              # Default encoding (dsv4/dsv32)
              if self.chat_encoding_spec == "dsv4":
+@@ -1494,6 +1502,7 @@ class OpenAIServingChat(OpenAIServingBase):
+         hidden_states = {}
+         routed_experts = {}
+         cached_tokens_details = {}
++        spec_tokens_details = {}
+         image_tokens = {}
+         audio_tokens = {}
+         video_tokens = {}
+@@ -1525,6 +1534,10 @@ class OpenAIServingChat(OpenAIServingBase):
+                 cached_tokens_details[index] = content["meta_info"].get(
+                     "cached_tokens_details", None
+                 )
++                if request.return_spec_tokens_details:
++                    spec_tokens_details[index] = spec_tokens_details_from_meta_info(
++                        content["meta_info"]
++                    )
+                 image_tokens[index] = content["meta_info"].get("image_tokens", 0)
+                 audio_tokens[index] = content["meta_info"].get("audio_tokens", 0)
+                 video_tokens[index] = content["meta_info"].get("video_tokens", 0)
+@@ -1645,15 +1658,30 @@ class OpenAIServingChat(OpenAIServingBase):
+                     (v for v in routed_experts.values() if v is not None), None
+                 )
+ 
+-            sglext_details = None
++            sglext_cached_tokens_details = None
+             if request.return_cached_tokens_details and cached_tokens_details:
+                 first_details = next(
+                     (v for v in cached_tokens_details.values() if v is not None), None
+                 )
+                 if first_details is not None:
+-                    sglext_details = cached_tokens_details_from_dict(first_details)
++                    sglext_cached_tokens_details = cached_tokens_details_from_dict(
++                        first_details
++                    )
+ 
+-            if sglext_routed is not None or sglext_details is not None:
++            sglext_spec_tokens_details = None
++            if request.return_spec_tokens_details and spec_tokens_details:
++                sglext_spec_tokens_details = next(
++                    (v for v in spec_tokens_details.values() if v is not None), None
++                )
++
++            if any(
++                obj is not None
++                for obj in [
++                    sglext_routed,
++                    sglext_cached_tokens_details,
++                    sglext_spec_tokens_details,
++                ]
++            ):
+                 sglext_chunk = ChatCompletionStreamResponse(
+                     id=content["meta_info"]["id"],
+                     created=int(time.time()),
+@@ -1661,7 +1689,8 @@ class OpenAIServingChat(OpenAIServingBase):
+                     model=request.model,
+                     sglext=SglExt(
+                         routed_experts=sglext_routed,
+-                        cached_tokens_details=sglext_details,
++                        cached_tokens_details=sglext_cached_tokens_details,
++                        spec_tokens_details=sglext_spec_tokens_details,
+                     ),
+                 )
+                 yield f"data: {sglext_chunk.model_dump_json()}\n\n"
+@@ -1761,11 +1790,13 @@ class OpenAIServingChat(OpenAIServingBase):
+         cached_tokens_details = process_cached_tokens_details_from_ret(
+             first_ret, request
+         )
++        spec_tokens_details = process_spec_tokens_details_from_ret(first_ret, request)
+         response_sglext = None
+-        if routed_experts or cached_tokens_details:
++        if routed_experts or cached_tokens_details or spec_tokens_details:
+             response_sglext = SglExt(
+                 routed_experts=routed_experts,
+                 cached_tokens_details=cached_tokens_details,
++                spec_tokens_details=spec_tokens_details,
+             )
+ 
+         for idx, ret_item in enumerate(ret):
+diff --git a/python/sglang/srt/entrypoints/openai/serving_completions.py b/python/sglang/srt/entrypoints/openai/serving_completions.py
+index 3867a1c8f2..03e0f9c994 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_completions.py
++++ b/python/sglang/srt/entrypoints/openai/serving_completions.py
+@@ -25,7 +25,9 @@ from sglang.srt.entrypoints.openai.utils import (
+     process_hidden_states_for_response,
+     process_hidden_states_from_ret,
+     process_routed_experts_from_ret,
++    process_spec_tokens_details_from_ret,
+     should_include_usage,
++    spec_tokens_details_from_meta_info,
+     to_openai_style_logprobs,
+ )
+ from sglang.srt.managers.io_struct import GenerateReqInput
+@@ -236,6 +238,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
+         hidden_states = {}
+         routed_experts = {}
+         cached_tokens_details = {}
++        spec_tokens_details = {}
+ 
+         stream_started = False
+         try:
+@@ -263,6 +266,10 @@ class OpenAIServingCompletion(OpenAIServingBase):
+                 cached_tokens_details[index] = content["meta_info"].get(
+                     "cached_tokens_details", None
+                 )
++                if request.return_spec_tokens_details:
++                    spec_tokens_details[index] = spec_tokens_details_from_meta_info(
++                        content["meta_info"]
++                    )
+ 
+                 is_first_chunk = index not in stream_offsets
+                 offset = stream_offsets.get(index, 0)
+@@ -418,15 +425,30 @@ class OpenAIServingCompletion(OpenAIServingBase):
+                     (v for v in routed_experts.values() if v is not None), None
+                 )
+ 
+-            sglext_details = None
++            sglext_cached_tokens_details = None
+             if request.return_cached_tokens_details and cached_tokens_details:
+                 first_details = next(
+                     (v for v in cached_tokens_details.values() if v is not None), None
+                 )
+                 if first_details is not None:
+-                    sglext_details = cached_tokens_details_from_dict(first_details)
++                    sglext_cached_tokens_details = cached_tokens_details_from_dict(
++                        first_details
++                    )
+ 
+-            if sglext_routed is not None or sglext_details is not None:
++            sglext_spec_tokens_details = None
++            if request.return_spec_tokens_details and spec_tokens_details:
++                sglext_spec_tokens_details = next(
++                    (v for v in spec_tokens_details.values() if v is not None), None
++                )
++
++            if any(
++                obj is not None
++                for obj in [
++                    sglext_routed,
++                    sglext_cached_tokens_details,
++                    sglext_spec_tokens_details,
++                ]
++            ):
+                 sglext_chunk = CompletionStreamResponse(
+                     id=content["meta_info"]["id"],
+                     created=created,
+@@ -435,7 +457,8 @@ class OpenAIServingCompletion(OpenAIServingBase):
+                     model=request.model,
+                     sglext=SglExt(
+                         routed_experts=sglext_routed,
+-                        cached_tokens_details=sglext_details,
++                        cached_tokens_details=sglext_cached_tokens_details,
++                        spec_tokens_details=sglext_spec_tokens_details,
+                     ),
+                 )
+                 yield f"data: {sglext_chunk.model_dump_json()}\n\n"
+@@ -516,11 +539,13 @@ class OpenAIServingCompletion(OpenAIServingBase):
+         cached_tokens_details = process_cached_tokens_details_from_ret(
+             first_ret, request
+         )
++        spec_tokens_details = process_spec_tokens_details_from_ret(first_ret, request)
+         response_sglext = None
+-        if routed_experts or cached_tokens_details:
++        if routed_experts or cached_tokens_details or spec_tokens_details:
+             response_sglext = SglExt(
+                 routed_experts=routed_experts,
+                 cached_tokens_details=cached_tokens_details,
++                spec_tokens_details=spec_tokens_details,
+             )
+ 
+         for idx, ret_item in enumerate(ret):
+diff --git a/python/sglang/srt/entrypoints/openai/utils.py b/python/sglang/srt/entrypoints/openai/utils.py
+index 86e6e663b7..ba83728e14 100644
+--- a/python/sglang/srt/entrypoints/openai/utils.py
++++ b/python/sglang/srt/entrypoints/openai/utils.py
+@@ -8,6 +8,7 @@ from sglang.srt.entrypoints.openai.protocol import (
+     ChatCompletionRequest,
+     CompletionRequest,
+     LogProbs,
++    SpecTokensDetails,
+     StreamOptions,
+ )
+ 
+@@ -154,6 +155,47 @@ def process_cached_tokens_details_from_ret(
+     return cached_tokens_details_from_dict(details)
+ 
+ 
++def spec_tokens_details_from_meta_info(
++    meta_info: Dict[str, Any],
++) -> Optional[SpecTokensDetails]:
++    """Build speculative decoding details from canonical or legacy metrics."""
++    details = dict(meta_info)
++
++    metric_keys = (
++        "spec_accept_rate",
++        "spec_accept_length",
++        "spec_num_correct_drafts",
++        "spec_num_proposed_drafts",
++        "spec_verify_ct",
++        "spec_correct_drafts_histogram",
++    )
++    if not any(key in details for key in metric_keys):
++        return None
++
++    return SpecTokensDetails(
++        spec_accept_rate=details.get("spec_accept_rate") or 0.0,
++        spec_accept_length=details.get("spec_accept_length") or 0.0,
++        spec_num_correct_drafts=details.get("spec_num_correct_drafts") or 0,
++        spec_num_proposed_drafts=details.get("spec_num_proposed_drafts") or 0,
++        spec_verify_ct=details.get("spec_verify_ct") or 0,
++        spec_correct_drafts_histogram=details.get("spec_correct_drafts_histogram")
++        or [],
++    )
++
++
++def process_spec_tokens_details_from_ret(
++    ret_item: Dict[str, Any],
++    request: Union[
++        ChatCompletionRequest,
++        CompletionRequest,
++    ],
++) -> Optional[SpecTokensDetails]:
++    """Process speculative decoding details from a response item."""
++    if not getattr(request, "return_spec_tokens_details", False):
++        return None
++    return spec_tokens_details_from_meta_info(ret_item["meta_info"])
++
++
+ def convert_embeds_to_tensors(
+     embeds: Optional[Union[List[Optional[List[List[float]]]], List[List[float]]]],
+ ) -> Optional[List[Optional[List[torch.Tensor]]]]:
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 33cd636ba0..274dbf3a93 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1183,6 +1183,7 @@ class Envs:
+     SGLANG_OPT_DEEPGEMM_HC_PRENORM = EnvBool(True)
+     SGLANG_OPT_USE_TILELANG_MHC_PRE = EnvBool(True)
+     SGLANG_OPT_USE_TILELANG_MHC_POST = EnvBool(True)
++    SGLANG_OPT_USE_FLASHINFER_MHC = EnvBool(False)
+     SGLANG_DSV4_MHC_PREWARM = EnvBool(True)
+     SGLANG_OPT_USE_TRITON_FUSED_MHC = EnvBool(True)
+     SGLANG_OPT_FUSE_MHC_POST_PRE = EnvBool(False)
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 index 402d3baa03..e498af20f3 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
@@ -1858,7 +2238,7 @@ index 1611b8fcce..c286b0aa9a 100644
          return False
      if weight_shape is not None and (
 diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
-index 65dd555499..a1ca9a929d 100644
+index 65dd555499..67ab9f90a2 100644
 --- a/python/sglang/srt/models/deepseek_v4.py
 +++ b/python/sglang/srt/models/deepseek_v4.py
 @@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
@@ -1877,7 +2257,82 @@ index 65dd555499..a1ca9a929d 100644
  
  DEEPSEEK_V4_STACKED_PARAMS_MAPPING: List[Tuple[str, str, int]] = [
      ("gate_up_proj", "gate_proj", 0),
-@@ -1197,12 +1199,19 @@ class MQALayer(MqaAttentionBase):
+@@ -219,6 +221,74 @@ def _is_fused_mhc_post_pre_enabled() -> bool:
+     )
+ 
+ 
++# FlashInfer's mhc_pre_big_fuse only accepts these split-K counts.
++_FLASHINFER_MHC_PRE_SPLITS = (1, 2, 4, 8, 16)
++
++
++@functools.cache
++def _cuda_sm_count() -> int:
++    return torch.cuda.get_device_properties(0).multi_processor_count
++
++
++def _flashinfer_mhc_pre_num_splits(num_tokens: int, hc_hidden_size: int) -> int:
++    block_m = block_k = 64
++    grid_m = (num_tokens + block_m - 1) // block_m
++    num_block_k = (hc_hidden_size + block_k - 1) // block_k
++    raw = max(1, min(_cuda_sm_count() // max(grid_m, 1), num_block_k // 4))
++    best = 1
++    for split in _FLASHINFER_MHC_PRE_SPLITS:
++        if split <= raw:
++            best = split
++    return best
++
++
++def _flashinfer_hc_pre(
++    x: torch.Tensor,
++    hc_fn: torch.Tensor,
++    hc_scale: torch.Tensor,
++    hc_base: torch.Tensor,
++    *,
++    rms_eps: float,
++    hc_eps: float,
++    sinkhorn_iters: int,
++) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
++    from flashinfer.mhc import mhc_pre_big_fuse
++
++    from sglang.srt.layers.deep_gemm_wrapper.entrypoint import tf32_hc_prenorm_gemm
++
++    num_tokens, hc_mult, hidden_size = x.shape
++    hc_hidden_size = hc_mult * hidden_size
++    mix_dim = hc_fn.shape[0]  # hc_mult * (2 + hc_mult) == 24
++    n_splits = _flashinfer_mhc_pre_num_splits(num_tokens, hc_hidden_size)
++
++    dot_mix = torch.empty(
++        (n_splits, num_tokens, mix_dim), dtype=torch.float32, device=x.device
++    )
++    sqrsum = torch.empty((n_splits, num_tokens), dtype=torch.float32, device=x.device)
++    tf32_hc_prenorm_gemm(
++        x.reshape(num_tokens, hc_hidden_size), hc_fn, dot_mix, sqrsum, n_splits
++    )
++    if n_splits == 1:
++        dot_mix = dot_mix.squeeze(0)
++        sqrsum = sqrsum.squeeze(0)
++
++    post, comb, layer_input = mhc_pre_big_fuse(
++        dot_mix,
++        sqrsum,
++        x,
++        hc_scale,
++        hc_base,
++        hc_hidden_size,
++        rms_eps=rms_eps,
++        mhc_pre_eps=hc_eps,
++        mhc_sinkhorn_eps=hc_eps,
++        mhc_post_mult_value=_MHC_POST_MULT_VALUE,
++        sinkhorn_repeat=sinkhorn_iters,
++        num_splits=n_splits,
++    )
++    return layer_input, post.squeeze(-1), comb
++
++
+ _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+ # PoC: compute the (replicated TP1) shared expert on LOCAL hidden before the dp
+ # gather instead of on the gathered global buffer. Requires
+@@ -1197,12 +1267,19 @@ class MQALayer(MqaAttentionBase):
          )
  
          tp_slice, q_padded, q_out = slice(None), None, None
@@ -1898,7 +2353,26 @@ index 65dd555499..a1ca9a929d 100644
              # Only [0:n_local_heads] is written below. Uninitialized padded TP
              # heads inject NaN into attention on gfx942 (fnuz), so zero-init
              # there; other archs tolerate new_empty and skip the per-forward
-@@ -1551,7 +1560,12 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1513,6 +1590,18 @@ class DeepseekV4DecoderLayer(nn.Module):
+             )
+             return y, post, comb, False
+ 
++        if envs.SGLANG_OPT_USE_FLASHINFER_MHC.get():
++            y, post, comb = _flashinfer_hc_pre(
++                x,
++                hc_fn,
++                hc_scale,
++                hc_base,
++                rms_eps=self.rms_norm_eps,
++                hc_eps=self.hc_eps,
++                sinkhorn_iters=self.hc_sinkhorn_iters,
++            )
++            return y, post, comb, False
++
+         if envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.get():
+             from sglang.kernels.ops.layernorm.mhc import mhc_pre
+ 
+@@ -1551,7 +1640,12 @@ class DeepseekV4DecoderLayer(nn.Module):
              )
              return y, post.squeeze(-1), comb, False
  
@@ -1912,7 +2386,7 @@ index 65dd555499..a1ca9a929d 100644
              from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
                  tf32_hc_prenorm_gemm,
              )
-@@ -1578,6 +1592,8 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1578,6 +1672,8 @@ class DeepseekV4DecoderLayer(nn.Module):
              self.hc_sinkhorn_iters,
              self.hc_eps,
          )
@@ -1921,7 +2395,7 @@ index 65dd555499..a1ca9a929d 100644
          # y is the post-norm activation fed into the MoE. Allocate it in the
          # symmetric memory pool so the downstream all-reduce uses the low-latency
          # NCCL symmetric path: the Triton inplace MoE runner writes the expert
-@@ -1587,7 +1603,7 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1587,7 +1683,7 @@ class DeepseekV4DecoderLayer(nn.Module):
          with use_symmetric_memory(
              get_tp_group(), disabled=not is_allocation_symmetric()
          ):
@@ -1930,6 +2404,18 @@ index 65dd555499..a1ca9a929d 100644
          return y, post.squeeze(1), comb.squeeze(1), False
  
      def hc_post(
+@@ -1606,6 +1702,11 @@ class DeepseekV4DecoderLayer(nn.Module):
+         if _is_npu:
+             return torch.ops.custom.npu_hc_post(x, residual, post, comb)
+ 
++        if envs.SGLANG_OPT_USE_FLASHINFER_MHC.get():
++            from flashinfer.mhc import mhc_post
++
++            return mhc_post(x, residual, post, comb)
++
+         if envs.SGLANG_OPT_USE_TILELANG_MHC_POST.get():
+             from sglang.kernels.ops.layernorm.mhc import mhc_post
+ 
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
 index c166bb21c3..33bdb1b41f 100644
 --- a/python/sglang/srt/server_args.py

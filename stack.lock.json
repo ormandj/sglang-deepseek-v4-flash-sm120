@@ -37,7 +37,7 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "d62dbaf3bb1dd402b0f08185248a15a78c7377b2",
+      "value": "0933958ed9e7c26084a3c6dfe2c234289c7fd02e",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -81,6 +81,16 @@
       "description": "SGLang PR #32815 head included in the source patch."
     },
     {
+      "arg": "DSV4_0731_SGLANG_PR33616_HEAD",
+      "value": "3ed2a0adf3d87b0f527c173a500dfb40d64b572f",
+      "description": "SGLang PR #33616 (FlashInfer mHC fusion for DSV4), merged upstream; pinned head carried here."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR33518_HEAD",
+      "value": "217d7f9c8417081d65d2c87c4c341d2de7c26241",
+      "description": "SGLang PR #33518 (sglext_spec: per-request speculative statistics on the OpenAI endpoints)."
+    },
+    {
       "arg": "DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD",
       "value": "d4dc7502cd4469c37e935d4fbce946b8a2331212",
       "description": "Local fix: enable the SM120 DeepGEMM capability when the required grouped FP4 symbol is installed."
@@ -107,17 +117,17 @@
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
-      "value": "67f76379a145f19793896394974e29e610cda912",
+      "value": "0263dc2929ccdce84b9989cae4e8ac948bdadf46",
       "description": "FlashInfer main commit the Python wheel is built from."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_TREE",
-      "value": "eb3d93ed91e895c40b5c8c8ebdcb6bfae88637a8",
+      "value": "cea60611159f4c37534d5a2b72935f6ea66f9b7d",
       "description": "Tree of the FlashInfer main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_EFFECTIVE_TREE",
-      "value": "d8567dec0ff48f11c0ab1d17a05e944d50e48f7a",
+      "value": "931d1f65665c49de68c1b18940c881e585c4f77c",
       "description": "FlashInfer tree after the single source patch, as built into the wheel."
     },
     {
@@ -126,40 +136,45 @@
       "description": "FlashInfer PR #4308 head included in the source patch."
     },
     {
-      "arg": "DSV4_0731_FLASHINFER_PR4309_HEAD",
-      "value": "bf136350f1dbbec177e2892b094df6e99145f9ea",
-      "description": "FlashInfer PR #4309 head included in the source patch."
+      "arg": "DSV4_0731_FLASHINFER_PR4380_HEAD",
+      "value": "dc963cc0c7518a333aa0e6fb14b9fe4606ead445",
+      "description": "FlashInfer PR #4380 (consolidated DSV4 sparse MLA top-k 192/256 support)."
+    },
+    {
+      "arg": "DSV4_0731_FLASHINFER_PR4393_HEAD",
+      "value": "6573c6520eae1e2ff205d64a86dd58d3fa028c81",
+      "description": "FlashInfer PR #4393 (pcie_ipc all-reduce for intra-node PCIe machines)."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_VERSION",
-      "value": "0.6.17.dev20260804",
+      "value": "0.6.18.dev20260807",
       "description": "FlashInfer version of both the built Python wheel and the cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_URL",
-      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.17-20260804/flashinfer_cubin-0.6.17.dev20260804-py3-none-any.whl",
+      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260807/flashinfer_cubin-0.6.18.dev20260807-py3-none-any.whl",
       "description": "Prebuilt cubin wheel matching the FlashInfer version."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_SHA256",
-      "value": "d64f7bb13c4f1528230054908240fd0f20fcfacd80a8e8a55df24d0f1e9a2c3c",
+      "value": "67832892402588edd71e3fdbd943f13c47731ac4f63f8a0f183c534533f7c497",
       "description": "SHA256 of the cubin wheel, enforced by the installer."
     }
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r8.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r11.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "8f6925f4920a497a95afdc0538cf3d909d59c4e605f52ca7691edd0cb1db6556",
-      "description": "SGLang PRs #29927, #33614, #33140, #32194, #30700, #32330 (rebased), #32686 and #32815 at the heads pinned above, five local fixes, and the DSV4/DSV32 tool-schema encoding fix."
+      "sha256": "967c84d8cfdc30b0b36780e64ecb4df5f0c97924b019672525da4680812140a2",
+      "description": "SGLang PRs #29927, #33614, #32194, #30700, #32330 (rebased), #32686, #32815, #32183, #33616 and #33518 at the heads pinned above, five local fixes, the DSV4/DSV32 tool-schema encoding fix, and a local consumer for FlashInfer PR #4393's pcie_ipc all-reduce."
     },
     {
       "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch",
       "repository": "flashinfer",
       "order": 1,
-      "sha256": "89e1dd5edeadef50bc4187885de75a832f5dd17b1e4e8fc6461b4520e015094d",
-      "description": "FlashInfer PRs #4308 and #4309 at the heads pinned above."
+      "sha256": "8d0101038db692ad688c91a8ea8def35ec07a5cd8e5768eec933e92f363b2e99",
+      "description": "FlashInfer PRs #4308, #4380 and #4393 at the heads pinned above."
     }
   ],
   "verification": {
