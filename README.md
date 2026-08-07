@@ -137,7 +137,7 @@ methodology, and the KV-capacity analysis are in [RUN.md](RUN.md).
 - Hardware: 2× NVIDIA RTX PRO 6000 Blackwell (SM120), TP=2. SM121 is not validated.
 - Model: [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731), served as `deepseek-v4-flash`.
 - Runtime settings: [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
-- Speculative decoding runs at DSpark depth 7, the model card's value; the checkpoint default of 5 corrupts output on SM120 ([#33800](https://github.com/sgl-project/sglang/issues/33800)). The fused DeepGEMM MHC pre-norm is re-enabled, worth +19.6% prefill at 128k. Both are explained in [RUN.md](RUN.md).
+- Speculative decoding runs at DSpark depth 7; the checkpoint's `config.json` carries `dspark_block_size = 5`. We publish no depth recommendation — see [RUN.md](RUN.md). The fused DeepGEMM MHC pre-norm is re-enabled, worth +19.6% prefill at 128k (measured n=5: 6,717 → 8,034 tok/s).
 
 ## License
 

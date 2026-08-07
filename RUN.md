@@ -71,23 +71,22 @@ settings to fall back to the TileLang default.
 
 ## Speculative decoding depth
 
-The script passes `--speculative-dspark-block-size 7`, matching the model
-card's own serving example (`num_speculative_tokens: 7`). The checkpoint's
-`config.json` carries `dspark_block_size = 5`, so omitting the flag silently
-selects 5 instead.
+The script passes `--speculative-dspark-block-size 7`. The checkpoint's
+`config.json` carries `dspark_block_size = 5`, so omitting the flag selects 5
+instead, and the server logs a gamma mismatch when the two disagree.
 
-That distinction matters on this hardware.
+We do not currently publish a depth recommendation. An earlier revision of this
+section reported a depth-5 corruption rate and a depth-5 versus depth-7
+throughput comparison; neither is supported by the result artifacts it claimed
+to summarize, and both have been removed rather than restated.
+
 [sgl-project/sglang#33800](https://github.com/sgl-project/sglang/issues/33800)
-reports DSpark depth 5 corrupting output on SM120 under agentic load —
-repetition loops and `</think>` leakage with a normal `finish_reason` and no
-errors logged — while depths 3, 4, 6 and 7 are clean. The result is
-non-monotonic, so it is not "deeper is worse".
-
-Scoring the pinned GSM8K split five times at depth 5 on the validated
-configuration produced 4 repetition-loop responses with
-`finish_reason=length` in 5,276 requests (0.076%). Depth 7 measured no slower:
-128k prefill 8,029 tok/s and decode 308.4 tok/s, versus 8,034 and 302.7 at
-depth 5.
+reported DSpark depth 5 corrupting output on SM120 and was root-caused on
+2026-08-07 to the SM120 mHC combine fallback — an einsum whose intermediates
+were allocated inside the `use_symmetric_memory` pool, where they could collide
+with in-flight collective buffers. Not DSpark, not the draft head, not the
+depth. PR #29927 replaces that einsum with a kernel and fixes it as a side
+effect; this image carries #29927.
 
 ## Long-generation corruption under DSpark
 
