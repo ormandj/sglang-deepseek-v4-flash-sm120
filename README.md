@@ -25,7 +25,7 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | Source | Head | Scope in this image |
 |---|---|---|
 | SGLang PR #29927 | `21a5bc8e` | Complete SM120 DSV4 stack: DeepGEMM paged-MQA indexer, batched sparse-MLA prefill, and FP4 MoE. On this hardware it raises both prefill throughput and speculative acceptance length |
-| SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. At block size 7 the verify width is 8, so the planner rewrote only part of the window and compressed attention state was polluted every 4 tokens. Long single-file code generation went from 0/8 to 14/14 complete (closed code fence plus `node --check`), greedy 0/1 to 3/3, and decode rose from 237.5 to 319.8 tok/s with accept length 4.04 to 5.5 |
+| SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. At block size 7 the verify width is 8, so the planner rewrote only part of the window and compressed attention state was polluted every 4 tokens. Long single-file code generation went from 0/8 to 14/14 complete (closed code fence plus `node --check`), greedy 0/1 to 3/3, and decode rose from 237.5 to 319.8 tok/s |
 | SGLang PR #33614 | `56eae704` | Keeps DSpark speculative sampling state identical across TP ranks |
 | SGLang PR #32194 | `f8fac391` | Skip unused DSV4 draft metadata in speculative decoding |
 | SGLang PR #30700 | `aead319d` | FlashInfer all-reduce-only dispatch and auto-enable |
@@ -114,14 +114,15 @@ vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 | GSM8K accuracy | 0.9416 | 0.9393 |
 | **GSM8K wall clock** | **341 s** | 749 s |
 | GSM8K aggregate | **340.7 tok/s** | 159.3 tok/s |
-| draft acceptance | **92.9%** (6.5 of 7) | 37.3% (1.86 of 5) |
+| draft acceptance | 24.5% (1.72 of 7) | **37.3%** (1.86 of 5) |
 | long-write complete (4 runs, 131k budget) | **4/4** | **4/4** |
 | long-write median tokens | 57,281 | **40,764** |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | concurrent 128k requests in KV | **5.9** | 1.1 |
 
-vLLM leads sustained decode by 7-13% and prefill by 3-8%. SGLang answers 2.8x
+vLLM leads sustained decode by 7-13%, prefill by 3-8%, and draft acceptance
+(2.86 vs 2.72 tokens per verification). SGLang answers 2.8x
 to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half the
 wall clock** at identical accuracy, and serves **5.4x the KV capacity** -- it
 accepts the 384K output budget the model card recommends for `high`/`max`

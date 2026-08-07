@@ -253,13 +253,27 @@ corruption appears.
 | | SGLang r8 | vLLM v20 r27 |
 |---|---:|---:|
 | draft tokens attempted | 7 | 5 |
-| acceptance rate | **92.9%** | 37.3% |
-| mean accepted per draft | **6.5** | 1.86 |
+| acceptance rate | 24.5% | **37.3%** |
+| mean accepted per draft | 1.72 | **1.86** |
+| tokens per verification (accept length, bonus included) | 2.72 | **2.86** |
 
-vLLM's per-position acceptance falls off steeply (21,427 / 14,511 / 8,992 /
-5,273 / 2,960 across the five draft positions), which is why its own
-documentation finds K=5 outperforming K=7. SGLang's drafts land almost always,
-so the wider draft continues to pay.
+vLLM accepts a larger share of a narrower draft. Its per-position acceptance
+falls off steeply (21,427 / 14,511 / 8,992 / 5,273 / 2,960 across the five draft
+positions), which is why its own documentation finds K=5 outperforming K=7. On
+this hardware SGLang's wider K=7 draft ends up delivering slightly fewer tokens
+per verification, not more.
+
+The SGLang figures come from the engine's own `sglang:spec_accept_length` and
+`sglang:spec_accept_rate` gauges, cross-checked against the accept length SGLang
+prints per decode batch (median 2.70 over 264 samples). An earlier revision of
+this document reported 92.9% and 6.5 accepted per draft. That was a measurement
+error: the harness derived acceptance from `sglang:generation_tokens_total`
+minus `sglang:spec_verify_calls_total`, and both counters only advance when a
+request finishes naturally. The decode benchmark cancels its streams at each
+timed boundary, so across a full sweep those counters moved by 60 tokens and 9
+verifications -- one incidental request -- and the ratio described that request
+rather than the benchmark. The vLLM figures were never affected: they come from
+true per-draft counters (28,515 drafts, 142,575 draft tokens, 53,163 accepted).
 
 ### Context and KV capacity
 
