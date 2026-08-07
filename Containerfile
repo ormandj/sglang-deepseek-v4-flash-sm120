@@ -121,7 +121,8 @@ RUN set -e; \
     git -C /tmp/flashinfer-src submodule update --init --depth=1 \
       3rdparty/cccl 3rdparty/cutlass 3rdparty/spdlog; \
     SOURCE_DATE_EPOCH="$(git -C /tmp/flashinfer-src show -s --format=%ct HEAD)" \
-      BUILD_NVEP=0 FLASHINFER_DEV_RELEASE_SUFFIX=20260804 \
+      BUILD_NVEP=0 \
+      FLASHINFER_DEV_RELEASE_SUFFIX="${DSV4_0731_FLASHINFER_VERSION##*.dev}" \
       uv build --wheel --out-dir /tmp/flashinfer-wheel /tmp/flashinfer-src; \
     uv pip uninstall --system --break-system-packages flashinfer-python flashinfer-jit-cache || true; \
     uv pip install --system --break-system-packages --no-cache --no-deps --reinstall \
