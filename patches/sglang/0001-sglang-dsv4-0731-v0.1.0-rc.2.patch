@@ -1,5 +1,5 @@
 diff --git a/docs/docs/advanced_features/server_arguments.mdx b/docs/docs/advanced_features/server_arguments.mdx
-index 7117a7173b..bd1b6761b9 100644
+index 7117a7173b0ffecd47ba7bdbc2d0b607b9b9e2e9..bd1b6761b9c2e12b3f71bacd504c715861071d7b 100644
 --- a/docs/docs/advanced_features/server_arguments.mdx
 +++ b/docs/docs/advanced_features/server_arguments.mdx
 @@ -1894,7 +1894,7 @@ Please consult the documentation below and [server_args.py](https://github.com/s
@@ -12,7 +12,7 @@ index 7117a7173b..bd1b6761b9 100644
        <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}><code>auto</code>, <code>trtllm</code>, <code>mnnvl</code></td>
      </tr>
 diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
-index 3516365743..ba70b47d83 100644
+index 35163657435827d38a478841fee55db9961864a4..ba70b47d83dc6bfc1f732337fa3eb8ba83e19ef9 100644
 --- a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
 +++ b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
 @@ -450,6 +450,8 @@ using PrefillPlan = tvm::ffi::Tuple<tvm::ffi::Tensor, tvm::ffi::Tensor>;
@@ -59,7 +59,7 @@ index 3516365743..ba70b47d83 100644
      const auto should_write = [=](int32_t position) {
        if (position >= first_w_pos) return true;
 diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
-index b52ab9ff14..f54e90bb86 100644
+index b52ab9ff14a5c359520c6616ae17363771691b99..f54e90bb863ef83c113c60cc2ff2a0a1267ee82b 100644
 --- a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
 +++ b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
 @@ -7,6 +7,8 @@
@@ -131,7 +131,7 @@ index b52ab9ff14..f54e90bb86 100644
      LaunchKernel(1, kBlockSize, device.unwrap(), smem)(kernel, params);
    }
 diff --git a/python/sglang/kernels/ops/attention/dsv4/compress.py b/python/sglang/kernels/ops/attention/dsv4/compress.py
-index bb3540076a..2abd28bf79 100644
+index bb3540076a536625ddf8ff230836514650809195..2abd28bf796ddb541d3df88593dfe873b85feb19 100644
 --- a/python/sglang/kernels/ops/attention/dsv4/compress.py
 +++ b/python/sglang/kernels/ops/attention/dsv4/compress.py
 @@ -247,6 +247,7 @@ class CompressorPrefillPlan(NamedTuple):
@@ -164,7 +164,7 @@ index bb3540076a..2abd28bf79 100644
              compress_ratio,
              torch.from_dlpack(plan_c) if not _is_xpu else plan_c,
 diff --git a/python/sglang/kernels/ops/attention/flash_mla_sm120.py b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
-index ec43c55089..5ad6e13d09 100644
+index ec43c55089ddcd24ec48cd4d2b60d5e052fc68c1..5ad6e13d09fe26e6af343a9f7f8f3e044811154a 100644
 --- a/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 +++ b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 @@ -210,6 +210,64 @@ def _sm120_sparse_decode_fwd(
@@ -327,7 +327,7 @@ index ec43c55089..5ad6e13d09 100644
      _page_split_kernel[grid](
          src_2d,
 diff --git a/python/sglang/kernels/ops/layernorm/mhc.py b/python/sglang/kernels/ops/layernorm/mhc.py
-index 1f310d82a5..e9edbf11f5 100644
+index 1f310d82a58e1602aff781021a94002ef799b05f..e9edbf11f517216d1cc01fe24549aa70fad5813a 100644
 --- a/python/sglang/kernels/ops/layernorm/mhc.py
 +++ b/python/sglang/kernels/ops/layernorm/mhc.py
 @@ -6,6 +6,8 @@ import threading
@@ -449,7 +449,7 @@ index 1f310d82a5..e9edbf11f5 100644
 +    )
 +    return y
 diff --git a/python/sglang/srt/arg_groups/overrides.py b/python/sglang/srt/arg_groups/overrides.py
-index 36df0d9c1b..75895ae0fe 100644
+index 36df0d9c1bc172b87ffd5c74daa6114d20720f4f..75895ae0febee956ccd582d8764fd88392b1f32d 100644
 --- a/python/sglang/srt/arg_groups/overrides.py
 +++ b/python/sglang/srt/arg_groups/overrides.py
 @@ -1919,6 +1919,7 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
@@ -491,7 +491,7 @@ index 36df0d9c1b..75895ae0fe 100644
          return {"flashinfer_allreduce_fusion_backend": "auto"}
      return {}
 diff --git a/python/sglang/srt/distributed/bootstrap.py b/python/sglang/srt/distributed/bootstrap.py
-index e0c37793dd..fd5452fac4 100644
+index e0c37793ddbd1dee221f1f69478c23a92c25b01d..fd5452fac4978f5b7387ed933c99de648b37fb4f 100644
 --- a/python/sglang/srt/distributed/bootstrap.py
 +++ b/python/sglang/srt/distributed/bootstrap.py
 @@ -16,9 +16,13 @@ from sglang.srt.distributed import (
@@ -527,7 +527,7 @@ index e0c37793dd..fd5452fac4 100644
          server_args=server_args,
          model_config=model_config,
 diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
-index aa25d7ddbb..53d5ee5028 100644
+index aa25d7ddbbf165757b52e3004b057336328f488f..53d5ee50289bbba113579b1cf6e2821177fef1a9 100644
 --- a/python/sglang/srt/distributed/parallel_state.py
 +++ b/python/sglang/srt/distributed/parallel_state.py
 @@ -81,6 +81,21 @@ TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -747,7 +747,7 @@ index aa25d7ddbb..53d5ee5028 100644
  def get_default_distributed_backend(device: str) -> str:
      # We deliberately go through ``platforms.current_platform`` (rather than
 diff --git a/python/sglang/srt/entrypoints/openai/protocol.py b/python/sglang/srt/entrypoints/openai/protocol.py
-index ecb458fc60..cc014205e4 100644
+index ecb458fc603a6bd2fc495358e33328dbe88c88e4..cc014205e47c379c95f722755f079c6f8f42e504 100644
 --- a/python/sglang/srt/entrypoints/openai/protocol.py
 +++ b/python/sglang/srt/entrypoints/openai/protocol.py
 @@ -348,6 +348,7 @@ class CompletionRequest(BaseModel):
@@ -793,7 +793,7 @@ index ecb458fc60..cc014205e4 100644
      return_token_ids: bool = False
      return_meta_info: bool = False
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index 34dceaa2b4..3047114060 100644
+index 34dceaa2b4a0e88f17efba1050f1b26632c642ce..3047114060d993e6d591cad62acbefdb86d5c176 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
 @@ -58,7 +58,9 @@ from sglang.srt.entrypoints.openai.utils import (
@@ -900,7 +900,7 @@ index 34dceaa2b4..3047114060 100644
  
          for idx, ret_item in enumerate(ret):
 diff --git a/python/sglang/srt/entrypoints/openai/serving_completions.py b/python/sglang/srt/entrypoints/openai/serving_completions.py
-index 3867a1c8f2..03e0f9c994 100644
+index 3867a1c8f2860682e0e3b079a308459117744afc..03e0f9c9949f48d28bfafef9d05679f8dfebf3b7 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_completions.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_completions.py
 @@ -25,7 +25,9 @@ from sglang.srt.entrypoints.openai.utils import (
@@ -992,7 +992,7 @@ index 3867a1c8f2..03e0f9c994 100644
  
          for idx, ret_item in enumerate(ret):
 diff --git a/python/sglang/srt/entrypoints/openai/utils.py b/python/sglang/srt/entrypoints/openai/utils.py
-index 86e6e663b7..ba83728e14 100644
+index 86e6e663b7e7f1f487416681a442da801e96f64a..ba83728e14921f4c9e37d824812f2dbafd30534b 100644
 --- a/python/sglang/srt/entrypoints/openai/utils.py
 +++ b/python/sglang/srt/entrypoints/openai/utils.py
 @@ -8,6 +8,7 @@ from sglang.srt.entrypoints.openai.protocol import (
@@ -1052,7 +1052,7 @@ index 86e6e663b7..ba83728e14 100644
      embeds: Optional[Union[List[Optional[List[List[float]]]], List[List[float]]]],
  ) -> Optional[List[Optional[List[torch.Tensor]]]]:
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-index a186fecb6f..7b232eeff8 100644
+index a186fecb6fea514d17aac15567c091b236330262..7b232eeff8db9aca0646532d814ff5d38511074a 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 +++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 @@ -581,13 +581,14 @@ class DeepseekV4AttnBackend(
@@ -1261,7 +1261,7 @@ index a186fecb6f..7b232eeff8 100644
                      inner_fb, in_capture=True
                  )
 diff --git a/python/sglang/srt/layers/attention/dsv4/compressor_v2.py b/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
-index c70843a48b..33af7f180d 100644
+index c70843a48b0aefb988b446e4fecf338ebfdc0b68..33af7f180d9cc0468dda018a319880b27dc123b9 100644
 --- a/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
 +++ b/python/sglang/srt/layers/attention/dsv4/compressor_v2.py
 @@ -413,6 +413,7 @@ def create_paged_compressor_data(
@@ -1281,7 +1281,7 @@ index c70843a48b..33af7f180d 100644
          )
      else:
 diff --git a/python/sglang/srt/layers/attention/dsv4/indexer.py b/python/sglang/srt/layers/attention/dsv4/indexer.py
-index f596caade6..6a637681ca 100644
+index f596caade6a9a094c6e3314bdf9c9426173eb2f7..6a637681ca94e4618fd0b2e062b77b80bf11b5c9 100644
 --- a/python/sglang/srt/layers/attention/dsv4/indexer.py
 +++ b/python/sglang/srt/layers/attention/dsv4/indexer.py
 @@ -29,6 +29,7 @@ from sglang.srt.layers.attention.dsa.dsa_topk_backend import DSATopKBackend
@@ -1462,7 +1462,7 @@ index f596caade6..6a637681ca 100644
              if hisparse_decode:
                  compress_layer_id = token_to_kv_pool.layer_mapping[
 diff --git a/python/sglang/srt/layers/attention/dsv4/metadata.py b/python/sglang/srt/layers/attention/dsv4/metadata.py
-index d245ddce3c..0f2a8d735a 100644
+index d245ddce3c01a940d54348efaa8dac02265a0c75..0f2a8d735afebab6c8339087cf5f00f769663bbe 100644
 --- a/python/sglang/srt/layers/attention/dsv4/metadata.py
 +++ b/python/sglang/srt/layers/attention/dsv4/metadata.py
 @@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, List, Optional
@@ -1519,7 +1519,7 @@ index d245ddce3c..0f2a8d735a 100644
          from sglang.kernels.ops.attention.dsv4 import plan_topk_v2
  
 diff --git a/python/sglang/srt/layers/communicator.py b/python/sglang/srt/layers/communicator.py
-index bb99bdf1f9..d09007c121 100644
+index bb99bdf1f9b3ca9b62d2b001f925b098ab9a7481..d09007c1214266b19e8b6954895a0c1a991ef118 100644
 --- a/python/sglang/srt/layers/communicator.py
 +++ b/python/sglang/srt/layers/communicator.py
 @@ -53,7 +53,10 @@ from sglang.srt.layers.dp_attention import (
@@ -1587,7 +1587,7 @@ index bb99bdf1f9..d09007c121 100644
              is_dp_attention_enabled()
              and self._speculative_algo is not None
 diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
-index 5f06cdafce..d9db697651 100644
+index 5f06cdafce4f71e6ed74e83773919104d9467adf..d9db6976512c224bc72c0bdc9cde4e4c48a16c11 100644
 --- a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
 +++ b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
 @@ -4,7 +4,7 @@ import os
@@ -1658,7 +1658,7 @@ index 5f06cdafce..d9db697651 100644
                  f"Available memory {memory_budget}GB is less than required memory {required_memory}GB for warmup, reducing max_m to {max_m} to avoid out of memory"
              )
 diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
-index 09e14f69df..d86282ff6d 100644
+index 09e14f69df833d7c1468733052065f56ee859c1a..d86282ff6dcac957720b2e6f8084d24d12764c7a 100644
 --- a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
 +++ b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
 @@ -18,22 +18,32 @@ def _compute_enable_deep_gemm():
@@ -1700,7 +1700,7 @@ index 09e14f69df..d86282ff6d 100644
 +DEEPGEMM_SCALE_UE8M0 = _compute_scale_ue8m0()
  DEEPGEMM_NEED_TMA_ALIGNED_SCALES = not (DEEPGEMM_SCALE_UE8M0 or _is_musa)
 diff --git a/python/sglang/srt/layers/flashinfer_comm_fusion.py b/python/sglang/srt/layers/flashinfer_comm_fusion.py
-index 194d97e05f..8e0014c33c 100644
+index 194d97e05f530ae6164180e1c7fe114da2769162..8e0014c33cf95ff3fcc6a95fb8ce3b05451f86be 100644
 --- a/python/sglang/srt/layers/flashinfer_comm_fusion.py
 +++ b/python/sglang/srt/layers/flashinfer_comm_fusion.py
 @@ -20,11 +20,22 @@ from sglang.srt.utils import (
@@ -1994,7 +1994,7 @@ index 194d97e05f..8e0014c33c 100644
      max_token_num: int,
      hidden_dim: int,
 diff --git a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
-index 67bdb5ea8b..5d7e73a909 100644
+index 67bdb5ea8b6f1d1a29314e810e7772d71c46b834..5d7e73a909305976f2fbfd1c2f8d988541c8acca 100644
 --- a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
 +++ b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
 @@ -40,6 +40,7 @@ from sglang.srt.utils import (
@@ -2174,7 +2174,7 @@ index 67bdb5ea8b..5d7e73a909 100644
      hidden_states_dtype = running_state["hidden_states_dtype"]
      hidden_states_device = running_state["hidden_states_device"]
 diff --git a/python/sglang/srt/model_executor/runner/base_runner.py b/python/sglang/srt/model_executor/runner/base_runner.py
-index a7bc4d6f8f..95c966092d 100644
+index a7bc4d6f8fa53185bea1826dcde50283cb92d527..95c966092d9f92e70a9544252b697e4aec0b064c 100644
 --- a/python/sglang/srt/model_executor/runner/base_runner.py
 +++ b/python/sglang/srt/model_executor/runner/base_runner.py
 @@ -271,8 +271,23 @@ class BaseRunner(ABC):
@@ -2203,7 +2203,7 @@ index a7bc4d6f8f..95c966092d 100644
              dtype=mr.dtype,
          )
 diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
-index 8ba2f94de2..0646b99abd 100644
+index 8ba2f94de2f418929f4c99b51f534d43aa6c2fb0..0646b99abd0feb6111cb0b16178eec527cd673e2 100644
 --- a/python/sglang/srt/model_loader/utils.py
 +++ b/python/sglang/srt/model_loader/utils.py
 @@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -2226,7 +2226,7 @@ index 8ba2f94de2..0646b99abd 100644
          return False
      if weight_shape is not None and (
 diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
-index c6a425f318..539512c7f7 100644
+index c6a425f3185a21df59cc041f2bf2509a322ab623..539512c7f765177a5ac341f8de3d40b2bd0ed9a5 100644
 --- a/python/sglang/srt/models/deepseek_v4.py
 +++ b/python/sglang/srt/models/deepseek_v4.py
 @@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
@@ -2298,8 +2298,24 @@ index c6a425f318..539512c7f7 100644
          return y, post.squeeze(1), comb.squeeze(1), False
  
      def hc_post(
+diff --git a/python/sglang/srt/models/deepseek_v4_dspark.py b/python/sglang/srt/models/deepseek_v4_dspark.py
+index 2b01ec2e2a0890b6741f11449693f26a82fb892a..82d7785a5d64e339bd00027b8e5bbd3fe95c7abc 100644
+--- a/python/sglang/srt/models/deepseek_v4_dspark.py
++++ b/python/sglang/srt/models/deepseek_v4_dspark.py
+@@ -554,6 +554,11 @@ class DSparkV4Stage(DeepseekV4DecoderLayer):
+ 
+ class DeepseekV4ForCausalLMDSpark(nn.Module):
+ 
++    @staticmethod
++    def shared_experts_fusion_disable_reason(hf_config, quant_config):
++        del hf_config, quant_config
++        return "DSpark V4 draft weights use separate shared experts."
++
+     def __init__(
+         self,
+         config: DeepSeekV4Config,
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index 5db8727a8a..46afc90053 100644
+index 5db8727a8afe1b6b72085ab3a9ce46a312cc4c4a..46afc90053e027297bdf8f818e33f06b7c838213 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
 @@ -434,6 +434,20 @@ def add_linear_attn_kernel_backend_choices(choices):
@@ -2370,7 +2386,7 @@ index 5db8727a8a..46afc90053 100644
                  envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
                  envs.SGLANG_OPT_USE_FUSED_COMPRESS.set(True)
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft.py b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
-index c7f27428ef..c5c6e05aab 100644
+index c7f27428ef17539acbabd9f47ba2d4ce69e392b3..c5c6e05aab459141075450a92b9512153adc4bc4 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 @@ -22,6 +22,7 @@ from sglang.srt.runtime_context import get_parallel
@@ -2453,7 +2469,7 @@ index c7f27428ef..c5c6e05aab 100644
          return DraftProposal(
              draft_block_ids=draft_block_ids,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
-index a01c93a7a8..ae3f74a917 100644
+index a01c93a7a812ac7fc3868effecdaa9fd3342db86..ae3f74a917f126f65cabae9526b4dbf8f8d9d188 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
 @@ -9,6 +9,7 @@ from sglang.kernels.ops.speculative.dspark.dspark_draft_model import (
@@ -2524,7 +2540,7 @@ index a01c93a7a8..ae3f74a917 100644
          folded_sampling=folded_sampling,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_tp.py b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
 new file mode 100644
-index 0000000000..a02b017097
+index 0000000000000000000000000000000000000000..a02b01709791ffaf3b5dd5b45b60ebb654f80012
 --- /dev/null
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
 @@ -0,0 +1,24 @@
@@ -2553,7 +2569,7 @@ index 0000000000..a02b017097
 +            self._tp_group.broadcast(tensor, src=0)
 +        return tensor
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_verify.py b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
-index 0581d548f5..bafd635ec3 100644
+index 0581d548f50b2992958d479a3a0c2ada899a4ae6..bafd635ec3615ef0b1ce9b61287686af191e7ecd 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 @@ -36,6 +36,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
@@ -2617,7 +2633,7 @@ index 0581d548f5..bafd635ec3 100644
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-index ed64e21f37..c2ff0b6a3d 100644
+index ed64e21f37c8d03c619ea7f04b6b3863e757e15a..c2ff0b6a3d2dab1410800dd4aa2f4f3a8a847a2f 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 @@ -50,6 +50,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
@@ -2683,7 +2699,7 @@ index ed64e21f37..c2ff0b6a3d 100644
          if on_publish is not None:
              on_publish(batch_output.new_seq_lens)
 diff --git a/python/sglang/srt/speculative/spec_utils.py b/python/sglang/srt/speculative/spec_utils.py
-index bb5aeb94a1..214343b42b 100644
+index bb5aeb94a1f963d403c2b2056d3f574d3511d698..214343b42bd68a4e5c9c7d36eae984863c83d010 100644
 --- a/python/sglang/srt/speculative/spec_utils.py
 +++ b/python/sglang/srt/speculative/spec_utils.py
 @@ -1035,6 +1035,17 @@ def spec_prepare_for_decode(batch: ScheduleBatch) -> None:
@@ -2705,7 +2721,7 @@ index bb5aeb94a1..214343b42b 100644
      else:
          from sglang.srt.speculative.eagle_utils import eagle_prepare_for_decode
 diff --git a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
-index 964eec4c85..93b22fa7d0 100644
+index 964eec4c856fdb646073510ff6c0d8473732db4a..93b22fa7d04460cd1723d4a581e872707148b134 100644
 --- a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
 +++ b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
 @@ -142,6 +142,9 @@ class EagleDraftCudaGraphRunnerAdapter:
@@ -2893,7 +2909,7 @@ index 964eec4c85..93b22fa7d0 100644
  
  # ---------------------------------------------------------------------------
 diff --git a/test/registered/attention/unittests/dsv4/test_deepseek_v4.py b/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
-index afc19f73e1..be34b3d9cf 100644
+index afc19f73e1d5f7bdf21b18bdb9fc2546bd7a0b22..be34b3d9cfd358a942c34a63834d7bf23d05f2ec 100644
 --- a/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
 +++ b/test/registered/attention/unittests/dsv4/test_deepseek_v4.py
 @@ -304,6 +304,253 @@ class TestDSV4AttentionBackendCorrectness(CustomTestCase):
@@ -3151,7 +3167,7 @@ index afc19f73e1..be34b3d9cf 100644
      """CPU-only checks for the DSV4 BCG metadata replay contract."""
  
 diff --git a/test/registered/kernels/ops/attention/test_c4_v2.py b/test/registered/kernels/ops/attention/test_c4_v2.py
-index f05aaa9039..03a3785140 100644
+index f05aaa9039ad62ae723920ed30e55dc34a95e459..03a378514003b1dae0099a3dbcbfeb780608606b 100644
 --- a/test/registered/kernels/ops/attention/test_c4_v2.py
 +++ b/test/registered/kernels/ops/attention/test_c4_v2.py
 @@ -7,7 +7,10 @@ import pytest
@@ -3221,7 +3237,7 @@ index f05aaa9039..03a3785140 100644
  def test_prefill_no_context(mode: str, seq_len: int) -> None:
 diff --git a/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 new file mode 100644
-index 0000000000..5aee3f4dcc
+index 0000000000000000000000000000000000000000..5aee3f4dccbd9acd2494711ff4985d4bfc093a01
 --- /dev/null
 +++ b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 @@ -0,0 +1,145 @@
@@ -3372,7 +3388,7 @@ index 0000000000..5aee3f4dcc
 +    )
 diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
 new file mode 100644
-index 0000000000..7ef29c2ab4
+index 0000000000000000000000000000000000000000..7ef29c2ab4dd759030c067d900c88f8c45ea1c07
 --- /dev/null
 +++ b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
 @@ -0,0 +1,138 @@
@@ -3516,7 +3532,7 @@ index 0000000000..7ef29c2ab4
 +    unittest.main()
 diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py b/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py
 new file mode 100644
-index 0000000000..bd590188c3
+index 0000000000000000000000000000000000000000..bd590188c3215dc9224f5584b3d710b4cce5bb76
 --- /dev/null
 +++ b/test/registered/unit/layers/deep_gemm_wrapper/test_configurer.py
 @@ -0,0 +1,59 @@
@@ -3580,7 +3596,7 @@ index 0000000000..bd590188c3
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/test/registered/unit/layers/test_flashinfer_comm_fusion.py b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
-index c2ad459fd2..571dca5ad6 100644
+index c2ad459fd2ecefda04e00639a7c06d8f896095d5..571dca5ad6c1e894a7dc50c72214c556df221bc4 100644
 --- a/test/registered/unit/layers/test_flashinfer_comm_fusion.py
 +++ b/test/registered/unit/layers/test_flashinfer_comm_fusion.py
 @@ -1,3 +1,4 @@
@@ -4059,7 +4075,7 @@ index c2ad459fd2..571dca5ad6 100644
      unittest.main()
 diff --git a/test/registered/unit/layers/test_layer_communicator_fusion_gate.py b/test/registered/unit/layers/test_layer_communicator_fusion_gate.py
 new file mode 100644
-index 0000000000..128df2aaa3
+index 0000000000000000000000000000000000000000..128df2aaa3c204ba0d491683f9dd0d4f518de2e2
 --- /dev/null
 +++ b/test/registered/unit/layers/test_layer_communicator_fusion_gate.py
 @@ -0,0 +1,100 @@
@@ -4165,7 +4181,7 @@ index 0000000000..128df2aaa3
 +    unittest.main()
 diff --git a/test/registered/unit/model_loader/test_deepgemm_sm120.py b/test/registered/unit/model_loader/test_deepgemm_sm120.py
 new file mode 100644
-index 0000000000..6152b83682
+index 0000000000000000000000000000000000000000..6152b83682fe13d99fcd87043446e9b02550761d
 --- /dev/null
 +++ b/test/registered/unit/model_loader/test_deepgemm_sm120.py
 @@ -0,0 +1,50 @@
@@ -4220,7 +4236,7 @@ index 0000000000..6152b83682
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
-index 90a52cea5d..4a63229219 100644
+index 90a52cea5d8e5d17ae2bb6bb9a2713f1c6d28b64..4a63229219f2498229bd2a5f396b71279880c652 100644
 --- a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
 +++ b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
 @@ -56,6 +56,9 @@ _OWNER_SITES = {
@@ -4233,9 +4249,32 @@ index 90a52cea5d..4a63229219 100644
      ("mem_cache/allocation.py", "alloc_for_decode", "kv_allocated_len"): 1,
      # spec v2: no pre-claim; resolve commits the full accepted run uniformly.
      # kv_allocated_len for spec v2 draft decode (eagle + dflash) is settled
+diff --git a/test/registered/unit/spec/test_draft_construction_isolation.py b/test/registered/unit/spec/test_draft_construction_isolation.py
+index 0469ed4e69550be3dd7d7aeb7a2ab0a1bd92b1fc..6dc3a270d27b43119a40a6bf6d4dae60a3861e3f 100644
+--- a/test/registered/unit/spec/test_draft_construction_isolation.py
++++ b/test/registered/unit/spec/test_draft_construction_isolation.py
+@@ -98,6 +98,18 @@ class TestFusionDecisionFlag(CustomTestCase):
+         # The draft's decision stays inspectable on the twin leaf.
+         self.assertTrue(get_flags().moe.speculative_disable_shared_experts_fusion)
+ 
++    def test_dspark_draft_disables_unsupported_shared_expert_fusion(self):
++        from sglang.srt.models.deepseek_v4_dspark import (
++            DeepseekV4ForCausalLMDSpark,
++        )
++
++        self._seed(disable_shared_experts_fusion=False)
++        _install(_NoGate)  # the target's build
++        with draft_model_build_scope():
++            _install(DeepseekV4ForCausalLMDSpark)
++            self.assertTrue(is_shared_experts_fusion_disabled())
++        self.assertTrue(get_flags().moe.speculative_disable_shared_experts_fusion)
++
+     def test_a_gateless_draft_inherits_the_active_decision(self):
+         self._seed(disable_shared_experts_fusion=False)
+         _install(_AlwaysDisables)  # the target's build
 diff --git a/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
 new file mode 100644
-index 0000000000..aaaeb66eb7
+index 0000000000000000000000000000000000000000..aaaeb66eb77d508c1a08a731aeec31deaf2b7375
 --- /dev/null
 +++ b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
 @@ -0,0 +1,83 @@
@@ -4323,7 +4362,7 @@ index 0000000000..aaaeb66eb7
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/test/registered/unit/test_model_overrides.py b/test/registered/unit/test_model_overrides.py
-index 32229f3b85..ce436dd5a6 100644
+index 32229f3b85daf82758a53ad52d065146eb55c20e..ce436dd5a6747cf3e45c5003c0b99b257067f7ab 100644
 --- a/test/registered/unit/test_model_overrides.py
 +++ b/test/registered/unit/test_model_overrides.py
 @@ -985,6 +985,34 @@ class TestGoldenModelOverrides(_IsolatedPublish):

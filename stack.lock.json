@@ -3,14 +3,14 @@
   "release": {
     "manifest": "release.json",
     "version": "0.1.0",
-    "candidate": 1,
-    "candidate_tag": "v0.1.0-rc.1",
+    "candidate": 2,
+    "candidate_tag": "v0.1.0-rc.2",
     "stable_tag": "v0.1.0",
     "cache_schema": "v2"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.1.0-rc.1",
+    "tag": "v0.1.0-rc.2",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -30,7 +30,7 @@
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
-      "value": "1",
+      "value": "2",
       "description": "Release-candidate ordinal for the 0.1.0 release line."
     },
     {
@@ -45,8 +45,8 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE_HEAD",
-      "value": "ce84df0fa111c992eb8cc3efc03a2941c9ce18fa",
-      "description": "SGLang commit the base image was built from."
+      "value": "52afe87a08c6aa049c52f9507b4f0ca26cecb562",
+      "description": "SGLang source commit recorded by the base image's editable package and checkout."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
@@ -60,7 +60,7 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "e55c17b745f467c850ecdc899ab19effbc497ab7",
+      "value": "cee50a9f372b26b64eec189b861b16f2c23c3244",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -149,6 +149,11 @@
       "description": "Current-main replay of the local SGLang consumer for FlashInfer PR #4393."
     },
     {
+      "arg": "DSV4_0731_SGLANG_DSPARK_SHARED_EXPERT_HEAD",
+      "value": "752a09a78b1b82faa6eaa4828d81e3e4232caa5f",
+      "description": "Local correctness fix: keep DSpark draft shared experts separate after SGLang #33889 made fusion decisions runner-local."
+    },
+    {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
       "value": "29196cf437778906c72630dc5d9850de547501de",
       "description": "FlashInfer main commit the Python wheel is built from."
@@ -191,14 +196,14 @@
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.1.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.2.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "3c9d0e47a46b3f996340bec129a8bb7723e22820431e8e2ed27de3ff192cf05f",
-      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #32183, #33518, #33568 and #33805 plus the remaining local all-reduce fixes. Merged #33616 is supplied by main and is not carried."
+      "sha256": "6acab9a3468067a6313d74fa2269d7047473e5751d6d336fd744ae404bfe0bfe",
+      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #32183, #33518, #33568 and #33805 plus the remaining local all-reduce and DSpark shared-expert fixes. Merged #33616 is supplied by main and is not carried."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.1.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.2.patch",
       "repository": "flashinfer",
       "order": 1,
       "sha256": "ec5f9d0369265459f155e060c6282a3d35f22c846ecf900b0ae191cfa7927352",

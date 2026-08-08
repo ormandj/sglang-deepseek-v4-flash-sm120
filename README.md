@@ -5,7 +5,7 @@ An SGLang container image for serving DeepSeek-V4-Flash-0731 on RTX PRO 6000 Bla
 Current release candidate:
 
 ```
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.1
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2
 ```
 
 After the candidate passes the project acceptance gates, its exact manifest is
@@ -20,7 +20,7 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 / Torch 2.13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260808-ce84df0f`, pinned by digest.
-- SGLang: current main `dc9624de`, plus one source patch containing only the still-open carries and remaining local integration changes. The final tree is `e55c17b7`.
+- SGLang: current main `dc9624de`, plus one source patch containing only the still-open carries and remaining local integration changes. The final tree is `cee50a9f`.
 - FlashInfer: current main `29196cf4` (version `0.6.18.dev20260808`), rebuilt from source with only open PRs #4308 and #4393, giving tree `a089f6c4`. Merged PRs #4329 and #4380 are supplied by main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
@@ -76,6 +76,7 @@ Image-local fixes:
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
 | SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
 | SGLang pcie_ipc consumer | `790a72c2` | Makes FlashInfer PR #4393's backend selectable from SGLang; the FlashInfer PR provides kernels and policy but no SGLang integration |
+| SGLang DSpark shared-expert gate | `752a09a7` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot, rejected all bundled shared-expert weights, and cut speculative acceptance from the r11 ~0.32 median to 0.136 |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
@@ -93,9 +94,11 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 
 ## Previous r11 evidence
 
-The `v0.1.0-rc.1` current-main refresh has no performance or quality claim
-until it passes the same hardware gates. The figures below describe its
-validated r11 predecessor and remain here as the comparison baseline.
+`v0.1.0-rc.1` is not promotable: its DSpark draft skipped the shared-expert
+weights and regressed decode by 41-46%. The corrected `v0.1.0-rc.2` has no
+performance or quality claim until it passes the same hardware gates. The
+figures below describe its validated r11 predecessor and remain here as the
+comparison baseline.
 
 On the validated r11 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
 limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
