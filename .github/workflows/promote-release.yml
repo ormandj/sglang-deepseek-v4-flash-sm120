@@ -1,0 +1,59 @@
+name: Promote validated image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: sglang-dsv4-0731-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Validate release contract
+        run: ./scripts/validate-release.sh
+      - name: Log in to GHCR
+        run: |
+          printf '%s' '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io \
+                --username '${{ github.actor }}' \
+                --password-stdin
+      - name: Promote the candidate manifest without rebuilding
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY}"
+          candidate_tag=$(jq -er '.candidate_tag' release.json)
+          stable_tag=$(jq -er '.stable_tag' release.json)
+          candidate_image="${repository}:${candidate_tag}"
+          stable_image="${repository}:${stable_tag}"
+
+          if docker buildx imagetools inspect "$stable_image" >/dev/null 2>&1; then
+            echo "$stable_image already exists; SemVer tags are immutable" >&2
+            exit 1
+          fi
+
+          candidate_digest=$(
+            docker buildx imagetools inspect "$candidate_image" \
+              | awk '$1 == "Digest:" { print $2; exit }'
+          )
+          [[ "$candidate_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          docker buildx imagetools create \
+            --prefer-index=false \
+            --tag "$stable_image" \
+            "${candidate_image}@${candidate_digest}"
+
+          stable_digest=$(
+            docker buildx imagetools inspect "$stable_image" \
+              | awk '$1 == "Digest:" { print $2; exit }'
+          )
+          [[ "$stable_digest" == "$candidate_digest" ]] || {
+            echo "promotion changed digest: $candidate_digest -> $stable_digest" >&2
+            exit 1
+          }
+          echo "promoted $candidate_image@$candidate_digest to $stable_image"

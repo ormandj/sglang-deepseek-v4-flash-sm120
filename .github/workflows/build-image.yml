@@ -6,8 +6,10 @@ on:
     branches: [main]
     paths:
       - Containerfile
+      - release.json
       - stack.lock.json
       - patches/**
+      - scripts/validate-release.sh
       - scripts/verify-patches.sh
       - .github/buildkitd.toml
       - .github/workflows/build-image.yml
@@ -97,39 +99,53 @@ jobs:
           docker buildx inspect sm120-builder
       - name: Verify the locked stack reproduces
         run: ./scripts/verify-patches.sh
-      - name: Build and push the canonical tag
+      - name: Build and push immutable candidate tags
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY}:dsv4-0731"
+          repository="ghcr.io/${GITHUB_REPOSITORY}"
+          candidate_tag=$(jq -er '.candidate_tag' release.json)
+          candidate_image="${repository}:${candidate_tag}"
+          build_image="${repository}:build-${GITHUB_RUN_NUMBER}"
+
+          if docker buildx imagetools inspect "$candidate_image" >/dev/null 2>&1; then
+            echo "$candidate_image already exists; SemVer tags are immutable" >&2
+            exit 1
+          fi
+
           docker buildx build \
             --builder sm120-builder \
             --file Containerfile \
             --target runtime \
             --platform linux/amd64 \
             --provenance=false \
-            --tag "$image" \
+            --build-arg "IMAGE_SOURCE=https://github.com/${GITHUB_REPOSITORY}" \
+            --build-arg "IMAGE_SOURCE_REVISION=${GITHUB_SHA}" \
+            --tag "$candidate_image" \
+            --tag "$build_image" \
             --push \
             .
 
           raw_manifest=$(mktemp)
-          docker buildx imagetools inspect --raw "$image" > "$raw_manifest"
+          docker buildx imagetools inspect --raw "$candidate_image" > "$raw_manifest"
           if jq -e 'has("manifests")' "$raw_manifest" >/dev/null; then
-            echo "$image is an OCI index; expected a directly pullable image manifest" >&2
+            echo "$candidate_image is an OCI index; expected a directly pullable image manifest" >&2
             exit 1
           fi
           jq -e '.config.digest and (.layers | length > 0)' "$raw_manifest" >/dev/null
           published_digest=$(
-            docker buildx imagetools inspect "$image" \
+            docker buildx imagetools inspect "$candidate_image" \
               | awk '$1 == "Digest:" { print $2; exit }'
           )
           if [[ ! "$published_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "could not resolve published manifest digest for $image" >&2
+            echo "could not resolve published manifest digest for $candidate_image" >&2
             exit 1
           fi
-          echo "published $image@$published_digest"
+          echo "published $candidate_image@$published_digest"
+          echo "published $build_image@$published_digest"
           echo "::notice title=Published image digest::$published_digest"
       - name: Verify anonymous pull access
         run: |
           image=${GITHUB_REPOSITORY}
+          tag=$(jq -er '.candidate_tag' release.json)
           token=$(
             curl --fail --silent --show-error \
               "https://ghcr.io/token?service=ghcr.io&scope=repository:${image}:pull" \
@@ -140,10 +156,10 @@ jobs:
           curl --fail --silent --show-error \
             --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
             --header "Authorization: Bearer $token" \
-            "https://ghcr.io/v2/${image}/manifests/dsv4-0731" \
+            "https://ghcr.io/v2/${image}/manifests/${tag}" \
             >/dev/null
       - name: Delete superseded untagged package versions
-        # Best effort: the canonical tag is already published, so a failure here
+        # Best effort: the candidate tag is already published, so a failure here
         # must not fail the build.
         continue-on-error: true
         env:
@@ -152,7 +168,7 @@ jobs:
           package=${GITHUB_REPOSITORY#*/}
           owner=${GITHUB_REPOSITORY_OWNER}
           # Only versions carrying no tag at all are removed, which can never
-          # include the version the canonical tag currently points at.
+          # include the version the candidate tag currently points at.
           gh api --paginate \
             --jq '.[] | select((.metadata.container.tags | length) == 0) | .id' \
             "/users/${owner}/packages/container/${package}/versions?per_page=100" \

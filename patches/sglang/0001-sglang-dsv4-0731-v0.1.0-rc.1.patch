@@ -12,10 +12,10 @@ index 7117a7173b..bd1b6761b9 100644
        <td style={{padding: "9px 12px", backgroundColor: "rgba(255,255,255,0.05)"}}><code>auto</code>, <code>trtllm</code>, <code>mnnvl</code></td>
      </tr>
 diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
-index c86b921354..484cb66393 100644
+index 3516365743..ba70b47d83 100644
 --- a/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
 +++ b/python/sglang/kernels/jit/csrc/deepseek_v4/c_plan.cuh
-@@ -448,6 +448,8 @@ using PrefillPlan = tvm::ffi::Tuple<tvm::ffi::Tensor, tvm::ffi::Tensor>;
+@@ -450,6 +450,8 @@ using PrefillPlan = tvm::ffi::Tuple<tvm::ffi::Tensor, tvm::ffi::Tensor>;
   * @param compress_plan     `[num_q_tokens, 16]` uint8 (output)
   * @param write_plan        `[num_q_tokens,  8]` uint8 (output)
   * @param compress_ratio 4 for c4, 128 for c128
@@ -24,7 +24,7 @@ index c86b921354..484cb66393 100644
   * @param use_cuda_graph Whether the plans will be used with cuda graph (affects padding)
   * @return (compress plan tensor, write plan tensor)
   */
-@@ -462,6 +464,7 @@ inline PrefillPlan plan_compress_prefill(
+@@ -464,6 +466,7 @@ inline PrefillPlan plan_compress_prefill(
      const int32_t compress_ratio,
      const int32_t swa_page_size,
      const int32_t ring_size,
@@ -32,7 +32,7 @@ index c86b921354..484cb66393 100644
      const bool use_cuda_graph) {
    auto B = SymbolicSize{"batch_size"};
    auto N = SymbolicSize{"num_q_tokens"};
-@@ -507,12 +510,13 @@ inline PrefillPlan plan_compress_prefill(
+@@ -509,12 +512,13 @@ inline PrefillPlan plan_compress_prefill(
    RuntimeCheck(batch_size <= num_q_tokens && num_q_tokens <= kMaxTokens);
    // `swa_page_size` >= `ring_size` >= `compress_ratio`
    RuntimeCheck(swa_page_size % ring_size == 0 && ring_size % compress_ratio == 0);
@@ -47,7 +47,7 @@ index c86b921354..484cb66393 100644
  
    if (cpu_or_gpu.unwrap().device_type == kDLGPU) {
      // GPU input path: kernel0 builds the (CPU-loop-equivalent) plan metadata directly
-@@ -573,7 +577,9 @@ inline PrefillPlan plan_compress_prefill(
+@@ -575,7 +579,9 @@ inline PrefillPlan plan_compress_prefill(
      const int32_t extend_len = ext_ptr[i];
      const int32_t prefix_len = seq_len - extend_len;
      const int32_t last_c_pos = seq_len / compress_ratio * compress_ratio;
@@ -59,7 +59,7 @@ index c86b921354..484cb66393 100644
      const auto should_write = [=](int32_t position) {
        if (position >= first_w_pos) return true;
 diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
-index 38be975558..7d72816127 100644
+index b52ab9ff14..f54e90bb86 100644
 --- a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
 +++ b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
 @@ -7,6 +7,8 @@
@@ -68,7 +68,7 @@ index 38be975558..7d72816127 100644
  
 +#include <utility>
 +
- namespace {
+ namespace sglang {
  
  constexpr uint32_t kBlockSize = 1024;
 @@ -72,14 +74,32 @@ __global__ __launch_bounds__(kBlockSize, 1)  //
@@ -449,10 +449,10 @@ index 1f310d82a5..e9edbf11f5 100644
 +    )
 +    return y
 diff --git a/python/sglang/srt/arg_groups/overrides.py b/python/sglang/srt/arg_groups/overrides.py
-index f5af1ddbc4..df7e42d8ce 100644
+index 36df0d9c1b..75895ae0fe 100644
 --- a/python/sglang/srt/arg_groups/overrides.py
 +++ b/python/sglang/srt/arg_groups/overrides.py
-@@ -1897,6 +1897,7 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
+@@ -1919,6 +1919,7 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
      {
          "DeepseekV3ForCausalLM",
          "DeepseekV32ForCausalLM",
@@ -460,7 +460,7 @@ index f5af1ddbc4..df7e42d8ce 100644
          "GptOssForCausalLM",
          "GlmMoeDsaForCausalLM",
          "Glm4MoeForCausalLM",
-@@ -1918,23 +1919,24 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
+@@ -1940,23 +1941,24 @@ _FLASHINFER_ALLREDUCE_FUSION_ARCHS = frozenset(
  @register_post_process
  def _flashinfer_allreduce_fusion_auto_enable(view: Any) -> dict:
      """Slot pass at the monolith tail: auto-enable FlashInfer AllReduce
@@ -527,7 +527,7 @@ index e0c37793dd..fd5452fac4 100644
          server_args=server_args,
          model_config=model_config,
 diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
-index 6fb820082c..6366c6c0a8 100644
+index aa25d7ddbb..53d5ee5028 100644
 --- a/python/sglang/srt/distributed/parallel_state.py
 +++ b/python/sglang/srt/distributed/parallel_state.py
 @@ -81,6 +81,21 @@ TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -586,7 +586,7 @@ index 6fb820082c..6366c6c0a8 100644
          self.local_size = get_int_env_var("LOCAL_SIZE", 0)
  
          if is_cuda_alike():
-@@ -619,6 +654,52 @@ class GroupCoordinator:
+@@ -625,6 +660,52 @@ class GroupCoordinator:
              with maybe_pynccl_context, maybe_pymscclpp_context:
                  yield graph_capture_context
  
@@ -639,7 +639,7 @@ index 6fb820082c..6366c6c0a8 100644
      def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
          """
          User-facing all-reduce function before we actually call the
-@@ -665,7 +746,16 @@ class GroupCoordinator:
+@@ -671,7 +752,16 @@ class GroupCoordinator:
          if self.npu_communicator is not None and not self.npu_communicator.disabled:
              return self.npu_communicator.all_reduce(input_)
  
@@ -656,7 +656,7 @@ index 6fb820082c..6366c6c0a8 100644
              # Byte-size thresholds in method selection (e.g. `_pick_algo` or
              # `should_mscclpp_allreduce`) would guard on the symbolic token dim
              # and recompile per shape; defer the selection to runtime inside
-@@ -717,6 +807,9 @@ class GroupCoordinator:
+@@ -723,6 +813,9 @@ class GroupCoordinator:
                  self.pynccl_comm.all_reduce(input_)
                  return input_
  
@@ -666,7 +666,7 @@ index 6fb820082c..6366c6c0a8 100644
          outplace_all_reduce_method = self._resolve_outplace_all_reduce_method(
              input_=input_,
              should_use_pymscclpp_allreduce=should_use_pymscclpp_allreduce,
-@@ -913,6 +1006,29 @@ class GroupCoordinator:
+@@ -919,6 +1012,29 @@ class GroupCoordinator:
              return "pynccl"
          return None
  
@@ -696,7 +696,7 @@ index 6fb820082c..6366c6c0a8 100644
      def _all_reduce_out_place(
          self, input_: torch.Tensor, outplace_all_reduce_method: str
      ) -> torch.Tensor:
-@@ -1999,6 +2115,7 @@ _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = False
+@@ -2005,6 +2121,7 @@ _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = False
  # Read once at import: whether CustomAllReduceV2 is opted in on a multi-node
  # (MNNVL) group. Used on the all_reduce hot path (see GroupCoordinator).
  _CA_V2_MULTINODE = envs.SGLANG_ENABLE_CUSTOM_ALL_REDUCE_V2_MULTINODE.get()
@@ -704,7 +704,7 @@ index 6fb820082c..6366c6c0a8 100644
  
  
  def set_custom_all_reduce(enable: bool):
-@@ -2016,6 +2133,41 @@ def set_torch_symm_mem_all_reduce(enable: bool):
+@@ -2022,6 +2139,41 @@ def set_torch_symm_mem_all_reduce(enable: bool):
      _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = enable
  
  
@@ -747,10 +747,10 @@ index 6fb820082c..6366c6c0a8 100644
  def get_default_distributed_backend(device: str) -> str:
      # We deliberately go through ``platforms.current_platform`` (rather than
 diff --git a/python/sglang/srt/entrypoints/openai/protocol.py b/python/sglang/srt/entrypoints/openai/protocol.py
-index 2352e55313..2f0b4b4a49 100644
+index ecb458fc60..cc014205e4 100644
 --- a/python/sglang/srt/entrypoints/openai/protocol.py
 +++ b/python/sglang/srt/entrypoints/openai/protocol.py
-@@ -342,6 +342,7 @@ class CompletionRequest(BaseModel):
+@@ -348,6 +348,7 @@ class CompletionRequest(BaseModel):
      return_routed_experts: bool = False
      routed_experts_start_len: int = 0
      return_cached_tokens_details: bool = False
@@ -758,7 +758,7 @@ index 2352e55313..2f0b4b4a49 100644
      return_token_ids: bool = False
  
      # Extra parameters for SRT backend only and will be ignored by OpenAI models.
-@@ -403,6 +404,17 @@ class CompletionRequest(BaseModel):
+@@ -409,6 +410,17 @@ class CompletionRequest(BaseModel):
          return v
  
  
@@ -776,7 +776,7 @@ index 2352e55313..2f0b4b4a49 100644
  class SglExt(BaseModel):
      """SGLang extension fields for OpenAI-compatible responses.
  
-@@ -412,6 +424,7 @@ class SglExt(BaseModel):
+@@ -418,6 +430,7 @@ class SglExt(BaseModel):
  
      routed_experts: Optional[str] = None
      cached_tokens_details: Optional[CachedTokensDetails] = None
@@ -784,7 +784,7 @@ index 2352e55313..2f0b4b4a49 100644
  
      @model_serializer(mode="wrap")
      def _serialize(self, handler):
-@@ -775,6 +788,7 @@ class ChatCompletionRequest(BaseModel):
+@@ -784,6 +797,7 @@ class ChatCompletionRequest(BaseModel):
      return_routed_experts: bool = False
      routed_experts_start_len: int = 0
      return_cached_tokens_details: bool = False
@@ -793,7 +793,7 @@ index 2352e55313..2f0b4b4a49 100644
      return_token_ids: bool = False
      return_meta_info: bool = False
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index ddbb8f7e92..9e6a3ec348 100644
+index 34dceaa2b4..3047114060 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
 @@ -58,7 +58,9 @@ from sglang.srt.entrypoints.openai.utils import (
@@ -1051,23 +1051,11 @@ index 86e6e663b7..ba83728e14 100644
  def convert_embeds_to_tensors(
      embeds: Optional[Union[List[Optional[List[List[float]]]], List[List[float]]]],
  ) -> Optional[List[Optional[List[torch.Tensor]]]]:
-diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
-index 33cd636ba0..274dbf3a93 100644
---- a/python/sglang/srt/environ.py
-+++ b/python/sglang/srt/environ.py
-@@ -1183,6 +1183,7 @@ class Envs:
-     SGLANG_OPT_DEEPGEMM_HC_PRENORM = EnvBool(True)
-     SGLANG_OPT_USE_TILELANG_MHC_PRE = EnvBool(True)
-     SGLANG_OPT_USE_TILELANG_MHC_POST = EnvBool(True)
-+    SGLANG_OPT_USE_FLASHINFER_MHC = EnvBool(False)
-     SGLANG_DSV4_MHC_PREWARM = EnvBool(True)
-     SGLANG_OPT_USE_TRITON_FUSED_MHC = EnvBool(True)
-     SGLANG_OPT_FUSE_MHC_POST_PRE = EnvBool(False)
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-index 402d3baa03..e498af20f3 100644
+index a186fecb6f..7b232eeff8 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 +++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-@@ -562,13 +562,14 @@ class DeepseekV4AttnBackend(
+@@ -581,13 +581,14 @@ class DeepseekV4AttnBackend(
          self.online_c128_mtp = OnlineC128MTPController(self)
          self.sparse_prefill_workspace = SparsePrefillWorkspace(self.device)
          spec_alg = model_runner.spec_algorithm
@@ -1084,7 +1072,7 @@ index 402d3baa03..e498af20f3 100644
          self.is_draft_runner = model_runner.is_draft_worker
          self._verify_mask = None
  
-@@ -679,15 +680,39 @@ class DeepseekV4AttnBackend(
+@@ -698,15 +699,39 @@ class DeepseekV4AttnBackend(
                  out_cache_loc=out_cache_loc,
              )
  
@@ -1126,15 +1114,15 @@ index 402d3baa03..e498af20f3 100644
          indexer_metadata = self.init_forward_metadata_indexer(core_attn_metadata)
  
          create = functools.partial(
-@@ -721,6 +746,7 @@ class DeepseekV4AttnBackend(
-         use_prefill_cuda_graph: bool = False,
+@@ -741,6 +766,7 @@ class DeepseekV4AttnBackend(
          online_c128_state_slot_offset: int = 0,
          dspark_block_size: Optional[int] = None,
+         forward_batch: Optional[ForwardBatch] = None,
 +        verify_width: int = 0,
      ) -> DSV4Metadata:
-         seq_lens_casual, req_pool_indices_repeated = self.expand_prefill_casually(
-             num_tokens=num_tokens,
-@@ -774,6 +800,7 @@ class DeepseekV4AttnBackend(
+         padded_num_tokens = out_cache_loc.shape[0]
+         cp_v2_active = forward_batch is not None and is_cp_v2_active(forward_batch)
+@@ -805,6 +831,7 @@ class DeepseekV4AttnBackend(
                          extend_lens_cpu=None,
                          use_prefill_cuda_graph=True,
                          num_q_tokens=out_cache_loc.shape[0],
@@ -1142,7 +1130,7 @@ index 402d3baa03..e498af20f3 100644
                          online_state_slot_offset=online_c128_state_slot_offset,
                      )
                  return create_paged_compressor_data(
-@@ -787,6 +814,7 @@ class DeepseekV4AttnBackend(
+@@ -818,6 +845,7 @@ class DeepseekV4AttnBackend(
                      extend_lens=extend_seq_lens,
                      extend_lens_cpu=extend_seq_lens_cpu,
                      use_prefill_cuda_graph=use_graph_plan,
@@ -1150,7 +1138,7 @@ index 402d3baa03..e498af20f3 100644
                      online_state_slot_offset=online_c128_state_slot_offset,
                  )
  
-@@ -912,6 +940,7 @@ class DeepseekV4AttnBackend(
+@@ -943,6 +971,7 @@ class DeepseekV4AttnBackend(
              need_compress=True,
              use_prefill_cuda_graph=use_prefill_cuda_graph,
              online_c128_state_slot_offset=online_c128_state_slot_offset,
@@ -1158,7 +1146,7 @@ index 402d3baa03..e498af20f3 100644
          )
  
      def init_forward_metadata_dspark_draft_block(
-@@ -1008,6 +1037,7 @@ class DeepseekV4AttnBackend(
+@@ -1039,6 +1068,7 @@ class DeepseekV4AttnBackend(
              extend_lens_cpu=None,
              use_prefill_cuda_graph=True,
              num_q_tokens=num_q_tokens,
@@ -1166,7 +1154,7 @@ index 402d3baa03..e498af20f3 100644
              online_state_slot_offset=online_c128_state_slot_offset,
          )
          c128_compress_metadata = raw_metadata.c128_compress_metadata
-@@ -1024,34 +1054,11 @@ class DeepseekV4AttnBackend(
+@@ -1055,34 +1085,11 @@ class DeepseekV4AttnBackend(
          self,
          raw_metadata: DSV4RawDecodeMetadata,
      ) -> DSV4Metadata:
@@ -1205,7 +1193,7 @@ index 402d3baa03..e498af20f3 100644
          )
  
      def init_forward_metadata_draft_extend(
-@@ -1552,8 +1559,10 @@ class DeepseekV4AttnBackend(
+@@ -1584,8 +1591,10 @@ class DeepseekV4AttnBackend(
          ):
              core = metadata.core_attn_metadata
              core.c1_flashmla_metadata = _create_flashmla_metadata()
@@ -1218,7 +1206,7 @@ index 402d3baa03..e498af20f3 100644
  
          # PREP_IN_CUDA_GRAPH=True: warmup upgraded raw->full on the host;
          # restore raw so capture re-runs the upgrade inside the graph.
-@@ -1617,6 +1626,11 @@ class DeepseekV4AttnBackend(
+@@ -1649,6 +1658,11 @@ class DeepseekV4AttnBackend(
          attn_sink: Optional[torch.Tensor] = None,
          **_,
      ) -> torch.Tensor:
@@ -1230,7 +1218,7 @@ index 402d3baa03..e498af20f3 100644
          if self.mtp_enabled and forward_batch.forward_mode.is_idle():
              return q.new_empty(q.shape[0], q.shape[1], layer.v_head_dim)
  
-@@ -1719,9 +1733,21 @@ class DeepseekV4AttnBackend(
+@@ -1751,9 +1765,21 @@ class DeepseekV4AttnBackend(
  
              if _is_sm120:
                  from sglang.kernels.ops.attention.flash_mla_sm120 import (
@@ -1252,7 +1240,7 @@ index 402d3baa03..e498af20f3 100644
                  o = flash_mla_with_kvcache_sm120(
                      q=q,
                      k_cache=swa_k_cache,
-@@ -2062,8 +2088,8 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+@@ -2095,8 +2121,8 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
              )
  
      def init_forward_metadata_in_graph(self, forward_batch: ForwardBatch) -> None:
@@ -1263,7 +1251,7 @@ index 402d3baa03..e498af20f3 100644
  
      def init_forward_metadata_out_graph(
          self,
-@@ -2091,7 +2117,7 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
+@@ -2124,7 +2150,7 @@ class DeepseekV4MultiStepBackend(DeepseekV4AttnBackend):
              spec_info=forward_batch.spec_info,
          )
          if in_capture:
@@ -2186,10 +2174,10 @@ index 67bdb5ea8b..5d7e73a909 100644
      hidden_states_dtype = running_state["hidden_states_dtype"]
      hidden_states_device = running_state["hidden_states_device"]
 diff --git a/python/sglang/srt/model_executor/runner/base_runner.py b/python/sglang/srt/model_executor/runner/base_runner.py
-index 656b070d56..d649ba2fd7 100644
+index a7bc4d6f8f..95c966092d 100644
 --- a/python/sglang/srt/model_executor/runner/base_runner.py
 +++ b/python/sglang/srt/model_executor/runner/base_runner.py
-@@ -262,8 +262,23 @@ class BaseRunner(ABC):
+@@ -271,8 +271,23 @@ class BaseRunner(ABC):
          from sglang.srt.layers.communicator import FUSE_ALLREDUCE_MAX_BATCH_SIZE
          from sglang.srt.layers.flashinfer_comm_fusion import pre_initialize_workspaces
  
@@ -2215,7 +2203,7 @@ index 656b070d56..d649ba2fd7 100644
              dtype=mr.dtype,
          )
 diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
-index 1611b8fcce..c286b0aa9a 100644
+index 8ba2f94de2..0646b99abd 100644
 --- a/python/sglang/srt/model_loader/utils.py
 +++ b/python/sglang/srt/model_loader/utils.py
 @@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -2226,7 +2214,7 @@ index 1611b8fcce..c286b0aa9a 100644
  
  logger = logging.getLogger(__name__)
  
-@@ -270,6 +271,10 @@ def should_deepgemm_weight_requant_ue8m0(
+@@ -275,6 +276,10 @@ def should_deepgemm_weight_requant_ue8m0(
          and weight_block_size is not None
      ):
          return False
@@ -2238,7 +2226,7 @@ index 1611b8fcce..c286b0aa9a 100644
          return False
      if weight_shape is not None and (
 diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
-index 65dd555499..67ab9f90a2 100644
+index c6a425f318..539512c7f7 100644
 --- a/python/sglang/srt/models/deepseek_v4.py
 +++ b/python/sglang/srt/models/deepseek_v4.py
 @@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
@@ -2249,7 +2237,7 @@ index 65dd555499..67ab9f90a2 100644
  from sglang.kernels.ops.quantization.fp8_kernel import (
      sglang_per_token_group_quant_fp8,
  )
-@@ -201,6 +202,7 @@ logger = logging.getLogger(__name__)
+@@ -207,6 +208,7 @@ logger = logging.getLogger(__name__)
  
  _FP8_WO_A_GEMM = envs.SGLANG_OPT_FP8_WO_A_GEMM.get()
  _MHC_POST_MULT_VALUE = 2.0
@@ -2257,82 +2245,7 @@ index 65dd555499..67ab9f90a2 100644
  
  DEEPSEEK_V4_STACKED_PARAMS_MAPPING: List[Tuple[str, str, int]] = [
      ("gate_up_proj", "gate_proj", 0),
-@@ -219,6 +221,74 @@ def _is_fused_mhc_post_pre_enabled() -> bool:
-     )
- 
- 
-+# FlashInfer's mhc_pre_big_fuse only accepts these split-K counts.
-+_FLASHINFER_MHC_PRE_SPLITS = (1, 2, 4, 8, 16)
-+
-+
-+@functools.cache
-+def _cuda_sm_count() -> int:
-+    return torch.cuda.get_device_properties(0).multi_processor_count
-+
-+
-+def _flashinfer_mhc_pre_num_splits(num_tokens: int, hc_hidden_size: int) -> int:
-+    block_m = block_k = 64
-+    grid_m = (num_tokens + block_m - 1) // block_m
-+    num_block_k = (hc_hidden_size + block_k - 1) // block_k
-+    raw = max(1, min(_cuda_sm_count() // max(grid_m, 1), num_block_k // 4))
-+    best = 1
-+    for split in _FLASHINFER_MHC_PRE_SPLITS:
-+        if split <= raw:
-+            best = split
-+    return best
-+
-+
-+def _flashinfer_hc_pre(
-+    x: torch.Tensor,
-+    hc_fn: torch.Tensor,
-+    hc_scale: torch.Tensor,
-+    hc_base: torch.Tensor,
-+    *,
-+    rms_eps: float,
-+    hc_eps: float,
-+    sinkhorn_iters: int,
-+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-+    from flashinfer.mhc import mhc_pre_big_fuse
-+
-+    from sglang.srt.layers.deep_gemm_wrapper.entrypoint import tf32_hc_prenorm_gemm
-+
-+    num_tokens, hc_mult, hidden_size = x.shape
-+    hc_hidden_size = hc_mult * hidden_size
-+    mix_dim = hc_fn.shape[0]  # hc_mult * (2 + hc_mult) == 24
-+    n_splits = _flashinfer_mhc_pre_num_splits(num_tokens, hc_hidden_size)
-+
-+    dot_mix = torch.empty(
-+        (n_splits, num_tokens, mix_dim), dtype=torch.float32, device=x.device
-+    )
-+    sqrsum = torch.empty((n_splits, num_tokens), dtype=torch.float32, device=x.device)
-+    tf32_hc_prenorm_gemm(
-+        x.reshape(num_tokens, hc_hidden_size), hc_fn, dot_mix, sqrsum, n_splits
-+    )
-+    if n_splits == 1:
-+        dot_mix = dot_mix.squeeze(0)
-+        sqrsum = sqrsum.squeeze(0)
-+
-+    post, comb, layer_input = mhc_pre_big_fuse(
-+        dot_mix,
-+        sqrsum,
-+        x,
-+        hc_scale,
-+        hc_base,
-+        hc_hidden_size,
-+        rms_eps=rms_eps,
-+        mhc_pre_eps=hc_eps,
-+        mhc_sinkhorn_eps=hc_eps,
-+        mhc_post_mult_value=_MHC_POST_MULT_VALUE,
-+        sinkhorn_repeat=sinkhorn_iters,
-+        num_splits=n_splits,
-+    )
-+    return layer_input, post.squeeze(-1), comb
-+
-+
- _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
- # PoC: compute the (replicated TP1) shared expert on LOCAL hidden before the dp
- # gather instead of on the gathered global buffer. Requires
-@@ -1197,12 +1267,19 @@ class MQALayer(MqaAttentionBase):
+@@ -1268,12 +1270,19 @@ class MQALayer(MqaAttentionBase):
          )
  
          tp_slice, q_padded, q_out = slice(None), None, None
@@ -2353,26 +2266,7 @@ index 65dd555499..67ab9f90a2 100644
              # Only [0:n_local_heads] is written below. Uninitialized padded TP
              # heads inject NaN into attention on gfx942 (fnuz), so zero-init
              # there; other archs tolerate new_empty and skip the per-forward
-@@ -1513,6 +1590,18 @@ class DeepseekV4DecoderLayer(nn.Module):
-             )
-             return y, post, comb, False
- 
-+        if envs.SGLANG_OPT_USE_FLASHINFER_MHC.get():
-+            y, post, comb = _flashinfer_hc_pre(
-+                x,
-+                hc_fn,
-+                hc_scale,
-+                hc_base,
-+                rms_eps=self.rms_norm_eps,
-+                hc_eps=self.hc_eps,
-+                sinkhorn_iters=self.hc_sinkhorn_iters,
-+            )
-+            return y, post, comb, False
-+
-         if envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.get():
-             from sglang.kernels.ops.layernorm.mhc import mhc_pre
- 
-@@ -1551,7 +1640,12 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1634,7 +1643,12 @@ class DeepseekV4DecoderLayer(nn.Module):
              )
              return y, post.squeeze(-1), comb, False
  
@@ -2386,7 +2280,7 @@ index 65dd555499..67ab9f90a2 100644
              from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
                  tf32_hc_prenorm_gemm,
              )
-@@ -1578,6 +1672,8 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1661,6 +1675,8 @@ class DeepseekV4DecoderLayer(nn.Module):
              self.hc_sinkhorn_iters,
              self.hc_eps,
          )
@@ -2395,7 +2289,7 @@ index 65dd555499..67ab9f90a2 100644
          # y is the post-norm activation fed into the MoE. Allocate it in the
          # symmetric memory pool so the downstream all-reduce uses the low-latency
          # NCCL symmetric path: the Triton inplace MoE runner writes the expert
-@@ -1587,7 +1683,7 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1670,7 +1686,7 @@ class DeepseekV4DecoderLayer(nn.Module):
          with use_symmetric_memory(
              get_tp_group(), disabled=not is_allocation_symmetric()
          ):
@@ -2404,23 +2298,11 @@ index 65dd555499..67ab9f90a2 100644
          return y, post.squeeze(1), comb.squeeze(1), False
  
      def hc_post(
-@@ -1606,6 +1702,11 @@ class DeepseekV4DecoderLayer(nn.Module):
-         if _is_npu:
-             return torch.ops.custom.npu_hc_post(x, residual, post, comb)
- 
-+        if envs.SGLANG_OPT_USE_FLASHINFER_MHC.get():
-+            from flashinfer.mhc import mhc_post
-+
-+            return mhc_post(x, residual, post, comb)
-+
-         if envs.SGLANG_OPT_USE_TILELANG_MHC_POST.get():
-             from sglang.kernels.ops.layernorm.mhc import mhc_post
- 
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index c166bb21c3..33bdb1b41f 100644
+index 5db8727a8a..46afc90053 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
-@@ -435,6 +435,20 @@ def add_linear_attn_kernel_backend_choices(choices):
+@@ -434,6 +434,20 @@ def add_linear_attn_kernel_backend_choices(choices):
      LINEAR_ATTN_KERNEL_BACKEND_CHOICES.extend(choices)
  
  
@@ -2441,7 +2323,7 @@ index c166bb21c3..33bdb1b41f 100644
  @dataclasses.dataclass
  class ServerArgs:
      """Server-wide configuration for SGLang.
-@@ -1979,10 +1993,11 @@ class ServerArgs:
+@@ -1978,10 +1992,11 @@ class ServerArgs:
          Arg(
              help=(
                  "Enable FlashInfer allreduce fusion and choose backend. "
@@ -2455,7 +2337,7 @@ index c166bb21c3..33bdb1b41f 100644
                  "'trtllm': available on single-node systems only. "
                  "'mnnvl': available on SM90 single-node systems and SM100/SM103 "
                  "single-node or multi-node systems via MNNVL fabric. "
-@@ -5310,15 +5325,23 @@ class ServerArgs:
+@@ -5329,15 +5344,23 @@ class ServerArgs:
  
              run_post_process_pass(self, _deepseek_v4_sm120_moe)
              if is_sm120_supported():
@@ -2671,7 +2553,7 @@ index 0000000000..a02b017097
 +            self._tp_group.broadcast(tensor, src=0)
 +        return tensor
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_verify.py b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
-index 4d5478cd53..50f22a1340 100644
+index 0581d548f5..bafd635ec3 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 @@ -36,6 +36,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
@@ -2680,9 +2562,9 @@ index 4d5478cd53..50f22a1340 100644
  )
 +from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
  from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout
- from sglang.srt.utils.invariants import Bucket, Invariant, NotNaN, expect
- 
-@@ -75,6 +76,7 @@ class TargetVerifyExecutor:
+ from sglang.srt.speculative.spec_utils import (
+     SIMULATE_ACC_METHOD,
+@@ -79,6 +80,7 @@ class TargetVerifyExecutor:
          verify_num_draft_tokens: int,
          model_runner,
          kv_injector: TargetHiddenKvInjector,
@@ -2690,7 +2572,7 @@ index 4d5478cd53..50f22a1340 100644
          verify_epilogue=None,
          simulate_acc_len: float = 0.0,
      ) -> None:
-@@ -83,6 +85,7 @@ class TargetVerifyExecutor:
+@@ -87,6 +89,7 @@ class TargetVerifyExecutor:
          self.verify_num_draft_tokens = verify_num_draft_tokens
          self.model_runner = model_runner
          self.kv_injector = kv_injector
@@ -2698,7 +2580,7 @@ index 4d5478cd53..50f22a1340 100644
          self.verify_epilogue = verify_epilogue
          self._verify_backend_self_adds_seq_lens_cache: Optional[bool] = None
          self._simulate_acc_len = float(simulate_acc_len)
-@@ -127,6 +130,10 @@ class TargetVerifyExecutor:
+@@ -131,6 +134,10 @@ class TargetVerifyExecutor:
                  bs=bs, dtype=correct_len.dtype, device=correct_len.device
              )
  
@@ -2709,7 +2591,7 @@ index 4d5478cd53..50f22a1340 100644
          finalized = FinalizeAcceptLens.execute(
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
-@@ -458,12 +465,14 @@ class DsparkVerifyEpilogue:
+@@ -466,12 +473,14 @@ class DsparkVerifyEpilogue:
          max_bs: int,
          verify_num_draft_tokens: int,
          device,
@@ -2724,7 +2606,7 @@ index 4d5478cd53..50f22a1340 100644
          self.inject_gate_buf = torch.zeros((1,), dtype=torch.int32, device=device)
          self.verify_lens_buf = torch.zeros(
              (self.max_bs,), dtype=torch.int64, device=device
-@@ -608,6 +617,9 @@ class DsparkVerifyEpilogue:
+@@ -616,6 +625,9 @@ class DsparkVerifyEpilogue:
              verify_num_draft_tokens=self.stride,
              cutoff_verify_lens=verify_lens,
          )
@@ -2801,19 +2683,21 @@ index ed64e21f37..c2ff0b6a3d 100644
          if on_publish is not None:
              on_publish(batch_output.new_seq_lens)
 diff --git a/python/sglang/srt/speculative/spec_utils.py b/python/sglang/srt/speculative/spec_utils.py
-index 2845a2d6c5..c345a4d227 100644
+index bb5aeb94a1..214343b42b 100644
 --- a/python/sglang/srt/speculative/spec_utils.py
 +++ b/python/sglang/srt/speculative/spec_utils.py
-@@ -1035,6 +1035,15 @@ def spec_prepare_for_decode(batch: ScheduleBatch) -> None:
+@@ -1035,6 +1035,17 @@ def spec_prepare_for_decode(batch: ScheduleBatch) -> None:
              server_args.max_speculative_num_draft_tokens,
          )
      if batch.spec_algorithm.is_dflash_family():
 +        # Mirror eagle_prepare_for_decode: evict out-of-window SWA KV and
 +        # advance decode_batch_idx (the eviction gate requires >= 1). Without
-+        # this, hybrid-SWA models hold SWA slots for every generated token and
-+        # a single request exhausts the SWA pool at
-+        # swa_full_tokens_ratio * max_total_num_tokens generated tokens, after
-+        # which the scheduler retracts it.
++        # this, hybrid-SWA models retain SWA KV for every generated token and
++        # a single request exhausts the SWA pool after
++        # swa_full_tokens_ratio * max_total_num_tokens generated tokens, at
++        # which point the scheduler retracts it. Pool sizing already assumes
++        # this eviction runs (pool_configurator: trailing_tokens =
++        # window + eviction_interval * draft_tokens + page_size).
 +        batch.maybe_evict_swa()
 +        for r in batch.reqs:
 +            r.decode_batch_idx += 1
@@ -2821,7 +2705,7 @@ index 2845a2d6c5..c345a4d227 100644
      else:
          from sglang.srt.speculative.eagle_utils import eagle_prepare_for_decode
 diff --git a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
-index 46db9aebfe..b82cff8df7 100644
+index 964eec4c85..93b22fa7d0 100644
 --- a/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
 +++ b/python/sglang/test/kits/attention_unittest/runner_modes/speculative_draft_runner.py
 @@ -142,6 +142,9 @@ class EagleDraftCudaGraphRunnerAdapter:
@@ -4335,11 +4219,114 @@ index 0000000000..6152b83682
 +
 +if __name__ == "__main__":
 +    unittest.main()
+diff --git a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
+index 90a52cea5d..4a63229219 100644
+--- a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
++++ b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
+@@ -56,6 +56,9 @@ _OWNER_SITES = {
+     ("mem_cache/allocation.py", "alloc_for_extend", "evict"): 1,
+     ("mem_cache/allocation.py", "alloc_for_extend", "kv_allocated_len"): 1,
+     ("mem_cache/allocation.py", "alloc_for_decode", "evict"): 1,
++    # spec: the dflash-family branch mirrors eagle_prepare_for_decode.
++    ("speculative/spec_utils.py", "spec_prepare_for_decode", "decode_batch_idx"): 1,
++    ("speculative/spec_utils.py", "spec_prepare_for_decode", "evict"): 1,
+     ("mem_cache/allocation.py", "alloc_for_decode", "kv_allocated_len"): 1,
+     # spec v2: no pre-claim; resolve commits the full accepted run uniformly.
+     # kv_allocated_len for spec v2 draft decode (eagle + dflash) is settled
+diff --git a/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
+new file mode 100644
+index 0000000000..aaaeb66eb7
+--- /dev/null
++++ b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
+@@ -0,0 +1,83 @@
++"""spec_prepare_for_decode must run SWA eviction on the dflash-family path.
++
++The dflash-family branch (DFLASH, DSPARK) historically skipped both
++``maybe_evict_swa`` and the ``decode_batch_idx`` tick that
++``eagle_prepare_for_decode`` performs. On hybrid-SWA models that retained
++SWA KV for every generated token, so a single request exhausted the SWA pool
++after ``swa_full_tokens_ratio * max_total_num_tokens`` generated tokens and
++was retracted by the scheduler. Pool sizing assumes the eviction runs
++(``pool_configurator``: ``trailing_tokens = sliding_window +
++eviction_interval * draft_tokens + page_size``).
++"""
++
++import unittest
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=1, suite="base-a-test-cpu")
++
++
++def _make_batch(spec_is_dflash_family: bool):
++    batch = MagicMock()
++    batch.spec_algorithm.is_dflash_family.return_value = spec_is_dflash_family
++    req = SimpleNamespace(decode_batch_idx=0)
++    batch.reqs = [req]
++    return batch, req
++
++
++class TestSpecPrepareSwaEviction(CustomTestCase):
++    def _run(self, batch):
++        from sglang.srt.speculative import spec_utils
++
++        with patch.object(
++            spec_utils, "get_server_args", return_value=MagicMock()
++        ) as server_args:
++            server_args.return_value.enable_mamba_extra_buffer_lazy.return_value = False
++            spec_utils.spec_prepare_for_decode(batch)
++
++    def test_dflash_family_evicts_and_ticks(self):
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        self._run(batch)
++        batch.maybe_evict_swa.assert_called_once_with()
++        self.assertEqual(req.decode_batch_idx, 1)
++        batch.spec_info.prepare_for_decode.assert_called_once_with(batch)
++
++    def test_tick_advances_every_iteration(self):
++        """decode_batch_idx is a clock, not a flag: it must keep advancing so
++        the SWA leaf-lock release gate (decode_batch_idx >= sliding_window_size)
++        can fire."""
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        self._run(batch)
++        self._run(batch)
++        self.assertEqual(req.decode_batch_idx, 2)
++        self.assertEqual(batch.maybe_evict_swa.call_count, 2)
++
++    def test_dflash_family_evicts_before_tick(self):
++        """The overlap-scheduler gate (decode_batch_idx >= 1) must see the
++        pre-tick value, exactly as in eagle_prepare_for_decode."""
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        seen_idx = []
++        batch.maybe_evict_swa.side_effect = lambda: seen_idx.append(
++            req.decode_batch_idx
++        )
++        self._run(batch)
++        self.assertEqual(seen_idx, [0])
++        self.assertEqual(req.decode_batch_idx, 1)
++
++    def test_eagle_path_unchanged(self):
++        batch, req = _make_batch(spec_is_dflash_family=False)
++        with patch(
++            "sglang.srt.speculative.eagle_utils.eagle_prepare_for_decode"
++        ) as eagle_prep:
++            self._run(batch)
++        eagle_prep.assert_called_once_with(batch)
++        # The dflash-branch tick must not run on the eagle path.
++        self.assertEqual(req.decode_batch_idx, 0)
++        batch.spec_info.prepare_for_decode.assert_not_called()
++
++
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/test/registered/unit/test_model_overrides.py b/test/registered/unit/test_model_overrides.py
-index c3241e5c51..e2cc13ea58 100644
+index 32229f3b85..ce436dd5a6 100644
 --- a/test/registered/unit/test_model_overrides.py
 +++ b/test/registered/unit/test_model_overrides.py
-@@ -875,6 +875,34 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+@@ -985,6 +985,34 @@ class TestGoldenModelOverrides(_IsolatedPublish):
          with patch.object(overrides_module, "is_sm120_supported", return_value=False):
              self.assertEqual(_deepseek_v4_sm120_moe(_view()), {})
  
@@ -4374,7 +4361,7 @@ index c3241e5c51..e2cc13ea58 100644
      def test_nemotron_h_overrides_at_callable_level(self):
          from sglang.srt.arg_groups.overrides import _nemotron_h_overrides
  
-@@ -1089,6 +1117,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+@@ -1217,6 +1245,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
          with (
              patch.object(overrides_module, "is_sm90_supported", return_value=True),
              patch.object(overrides_module, "is_sm100_supported", return_value=False),
@@ -4382,7 +4369,7 @@ index c3241e5c51..e2cc13ea58 100644
          ):
              self.assertEqual(
                  _flashinfer_allreduce_fusion_auto_enable(_view()),
-@@ -1128,6 +1157,19 @@ class TestGoldenModelOverrides(_IsolatedPublish):
+@@ -1256,6 +1285,19 @@ class TestGoldenModelOverrides(_IsolatedPublish):
                  {},
              )
  

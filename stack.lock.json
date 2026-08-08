@@ -1,8 +1,16 @@
 {
   "schema": 1,
+  "release": {
+    "manifest": "release.json",
+    "version": "0.1.0",
+    "candidate": 1,
+    "candidate_tag": "v0.1.0-rc.1",
+    "stable_tag": "v0.1.0",
+    "cache_schema": "v2"
+  },
   "image": {
-    "repository": "ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120",
-    "tag": "dsv4-0731",
+    "repository": "sglang-deepseek-v4-flash-sm120",
+    "tag": "v0.1.0-rc.1",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -16,28 +24,43 @@
   },
   "pins": [
     {
+      "arg": "DSV4_0731_RELEASE_VERSION",
+      "value": "0.1.0",
+      "description": "Stable SemVer target. Candidate and stable tags are derived by release.json."
+    },
+    {
+      "arg": "DSV4_0731_RELEASE_CANDIDATE",
+      "value": "1",
+      "description": "Release-candidate ordinal for the 0.1.0 release line."
+    },
+    {
+      "arg": "DSV4_0731_CACHE_SCHEMA",
+      "value": "v2",
+      "description": "Runtime compilation-cache compatibility namespace, versioned independently from the image."
+    },
+    {
       "arg": "DSV4_0731_SGLANG_BASE",
-      "value": "lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86@sha256:687efca081e85f4e3126456ff389b1af515fc08a604de4c61f947f531963aba7",
-      "description": "Official CUDA 13 SGLang nightly base image, pinned by digest."
+      "value": "lmsysorg/sglang:nightly-dev-cu13-20260808-ce84df0f@sha256:e65e3995661d16f829f9eb1280feb7d8b8bdcb305eb84e95e68824a2328f9a98",
+      "description": "Official CUDA 13 / Torch 2.13 SGLang nightly base image, pinned by digest."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE_HEAD",
-      "value": "12eadf86f12aec2e6f81a6e38b61b964a4c6b529",
+      "value": "ce84df0fa111c992eb8cc3efc03a2941c9ce18fa",
       "description": "SGLang commit the base image was built from."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "4ad990ba7d75bb9f948f5f6bd8d79a66b5d3fd63",
+      "value": "dc9624deb2f03ebe5e52bd03337addf91386c041",
       "description": "SGLang main commit checked out in the image."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "671cb86de1275cfc17a4f48c5cea5bf86d3c82d6",
+      "value": "3a32d82ef3599f60c86da23d9e797f0e32c01715",
       "description": "Tree of the SGLang main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "0933958ed9e7c26084a3c6dfe2c234289c7fd02e",
+      "value": "e55c17b745f467c850ecdc899ab19effbc497ab7",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -81,14 +104,24 @@
       "description": "SGLang PR #32815 head included in the source patch."
     },
     {
-      "arg": "DSV4_0731_SGLANG_PR33616_HEAD",
-      "value": "3ed2a0adf3d87b0f527c173a500dfb40d64b572f",
-      "description": "SGLang PR #33616 (FlashInfer mHC fusion for DSV4), merged upstream; pinned head carried here."
+      "arg": "DSV4_0731_SGLANG_PR33518_HEAD",
+      "value": "c3249eb94c8acca935a9978656ab57fd054657c0",
+      "description": "Current SGLang PR #33518 head (sglext_spec: per-request speculative statistics on the OpenAI endpoints)."
     },
     {
-      "arg": "DSV4_0731_SGLANG_PR33518_HEAD",
-      "value": "217d7f9c8417081d65d2c87c4c341d2de7c26241",
-      "description": "SGLang PR #33518 (sglext_spec: per-request speculative statistics on the OpenAI endpoints)."
+      "arg": "DSV4_0731_SGLANG_PR33518_CHANGE",
+      "value": "1c3f7b70acf4a8fac5154a4581915ce3e8f587f6",
+      "description": "The unique #33518 implementation commit replayed from its current head; the head also contains an upstream-main merge."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR33568_HEAD",
+      "value": "cab45a29997f8898e076e9253741a5119a401db0",
+      "description": "SGLang PR #33568: match DSV4/DSV32 tool prompts to the reference encoding."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR33805_HEAD",
+      "value": "26a2a3981798b8deb97d053d163fa3c48668e03f",
+      "description": "SGLang PR #33805: run SWA eviction on the DFLASH/DSPARK speculative path."
     },
     {
       "arg": "DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD",
@@ -111,23 +144,23 @@
       "description": "Local fix: bound the allreduce-only kAllReduce path by the same token cap as the fused path, so prefill-sized all-reduces use NCCL."
     },
     {
-      "arg": "DSV4_0731_SGLANG_DSPARK_SWA_EVICTION_HEAD",
-      "value": "bcc988b92823c5a1be8d6cee0a3527770f07c6cf",
-      "description": "Local fix: run SWA window eviction on the dflash/dspark speculative decode path, so a single request is no longer retracted at swa_full_tokens_ratio x max_total_num_tokens generated tokens."
+      "arg": "DSV4_0731_SGLANG_PCIE_IPC_CONSUMER_HEAD",
+      "value": "790a72c26435eb6beec8445fa9fab408efa04754",
+      "description": "Current-main replay of the local SGLang consumer for FlashInfer PR #4393."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
-      "value": "0263dc2929ccdce84b9989cae4e8ac948bdadf46",
+      "value": "29196cf437778906c72630dc5d9850de547501de",
       "description": "FlashInfer main commit the Python wheel is built from."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_TREE",
-      "value": "cea60611159f4c37534d5a2b72935f6ea66f9b7d",
+      "value": "98ea59af67c5672b8b2af4f00cbc6f61768f39ea",
       "description": "Tree of the FlashInfer main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_EFFECTIVE_TREE",
-      "value": "931d1f65665c49de68c1b18940c881e585c4f77c",
+      "value": "a089f6c4beaf103306775014a7a3d42eed1214c5",
       "description": "FlashInfer tree after the single source patch, as built into the wheel."
     },
     {
@@ -136,45 +169,40 @@
       "description": "FlashInfer PR #4308 head included in the source patch."
     },
     {
-      "arg": "DSV4_0731_FLASHINFER_PR4380_HEAD",
-      "value": "dc963cc0c7518a333aa0e6fb14b9fe4606ead445",
-      "description": "FlashInfer PR #4380 (consolidated DSV4 sparse MLA top-k 192/256 support)."
-    },
-    {
       "arg": "DSV4_0731_FLASHINFER_PR4393_HEAD",
       "value": "6573c6520eae1e2ff205d64a86dd58d3fa028c81",
       "description": "FlashInfer PR #4393 (pcie_ipc all-reduce for intra-node PCIe machines)."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_VERSION",
-      "value": "0.6.18.dev20260807",
+      "value": "0.6.18.dev20260808",
       "description": "FlashInfer version of both the built Python wheel and the cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_URL",
-      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260807/flashinfer_cubin-0.6.18.dev20260807-py3-none-any.whl",
+      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260808/flashinfer_cubin-0.6.18.dev20260808-py3-none-any.whl",
       "description": "Prebuilt cubin wheel matching the FlashInfer version."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_SHA256",
-      "value": "67832892402588edd71e3fdbd943f13c47731ac4f63f8a0f183c534533f7c497",
+      "value": "1717fb97473a1a11684487190122a1a96e2bf5c730537a5b127d3650c51f8149",
       "description": "SHA256 of the cubin wheel, enforced by the installer."
     }
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-perf-r11.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.1.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "967c84d8cfdc30b0b36780e64ecb4df5f0c97924b019672525da4680812140a2",
-      "description": "SGLang PRs #29927, #33614, #32194, #30700, #32330 (rebased), #32686, #32815, #32183, #33616 and #33518 at the heads pinned above, five local fixes, the DSV4/DSV32 tool-schema encoding fix, and a local consumer for FlashInfer PR #4393's pcie_ipc all-reduce."
+      "sha256": "3c9d0e47a46b3f996340bec129a8bb7723e22820431e8e2ed27de3ff192cf05f",
+      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #32183, #33518, #33568 and #33805 plus the remaining local all-reduce fixes. Merged #33616 is supplied by main and is not carried."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-perf-refresh.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.1.patch",
       "repository": "flashinfer",
       "order": 1,
-      "sha256": "8d0101038db692ad688c91a8ea8def35ec07a5cd8e5768eec933e92f363b2e99",
-      "description": "FlashInfer PRs #4308, #4380 and #4393 at the heads pinned above."
+      "sha256": "ec5f9d0369265459f155e060c6282a3d35f22c846ecf900b0ae191cfa7927352",
+      "description": "Open FlashInfer PRs #4308 and #4393. Merged #4329 and #4380 are supplied by main and are not carried; #4380 replaced the former #4309 carry."
     }
   ],
   "verification": {

@@ -2,21 +2,26 @@
 
 An SGLang container image for serving DeepSeek-V4-Flash-0731 on RTX PRO 6000 Blackwell (SM120) GPUs, built from pinned upstream sources plus a small set of patches that are not yet in an upstream release.
 
-Canonical image:
+Current release candidate:
 
 ```
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:dsv4-0731
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.1
 ```
 
-One `linux/amd64` image is published under that single tag. There is deliberately no `latest` tag.
+After the candidate passes the project acceptance gates, its exact manifest is
+promoted without rebuilding to `v0.1.0`. Both tags are immutable. The workflow
+also emits an immutable `build-N` diagnostic tag; there is deliberately no
+`latest` or model-name moving alias. [release.json](release.json) is the version
+source of truth and uses cache namespace `v2`, which is versioned independently
+from the image.
 
 See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh) for the validated serving configuration.
 
 ## Source composition
 
-- Base: the official CUDA 13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260803-12eadf86`, pinned by digest.
-- SGLang: main `4ad990ba`, plus a single source patch carrying the pinned heads of ten upstream pull requests, five local fixes, a local tool-schema encoding fix, and a local consumer for FlashInfer PR #4393. The final tree in the image is `0933958e`.
-- FlashInfer: main `0263dc29` (version `0.6.18.dev20260807`), rebuilt from source with a single patch carrying upstream PRs #4308, #4380 and #4393, giving tree `931d1f65`. PR #3903 is already in main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
+- Base: the official CUDA 13 / Torch 2.13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260808-ce84df0f`, pinned by digest.
+- SGLang: current main `dc9624de`, plus one source patch containing only the still-open carries and remaining local integration changes. The final tree is `e55c17b7`.
+- FlashInfer: current main `29196cf4` (version `0.6.18.dev20260808`), rebuilt from source with only open PRs #4308 and #4393, giving tree `a089f6c4`. Merged PRs #4329 and #4380 are supplied by main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
 
@@ -33,10 +38,10 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 | SGLang PR #32686 | `15c0902e` | DeepGEMM warmup: pick the largest warmup `M` that fits the memory budget |
 | SGLang PR #32815 | `1dbf09f6` | Enable FP8 W_o_A GEMM when the installed DeepGEMM supports it |
 | FlashInfer PR #4308 | `4ec7f230` | Makes the fused-MoE profiler's MXFP8 × MXFP4 quantization state match the runtime path, so autotuning stays enabled |
-| FlashInfer PR #4380 | `dc963cc0` | Maintainer-consolidated DSV4 sparse MLA top-k 192/256 support; replaces the earlier #4309 |
 | FlashInfer PR #4393 | `6573c652` | `pcie_ipc` all-reduce for intra-node PCIe machines with no NVLink or multicast. Present in the image; off by default |
-| SGLang PR #33616 | `3ed2a0ad` | FlashInfer mHC fusion for DSV4, behind `SGLANG_OPT_USE_FLASHINFER_MHC`. Merged upstream |
-| SGLang PR #33518 | `217d7f9c` | Per-request speculative statistics on the OpenAI endpoints, behind `return_spec_tokens_details` |
+| SGLang PR #33518 | `c3249eb9` | Per-request speculative statistics on the OpenAI endpoints, behind `return_spec_tokens_details`; the current head's unique implementation commit is `1c3f7b70` |
+| SGLang PR #33568 | `cab45a29` | Match DSV4/DSV32 tool prompts to DeepSeek's reference encoding |
+| SGLang PR #33805 | `26a2a398` | Run sliding-window KV eviction on the DFLASH/DSPARK speculative path |
 
 Every carried pull request, its owner, and when we can drop it:
 
@@ -51,14 +56,16 @@ Every carried pull request, its owner, and when we can drop it:
 | SGLang PR #32815 | `1dbf09f6` | ormandj | merged |
 | SGLang PR #32183 | `22ef4312` | slchenchn | merged |
 | FlashInfer PR #4308 | `4ec7f230` | — | merged |
-| FlashInfer PR #4380 | `dc963cc0` | — | merged |
 | FlashInfer PR #4393 | `6573c652` | — | merged |
-| SGLang PR #33616 | `3ed2a0ad` | trevor-m | already merged; drops on rebase |
-| SGLang PR #33518 | `217d7f9c` | Muqi1029 | merged |
+| SGLang PR #33518 | `c3249eb9` | Muqi1029 | merged |
+| SGLang PR #33568 | `cab45a29` | ormandj | merged |
+| SGLang PR #33805 | `26a2a398` | ormandj | merged |
 
-SGLang PR #33140 (official DSV4 reasoning-effort support) was carried until it
-merged upstream as `059269594c`; it is present in this base and no longer
-patched in.
+The current-main refresh removed SGLang #33616 and FlashInfer #4380 because
+they merged. It also removed the previously unlisted FlashInfer #4329 patch
+content because that change is now in main. FlashInfer #4380 is the upstream
+replacement for the former #4309 carry. SGLang #33140 was removed by an
+earlier refresh after it merged as `059269594c`.
 
 Image-local fixes:
 
@@ -68,8 +75,7 @@ Image-local fixes:
 | SGLang all-reduce prefill workspace | `73d125d0` | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
 | SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
-| SGLang dspark SWA eviction | `bcc988b9` | Runs sliding-window KV eviction on the DFLASH/DSPARK speculative decode path. Without it, hybrid-SWA models retain SWA KV for every generated token and a single request is retracted at `swa-full-tokens-ratio x max_total_num_tokens` generated tokens (reproduced at exactly 77,824 on this hardware); upstream's own pool sizing assumes this eviction runs |
-| SGLang DSV4/DSV32 tool-schema encoding | — | Keeps unset protocol-model defaults (most visibly `strict: false`) out of the rendered DSV4/DSV32 tool schemas, so served prompts match the checkpoint's reference encoder exactly; proposed upstream in SGLang PR #33568 |
+| SGLang pcie_ipc consumer | `790a72c2` | Makes FlashInfer PR #4393's backend selectable from SGLang; the FlashInfer PR provides kernels and policy but no SGLang integration |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
@@ -85,16 +91,16 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 | `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | Runs the slower top-k transform; no override possible | TBD — gating alone changes no default |
 | DSpark speculative decoding never accumulates presence/frequency/repetition penalties: `eagle_prepare_for_decode` calls `cumulate_penalty_output_tokens`, the dflash-family branch does not | Those sampling penalties are silently inert under DSpark | TBD |
 
-Separately, [sgl-project/sglang#33805](https://github.com/sgl-project/sglang/pull/33805)
-(sliding-window KV eviction on the dflash-family speculative decode path) is
-open; it is already carried in this image as the dspark SWA eviction fix above.
+## Previous r11 evidence
 
-## Measured performance
+The `v0.1.0-rc.1` current-main refresh has no performance or quality claim
+until it passes the same hardware gates. The figures below describe its
+validated r11 predecessor and remain here as the comparison baseline.
 
-On the validated configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
+On the validated r11 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
 limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
 [llm-inference-bench](https://github.com/local-inference-lab/llm-inference-bench)
-against both this image and `voipmonitor/vllm` v20 r27 in its documented DSpark
+against both r11 and `voipmonitor/vllm` v20 r27 in its documented DSpark
 configuration, same client and same flags:
 
 ### Decode: aggregate tokens/second, per-user tokens/second, TTFT p50
@@ -115,7 +121,7 @@ vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 
 ### Everything else
 
-| | SGLang (this image) | vLLM v20 r27 |
+| | SGLang (r11 predecessor) | vLLM v20 r27 |
 |---|---:|---:|
 | prefill @ 8k | 7,342 tok/s | **7,540 tok/s** |
 | prefill @ 64k | 8,320 tok/s | **8,945 tok/s** |
