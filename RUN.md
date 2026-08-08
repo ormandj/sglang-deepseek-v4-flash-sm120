@@ -69,6 +69,26 @@ Both indexers make the context-scaled allocation described under KV capacity
 below, so this choice does not affect that requirement. Remove the three
 settings to fall back to the TileLang default.
 
+## Idle CPU usage
+
+The script passes `--sleep-on-idle`. Without it SGLang's scheduler busy-waits
+between requests, pinning one CPU thread per rank at 100% -- two cores at TP=2,
+continuously, even with no traffic.
+
+The flag replaces the spin with a `zmq.Poller` blocking wait on the sockets that
+carry incoming requests, so it costs no wake-up latency: an arriving request
+signals the socket immediately, and the poll timeout only bounds how long the
+scheduler blocks when nothing arrives. It runs on the rank-0 scheduler only, so
+the collective ranks are unaffected.
+
+It matters more than it looks on power-limited cards. These are 300 W Max-Q
+parts; two cores spinning at 100% is package power and heat spent for nothing,
+and it eats the thermal headroom a burst of traffic would otherwise have.
+
+The sleeper can also periodically call `empty_cache()`, but only when
+`SGLANG_EMPTY_CACHE_INTERVAL` is set above zero. It defaults to `-1`, so with
+this image's defaults no allocator flush is introduced.
+
 ## Speculative decoding depth
 
 The script sets `--speculative-dspark-block-size` explicitly. The checkpoint's
