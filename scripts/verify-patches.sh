@@ -11,9 +11,20 @@ cd "$repo"
 lock=stack.lock.json
 containerfile=Containerfile
 
-for tool in jq git sha256sum; do
+for tool in jq git; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
+
+if command -v sha256sum >/dev/null; then
+  sha256_file() { sha256sum "$1" | cut -d' ' -f1; }
+elif command -v shasum >/dev/null; then
+  sha256_file() { shasum -a 256 "$1" | cut -d' ' -f1; }
+else
+  echo "missing required SHA-256 tool: sha256sum or shasum" >&2
+  exit 1
+fi
+
+"$repo/scripts/validate-release.sh"
 
 lock_value() {
   jq -r --arg arg "$1" '.pins[] | select(.arg == $arg) | .value' "$lock"
@@ -39,7 +50,7 @@ done < <(sed -n 's/^ARG \([A-Z0-9_]*\)=.*/\1/p' "$containerfile")
 echo "== patch bytes match the lock and are the ones the Containerfile copies =="
 while IFS=$'\t' read -r path sha; do
   [[ -f "$path" ]] || { echo "missing patch: $path" >&2; exit 1; }
-  actual=$(sha256sum "$path" | cut -d' ' -f1)
+  actual=$(sha256_file "$path")
   if [[ "$actual" != "$sha" ]]; then
     echo "sha256 mismatch for $path: lock $sha, file $actual" >&2
     exit 1
