@@ -82,8 +82,12 @@ ARG IMAGE_SOURCE_REVISION
 
 COPY patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.1.patch /tmp/sglang-release.patch
 # The tree check pins the single source patch and proves it applies to the
-# selected current-main tree.
+# selected current-main tree. Local-build nightlies can retain actions/checkout's
+# now-expired authorization header in the copied repository, so scrub it and
+# restore the public origin before fetching.
 RUN set -e; cd /sgl-workspace/sglang; \
+    git config --local --unset-all http.https://github.com/.extraheader || true; \
+    git remote set-url origin https://github.com/sgl-project/sglang.git; \
     git fetch --depth=1 origin "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
     git checkout --detach FETCH_HEAD; \
     git reset --hard "${DSV4_0731_SGLANG_MAIN_HEAD}"; \
