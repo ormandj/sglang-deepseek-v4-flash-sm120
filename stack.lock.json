@@ -150,7 +150,7 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_DSPARK_SHARED_EXPERT_HEAD",
-      "value": "752a09a78b1b82faa6eaa4828d81e3e4232caa5f",
+      "value": "16797c8c75a2f87cfd61ad7c4f029cc0f30e9a8a",
       "description": "Local correctness fix: keep DSpark draft shared experts separate after SGLang #33889 made fusion decisions runner-local."
     },
     {

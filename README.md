@@ -76,7 +76,7 @@ Image-local fixes:
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
 | SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
 | SGLang pcie_ipc consumer | `790a72c2` | Makes FlashInfer PR #4393's backend selectable from SGLang; the FlashInfer PR provides kernels and policy but no SGLang integration |
-| SGLang DSpark shared-expert gate | `752a09a7` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot, rejected all bundled shared-expert weights, and cut speculative acceptance from the r11 ~0.32 median to 0.136 |
+| SGLang DSpark shared-expert gate | `16797c8c` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot, rejected all bundled shared-expert weights, and cut speculative acceptance from the r11 ~0.32 median to 0.136 |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
