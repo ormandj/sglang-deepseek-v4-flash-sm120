@@ -69,6 +69,18 @@ Both indexers make the context-scaled allocation described under KV capacity
 below, so this choice does not affect that requirement. Remove the three
 settings to fall back to the TileLang default.
 
+## Prefix cache reporting
+
+The script passes `--enable-cache-report`, which populates
+`usage.prompt_tokens_details.cached_tokens` on OpenAI responses -- the standard
+field for how much of a prompt was served from the prefix cache.
+
+It costs nothing. `cached_tokens` is already carried in the engine's per-request
+`meta_info`; the flag only controls whether the response surfaces it. With a
+774,656-token window and a radix cache, multi-turn and shared-prefix workloads
+reuse a large fraction of their prompts, and without this flag a client has no
+way to see it.
+
 ## Idle CPU usage
 
 The script passes `--sleep-on-idle`. Without it SGLang's scheduler busy-waits

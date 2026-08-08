@@ -79,6 +79,7 @@ exec docker run --rm \
   --reasoning-parser deepseek-v4 \
   --tool-call-parser deepseekv4 \
   --enable-metrics \
+  --enable-cache-report \
   --sleep-on-idle \
   --host 0.0.0.0 \
   --port 8000
