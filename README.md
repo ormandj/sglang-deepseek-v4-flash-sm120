@@ -76,7 +76,7 @@ Image-local fixes:
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
 | SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
 | SGLang pcie_ipc consumer | `790a72c2` | Makes FlashInfer PR #4393's backend selectable from SGLang; the FlashInfer PR provides kernels and policy but no SGLang integration |
-| SGLang DSpark shared-expert gate | `16797c8c` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot, rejected all bundled shared-expert weights, and cut speculative acceptance from the r11 ~0.32 median to 0.136 |
+| SGLang DSpark shared-expert gate | `16797c8c` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot and rejected all bundled shared-expert weights. Corrected counters measured 13.59% draft-token acceptance on rc.1 and 39.69% after the gate on rc.2 |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
@@ -92,31 +92,83 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 | `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | Runs the slower top-k transform; no override possible | TBD — gating alone changes no default |
 | DSpark speculative decoding never accumulates presence/frequency/repetition penalties: `eagle_prepare_for_decode` calls `cumulate_penalty_output_tokens`, the dflash-family branch does not | Those sampling penalties are silently inert under DSpark | TBD |
 
-## v0.1.0-rc.2 performance gate
+## v0.1.0-rc.2 validation
 
-The source-identical private rc.2 image was tested on the production 2x RTX PRO 6000
-Blackwell Max-Q TP=2 deployment after a clean-cache startup. The complete gate
-artifact is
-`/models/.bench-results/v0.1.0-rc.2-20260808/diagnostic-r1`.
-Reference values below are medians recomputed from all five saved
+The source-identical private rc.2 image was tested on the production 2x RTX PRO
+6000 Blackwell Max-Q TP=2 deployment after a clean-cache startup. The public
+image is
+`ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2@sha256:71766e76fd1ffd2bcac4ba79cbeb2317b326144558fc2e7bb49e2bbea05e8cbb`.
+
+### rc.1 regression and rc.2 fix
+
+The matched diagnostic changes only the DSpark shared-expert gate. rc.1 had
+rejected every bundled draft shared-expert tensor; rc.2 loaded the separate
+draft experts normally.
+
+| C | rc.1 before fix | rc.2 after fix | delta |
+|---:|---:|---:|---:|
+| 1 | 104.7 | 200.1 | +91.1% |
+| 2 | 164.1 | 299.1 | +82.3% |
+| 4 | 244.7 | 432.2 | +76.6% |
+| 8 | 344.1 | 593.7 | +72.5% |
+| 16 | 535.7 | 909.9 | +69.9% |
+| 32 | 777.1 | 1,318.4 | +69.7% |
+
+Corrected SGLang counters moved from 13.59% to 39.69% draft-token acceptance
+and from 1.680 to 2.984 accepted tokens per verification including the target
+bonus. This establishes that the rc.1 regression is fixed.
+
+### Repeated performance and quality campaign
+
+Five independent accepted runs each include warmups, 30-second sustained
+decode at C1/C2/C4/C8/C16/C32, five coding requests, exact cold
+8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted run passed
+admission, timing, speculative-counter, prefill, coding, and quality
+validation. Access-log audits found only the in-pod `127.0.0.1` client. One
+overlapped attempt was deleted and is not part of these results.
+
+The comparison values are medians recomputed directly from all five saved
 `r9-armD-w5-r1..r5` artifacts used for the published r11 table.
 
-| C | r11 reference tok/s | rc.2 tok/s | delta |
+| C | r11 median tok/s | rc.2 n=5 median tok/s | delta |
 |---:|---:|---:|---:|
-| 1 | 194.1 | 200.1 | +3.13% |
-| 2 | 295.6 | 299.1 | +1.19% |
-| 4 | 439.9 | 432.2 | -1.74% |
-| 8 | 597.7 | 593.7 | -0.68% |
-| 16 | 909.3 | 909.9 | +0.07% |
-| 32 | 1,315.0 | 1,318.4 | +0.26% |
+| 1 | 194.1 | 187.9 | -3.16% |
+| 2 | 295.6 | 397.4 | +34.43% |
+| 4 | 439.9 | 438.1 | -0.40% |
+| 8 | 597.7 | 606.1 | +1.39% |
+| 16 | 909.3 | 913.1 | +0.42% |
+| 32 | 1,315.0 | 1,316.5 | +0.11% |
 
-Exact cold prefill was 7,370 / 8,326 / 7,747 tok/s at 8K/64K/128K,
-respectively (+0.38% / +0.07% / +0.19% versus the reference medians). The
-five-request coding median was 267.4 tok/s (+0.99%). Corrected SGLang counters
-reported 39.69% draft-token acceptance and 2.984 accepted tokens per
-verification including the target bonus; rc.1 measured 13.59% and 1.680 on the
-same fields. This gate establishes that the rc.1 performance regression is
-fixed; the repeated quality and long-write campaign is tracked separately.
+The C2 result is reproducible across the five rc.2 runs (397.1-400.6 tok/s)
+but differs from the 299.1 tok/s diagnostic gate. It is reported without
+attributing that uplift to the shared-expert fix; the other concurrency cells
+are within 3.2% of the published reference.
+
+| Exact cold prefill | r11 median tok/s | rc.2 n=5 median tok/s | delta |
+|---:|---:|---:|---:|
+| 8K | 7,342 | 7,378 | +0.49% |
+| 64K | 8,320 | 8,530 | +2.52% |
+| 128K | 7,732 | 7,934 | +2.61% |
+
+The five-run coding median was 267.9 tok/s versus 264.8 (+1.19%). Corrected
+speculative counters reported a 42.17% median draft-token acceptance rate and
+3.109 accepted tokens per verification including the target bonus.
+
+GSM8K averaged 93.72% accuracy (6,181/6,595 correct) versus 93.75%
+(6,183/6,595) on r11. All 6,595 rc.2 responses were extractable and had valid
+finish reasons. Median aggregate throughput was 369.9 tok/s versus 372.4, and
+mean wall time was 318.3 seconds versus 314.8.
+
+The matched long-write check used eight sequential requests with
+`reasoning_effort=max`, temperature 1.0, top-p 0.95, and a 131,072-token cap.
+rc.2 completed 8/8 with normal stop reasons, closed HTML fences and documents,
+no placeholders, and JavaScript accepted by `node --check`. The true median
+completion length was 57,956.5 tokens (17,110-67,884), versus r11's 57,029.5
+(47,298-66,123).
+
+Operator-local artifacts are retained under
+`/models/.bench-results/v0.1.0-rc.2-20260808/` on the model PVC and the matching
+gitignored `bench/results/v0.1.0-rc.2-20260808/` project directory.
 
 ## Previous r11 evidence
 
