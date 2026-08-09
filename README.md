@@ -92,13 +92,37 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 | `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | Runs the slower top-k transform; no override possible | TBD — gating alone changes no default |
 | DSpark speculative decoding never accumulates presence/frequency/repetition penalties: `eagle_prepare_for_decode` calls `cumulate_penalty_output_tokens`, the dflash-family branch does not | Those sampling penalties are silently inert under DSpark | TBD |
 
+## v0.1.0-rc.2 performance gate
+
+The source-identical private rc.2 image was tested on the production 2x RTX PRO 6000
+Blackwell Max-Q TP=2 deployment after a clean-cache startup. The complete gate
+artifact is
+`/models/.bench-results/v0.1.0-rc.2-20260808/diagnostic-r1`.
+Reference values below are medians recomputed from all five saved
+`r9-armD-w5-r1..r5` artifacts used for the published r11 table.
+
+| C | r11 reference tok/s | rc.2 tok/s | delta |
+|---:|---:|---:|---:|
+| 1 | 194.1 | 200.1 | +3.13% |
+| 2 | 295.6 | 299.1 | +1.19% |
+| 4 | 439.9 | 432.2 | -1.74% |
+| 8 | 597.7 | 593.7 | -0.68% |
+| 16 | 909.3 | 909.9 | +0.07% |
+| 32 | 1,315.0 | 1,318.4 | +0.26% |
+
+Exact cold prefill was 7,370 / 8,326 / 7,747 tok/s at 8K/64K/128K,
+respectively (+0.38% / +0.07% / +0.19% versus the reference medians). The
+five-request coding median was 267.4 tok/s (+0.99%). Corrected SGLang counters
+reported 39.69% draft-token acceptance and 2.984 accepted tokens per
+verification including the target bonus; rc.1 measured 13.59% and 1.680 on the
+same fields. This gate establishes that the rc.1 performance regression is
+fixed; the repeated quality and long-write campaign is tracked separately.
+
 ## Previous r11 evidence
 
 `v0.1.0-rc.1` is not promotable: its DSpark draft skipped the shared-expert
-weights and regressed decode by 41-46%. The corrected `v0.1.0-rc.2` has no
-performance or quality claim until it passes the same hardware gates. The
-figures below describe its validated r11 predecessor and remain here as the
-comparison baseline.
+weights and regressed decode by 41-46%. The figures below describe its
+validated r11 predecessor and remain here as the comparison baseline.
 
 On the validated r11 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
 limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
