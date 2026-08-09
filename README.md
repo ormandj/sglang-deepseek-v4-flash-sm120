@@ -20,8 +20,8 @@ See [RUN.md](RUN.md) for the run guide and [examples/serve-dsv4-0731.sh](example
 ## Source composition
 
 - Base: the official CUDA 13 / Torch 2.13 SGLang nightly `lmsysorg/sglang:nightly-dev-cu13-20260808-ce84df0f`, pinned by digest.
-- SGLang: current main `dc9624de`, plus one source patch containing only the still-open carries and remaining local integration changes. The final tree is `cee50a9f`.
-- FlashInfer: current main `29196cf4` (version `0.6.18.dev20260808`), rebuilt from source with only open PRs #4308 and #4393, giving tree `a089f6c4`. Merged PRs #4329 and #4380 are supplied by main. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
+- SGLang: release-pinned main commit `dc9624de`, plus one source patch containing the listed carries and remaining local integration changes. The final tree is `cee50a9f`.
+- FlashInfer: release-pinned main commit `29196cf4` (version `0.6.18.dev20260808`), rebuilt from source with PRs #4308 and #4393, giving tree `a089f6c4`. Merged PRs #4329 and #4380 are supplied by that main commit. The matching cubin wheel is installed by URL and pinned by SHA256. The prebuilt JIT-cache wheel is removed so the patched SM120 modules compile once into the persistent runtime cache.
 
 Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-patches.sh](scripts/verify-patches.sh) checks that the lock, the `Containerfile`, and the patch bytes agree, then clones the pinned commits and confirms that applying the patches in build order reproduces the recorded tree hashes.
 
@@ -29,8 +29,8 @@ Every pin is recorded in [stack.lock.json](stack.lock.json). [scripts/verify-pat
 
 | Source | Head | Scope in this image |
 |---|---|---|
-| SGLang PR #29927 | `21a5bc8e` | Complete SM120 DSV4 stack: DeepGEMM paged-MQA indexer, batched sparse-MLA prefill, and FP4 MoE. On this hardware it raises both prefill throughput and speculative acceptance length |
-| SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. At block size 7 the verify width is 8, so the planner rewrote only part of the window and compressed attention state was polluted every 4 tokens. Long single-file code generation went from 0/8 to 14/14 complete (closed code fence plus `node --check`), greedy 0/1 to 3/3, and decode rose from 237.5 to 319.8 tok/s |
+| SGLang PR #29927 | `21a5bc8e` | Complete SM120 DSV4 stack: DeepGEMM paged-MQA indexer, batched sparse-MLA prefill, and FP4 MoE |
+| SGLang PR #32183 | `22ef4312` | Propagates the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded `kMaxMTPDraftTokens = 4` rewrite window. Without it, verifier widths above four rewrite only part of the window and eventually pollute compressed attention state during long generation |
 | SGLang PR #33614 | `56eae704` | Keeps DSpark speculative sampling state identical across TP ranks |
 | SGLang PR #32194 | `f8fac391` | Skip unused DSV4 draft metadata in speculative decoding |
 | SGLang PR #30700 | `aead319d` | FlashInfer all-reduce-only dispatch and auto-enable |
@@ -74,9 +74,9 @@ Image-local fixes:
 | SGLang SM120 DeepGEMM capability probe | `d4dc7502` | Enables the SM120 DeepGEMM capability when the required grouped FP4 symbol is installed |
 | SGLang all-reduce prefill workspace | `73d125d0` | Sizes the FlashInfer all-reduce workspace for the largest configured prefill forward before CUDA graph capture |
 | SGLang SM120 all-reduce execution gate | `861b99ca` | Admits SM120 through the all-reduce execution gate for the backend enabled by PR #32330 |
-| SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward routes prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring. Worth +3.7% prefill at 64k and +2.0% at 128k here, while decode keeps the FlashInfer kernel |
+| SGLang all-reduce token cap | `f99f4a0b` | Bounds the all-reduce-only kAllReduce path by the same token cap as the fused path. Without it the only ceiling is the workspace allocation, so sizing that workspace for the prefill forward can route prefill-sized all-reduces onto a min-latency kernel instead of the NCCL ring |
 | SGLang pcie_ipc consumer | `790a72c2` | Makes FlashInfer PR #4393's backend selectable from SGLang; the FlashInfer PR provides kernels and policy but no SGLang integration |
-| SGLang DSpark shared-expert gate | `16797c8c` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft built an extra fused expert slot and rejected all bundled shared-expert weights. Corrected counters measured 13.59% draft-token acceptance on rc.1 and 39.69% after the gate on rc.2 |
+| SGLang DSpark shared-expert gate | `16797c8c` | Keeps the DSpark draft on separate shared-expert modules after #33889 made fusion decisions runner-local. Without this gate the draft builds an extra fused expert slot and rejects all bundled shared-expert weights |
 
 The intent is upstream-first: everything here is either an open upstream pull request carried at a pinned head, or a narrow local fix intended to be replaced by an upstream change. As those land, the corresponding patch content is dropped rather than maintained.
 
@@ -88,134 +88,65 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 
 | Finding | Effect here | Upstream status |
 |---|---|---|
-| The SM120 branch disables both fused MHC pre-norm paths, forcing an eager float32 fallback measured at ~15% of a 128k prefill. The guard predates first-class SM120 support for the DeepGEMM `tf32_hc_prenorm_gemm` kernel | +19.6% prefill at 128k once re-enabled | TBD — the TileLang half of the same guard is justified and should stay (it fails CUDA graph capture on SM120) |
-| `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | Runs the slower top-k transform; no override possible | TBD — gating alone changes no default |
+| The SM120 branch disables both fused MHC pre-norm paths, forcing an eager float32 fallback. The guard predates first-class SM120 support for the DeepGEMM `tf32_hc_prenorm_gemm` kernel | The validated runtime re-enables the DeepGEMM path | TBD — the TileLang half of the same guard is justified and should stay (it fails CUDA graph capture on SM120) |
+| `SGLANG_OPT_USE_TOPK_V2` is force-disabled on SM120 without an `is_set()` guard, unlike its neighbours, so an operator-set value is overridden with no escape hatch | An explicit operator selection cannot be honored | TBD — gating alone changes no default |
 | DSpark speculative decoding never accumulates presence/frequency/repetition penalties: `eagle_prepare_for_decode` calls `cumulate_penalty_output_tokens`, the dflash-family branch does not | Those sampling penalties are silently inert under DSpark | TBD |
 
-## v0.1.0-rc.2 validation
+## Current v0.1.0-rc.2 validation
 
-The source-identical private rc.2 image was tested on the production 2x RTX PRO
-6000 Blackwell Max-Q TP=2 deployment after a clean-cache startup. The public
-image is
+The source-identical private deployment of rc.2 was compared with the documented
+vLLM DSpark r33 image on the same two RTX PRO 6000 Blackwell Max-Q GPUs, one
+engine at a time. Both used TP=2, DSpark K=5, the same model snapshot, the same
+unmodified `llm_decode_bench.py`, temperature 1.0, and five measured
+repetitions. The public image corresponding to the tested release lock is
 `ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2@sha256:71766e76fd1ffd2bcac4ba79cbeb2317b326144558fc2e7bb49e2bbea05e8cbb`.
 
-### rc.1 regression and rc.2 fix
+### Sustained decode
 
-The rc.1 before-fix diagnostic is compared with post-fix rc.2 medians from five
-accepted repetitions per concurrency. rc.1 had rejected every bundled draft
-shared-expert tensor; rc.2 loaded the separate draft experts normally.
+Aggregate throughput is the median of five independent 20-second runs. TTFT is
+the median of the five per-run p50 values. Every cell reached the requested
+concurrency with zero queueing and zero request errors.
 
-| C | rc.1 before fix | rc.2 after fix n=5 median | delta |
-|---:|---:|---:|---:|
-| 1 | 104.7 | 187.9 | +79.5% |
-| 2 | 164.1 | 403.0 | +145.6% |
-| 4 | 244.7 | 438.1 | +79.0% |
-| 8 | 344.1 | 606.1 | +76.1% |
-| 16 | 535.7 | 913.1 | +70.5% |
-| 32 | 777.1 | 1,316.5 | +69.4% |
+| C | SGLang rc.2 tok/s | vLLM r33 tok/s | SGLang vs vLLM | SGLang p50 TTFT | vLLM p50 TTFT |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 178.4 | 185.5 | -3.8% | 0.190 s | 0.495 s |
+| 2 | 275.9 | 271.3 | +1.7% | 0.375 s | 0.772 s |
+| 4 | 405.8 | 392.1 | +3.5% | 0.366 s | 1.122 s |
+| 8 | 566.2 | 573.7 | -1.3% | 0.382 s | 1.287 s |
+| 16 | 846.1 | 814.2 | +3.9% | 0.399 s | 1.548 s |
+| 32 | 1,234.9 | — | — | 0.447 s | — |
 
-Corrected SGLang counters moved from 13.59% to 39.69% draft-token acceptance
-and from 1.680 to 2.984 accepted tokens per verification including the target
-bonus. This establishes that the rc.1 regression is fixed.
+vLLM r33 was intentionally stopped at C=16: that deployment is configured for
+16 sequences and its KV envelope does not support the C=32 cell. SGLang supports
+and was measured at C=32.
 
-### Repeated performance and quality campaign
+### Exact cold prefill
 
-Decode values below are medians of five accepted repetitions per concurrency.
-The five full runs also include warmups, five coding requests, exact cold
-8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted measurement
-passed admission, timing, speculative-counter, prefill, coding, and quality
-validation.
+Client throughput is prompt tokens divided by TTFT. Each reported value is the
+median of five independently calibrated exact-token runs.
 
-The comparison values are medians recomputed directly from all five saved
-`r9-armD-w5-r1..r5` artifacts used for the published r11 table.
+| target | reported prompt tokens | SGLang rc.2 tok/s | vLLM r33 tok/s | SGLang vs vLLM | SGLang TTFT | vLLM TTFT |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8,192 | 8,194 | 7,395 | 7,659 | -3.4% | 1.108 s | 1.070 s |
+| 65,536 | 65,538 | 8,367 | 8,755 | -4.4% | 7.833 s | 7.486 s |
+| 131,008 | 131,010 | 7,797 | 8,062 | -3.3% | 16.802 s | 16.250 s |
 
-| C | r11 median tok/s | rc.2 n=5 median tok/s | delta |
-|---:|---:|---:|---:|
-| 1 | 194.1 | 187.9 | -3.16% |
-| 2 | 295.6 | 403.0 | +36.33% |
-| 4 | 439.9 | 438.1 | -0.40% |
-| 8 | 597.7 | 606.1 | +1.39% |
-| 16 | 909.3 | 913.1 | +0.42% |
-| 32 | 1,315.0 | 1,316.5 | +0.11% |
+The engines are within 4% across the shared decode cells. vLLM is 3.4-4.6%
+faster on these exact cold-prefill cells, while SGLang has materially lower
+first-token latency in the sustained-decode setup.
 
-| Exact cold prefill | r11 median tok/s | rc.2 n=5 median tok/s | delta |
-|---:|---:|---:|---:|
-| 8K | 7,342 | 7,378 | +0.49% |
-| 64K | 8,320 | 8,530 | +2.52% |
-| 128K | 7,732 | 7,934 | +2.61% |
-
-The five-run coding median was 267.9 tok/s versus 264.8 (+1.19%). Corrected
-speculative counters reported a 42.17% median draft-token acceptance rate and
-3.109 accepted tokens per verification including the target bonus.
-
-GSM8K averaged 93.72% accuracy (6,181/6,595 correct) versus 93.75%
-(6,183/6,595) on r11. All 6,595 rc.2 responses were extractable and had valid
-finish reasons. Median aggregate throughput was 369.9 tok/s versus 372.4, and
-mean wall time was 318.3 seconds versus 314.8.
-
-The matched long-write check used eight sequential requests with
-`reasoning_effort=max`, temperature 1.0, top-p 0.95, and a 131,072-token cap.
-rc.2 completed 8/8 with normal stop reasons, closed HTML fences and documents,
-no placeholders, and JavaScript accepted by `node --check`. The true median
-completion length was 57,956.5 tokens (17,110-67,884), versus r11's 57,029.5
-(47,298-66,123).
-
-## Current rc.2 comparison with vLLM
-
-On the validated rc.2 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W
-hard limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
-[llm-inference-bench](https://github.com/local-inference-lab/llm-inference-bench)
-against `voipmonitor/vllm` v20 r27 in its documented DSpark configuration,
-using the same client and flags:
-
-### Decode: aggregate tokens/second
-
-| concurrency | SGLang rc.2 n=5 median | vLLM v20 r27 | SGLang delta |
-|---|---:|---:|---:|
-| 1 | 187.9 | **199.5** | -5.81% |
-| 2 | **403.0** | 291.3 | +38.35% |
-| 4 | **438.1** | 410.7 | +6.67% |
-| 8 | **606.1** | 589.5 | +2.82% |
-| 16 | **913.1** | 821.4 | +11.16% |
-| 32 | **1,316.5** | — | — |
-
-SGLang figures are medians of five accepted repetitions per concurrency.
-
-vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
-
-### Everything else
-
-| | SGLang rc.2 | vLLM v20 r27 |
-|---|---:|---:|
-| prefill @ 8k | 7,378 tok/s | **7,540 tok/s** |
-| prefill @ 64k | 8,530 tok/s | **8,945 tok/s** |
-| prefill @ 128k | 7,934 tok/s | **8,238 tok/s** |
-| GSM8K accuracy | 0.9372 | 0.9393 |
-| **GSM8K wall clock** | **318.3 s** | 749 s |
-| GSM8K aggregate | **369.9 tok/s** | 159.3 tok/s |
-| long-write complete (131k budget) | **8/8** | 4/4 |
-| long-write median tokens | **57,956.5** | 40,764 |
-| **usable context** | **774,656 tokens** | 133,120 tokens |
-| KV cache | **778,496 tokens** | 143,439 tokens |
-| concurrent 128k requests in KV | **5.9** | 1.1 |
-
-SGLang trails vLLM by 5.8% at C1 and by 2.1-4.6% on prefill. SGLang leads
-sustained decode at C2-C16 by 2.8-38.3%, finishes the 1,319-question GSM8K suite
-in **less than half the wall clock** at comparable accuracy, and serves **5.4x
-the KV capacity** -- it
-accepts the 384K output budget the model card recommends for `high`/`max`
-reasoning, which vLLM rejects outright at `max_model_len 133120`.
-
-Absolute values are specific to Max-Q cards on PCIe Gen 4; a 600 W card on Gen 5
-has twice the power budget and twice the inter-GPU bandwidth. Full tables,
-methodology, and the KV-capacity analysis are in [RUN.md](RUN.md).
+See [BENCHMARKS.md](BENCHMARKS.md) for the pinned benchmark commit and hash,
+exact commands, warmup and admission rules, all per-run values, image
+configuration, the client-side KV guard override used for vLLM, and sanitized
+raw reports. These are the only cross-engine performance figures published by
+this repository; results from older image revisions have been removed.
 
 ## Validated configuration
 
 - Hardware: 2× NVIDIA RTX PRO 6000 Blackwell (SM120), TP=2. SM121 is not validated.
 - Model: [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731), served as `deepseek-v4-flash`.
 - Runtime settings: [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
-- Speculative decoding depth is set explicitly in the serving script; the checkpoint's `config.json` carries `dspark_block_size = 5`. We publish no depth recommendation — see [RUN.md](RUN.md). The fused DeepGEMM MHC pre-norm is re-enabled, worth +19.6% prefill at 128k (measured n=5: 6,717 → 8,034 tok/s).
+- Speculative decoding depth is set explicitly in the serving script; the checkpoint's `config.json` carries `dspark_block_size = 5`. We publish no depth recommendation — see [RUN.md](RUN.md). The validated runtime re-enables the fused DeepGEMM MHC pre-norm path on SM120.
 
 ## License
 
