@@ -101,18 +101,18 @@ image is
 
 ### rc.1 regression and rc.2 fix
 
-The matched diagnostic changes only the DSpark shared-expert gate. rc.1 had
-rejected every bundled draft shared-expert tensor; rc.2 loaded the separate
-draft experts normally.
+The rc.1 before-fix diagnostic is compared with post-fix rc.2 medians from five
+accepted repetitions per concurrency. rc.1 had rejected every bundled draft
+shared-expert tensor; rc.2 loaded the separate draft experts normally.
 
-| C | rc.1 before fix | rc.2 after fix | delta |
+| C | rc.1 before fix | rc.2 after fix n=5 median | delta |
 |---:|---:|---:|---:|
-| 1 | 104.7 | 200.1 | +91.1% |
-| 2 | 164.1 | 299.1 | +82.3% |
-| 4 | 244.7 | 432.2 | +76.6% |
-| 8 | 344.1 | 593.7 | +72.5% |
-| 16 | 535.7 | 909.9 | +69.9% |
-| 32 | 777.1 | 1,318.4 | +69.7% |
+| 1 | 104.7 | 187.9 | +79.5% |
+| 2 | 164.1 | 403.0 | +145.6% |
+| 4 | 244.7 | 438.1 | +79.0% |
+| 8 | 344.1 | 606.1 | +76.1% |
+| 16 | 535.7 | 913.1 | +70.5% |
+| 32 | 777.1 | 1,316.5 | +69.4% |
 
 Corrected SGLang counters moved from 13.59% to 39.69% draft-token acceptance
 and from 1.680 to 2.984 accepted tokens per verification including the target
@@ -120,10 +120,10 @@ bonus. This establishes that the rc.1 regression is fixed.
 
 ### Repeated performance and quality campaign
 
-Five independent accepted runs each include warmups, 30-second sustained
-decode at C1/C2/C4/C8/C16/C32, five coding requests, exact cold
-8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted run passed
-admission, timing, speculative-counter, prefill, coding, and quality
+Decode values below are medians of five accepted repetitions per concurrency.
+The five full runs also include warmups, five coding requests, exact cold
+8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted measurement
+passed admission, timing, speculative-counter, prefill, coding, and quality
 validation.
 
 The comparison values are medians recomputed directly from all five saved
@@ -132,7 +132,7 @@ The comparison values are medians recomputed directly from all five saved
 | C | r11 median tok/s | rc.2 n=5 median tok/s | delta |
 |---:|---:|---:|---:|
 | 1 | 194.1 | 187.9 | -3.16% |
-| 2 | 295.6 | 397.4 | +34.43% |
+| 2 | 295.6 | 403.0 | +36.33% |
 | 4 | 439.9 | 438.1 | -0.40% |
 | 8 | 597.7 | 606.1 | +1.39% |
 | 16 | 909.3 | 913.1 | +0.42% |
