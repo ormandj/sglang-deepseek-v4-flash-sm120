@@ -118,57 +118,9 @@ Corrected SGLang counters moved from 13.59% to 39.69% draft-token acceptance
 and from 1.680 to 2.984 accepted tokens per verification including the target
 bonus. This establishes that the rc.1 regression is fixed.
 
-### Repeated performance and quality campaign
-
-Five independent accepted runs each include warmups, 30-second sustained
-decode at C1/C2/C4/C8/C16/C32, five coding requests, exact cold
-8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted run passed
-admission, timing, speculative-counter, prefill, coding, and quality
-validation. Access-log audits found only the in-pod `127.0.0.1` client. One
-overlapped attempt was deleted and is not part of these results.
-
-The comparison values are medians recomputed directly from all five saved
-`r9-armD-w5-r1..r5` artifacts used for the published r11 table.
-
-| C | r11 median tok/s | rc.2 n=5 median tok/s | delta |
-|---:|---:|---:|---:|
-| 1 | 194.1 | 187.9 | -3.16% |
-| 2 | 295.6 | 397.4 | +34.43% |
-| 4 | 439.9 | 438.1 | -0.40% |
-| 8 | 597.7 | 606.1 | +1.39% |
-| 16 | 909.3 | 913.1 | +0.42% |
-| 32 | 1,315.0 | 1,316.5 | +0.11% |
-
-The C2 result is reproducible across the five rc.2 runs (397.1-400.6 tok/s)
-but differs from the 299.1 tok/s diagnostic gate. It is reported without
-attributing that uplift to the shared-expert fix; the other concurrency cells
-are within 3.2% of the published reference.
-
-| Exact cold prefill | r11 median tok/s | rc.2 n=5 median tok/s | delta |
-|---:|---:|---:|---:|
-| 8K | 7,342 | 7,378 | +0.49% |
-| 64K | 8,320 | 8,530 | +2.52% |
-| 128K | 7,732 | 7,934 | +2.61% |
-
-The five-run coding median was 267.9 tok/s versus 264.8 (+1.19%). Corrected
-speculative counters reported a 42.17% median draft-token acceptance rate and
-3.109 accepted tokens per verification including the target bonus.
-
-GSM8K averaged 93.72% accuracy (6,181/6,595 correct) versus 93.75%
-(6,183/6,595) on r11. All 6,595 rc.2 responses were extractable and had valid
-finish reasons. Median aggregate throughput was 369.9 tok/s versus 372.4, and
-mean wall time was 318.3 seconds versus 314.8.
-
-The matched long-write check used eight sequential requests with
-`reasoning_effort=max`, temperature 1.0, top-p 0.95, and a 131,072-token cap.
-rc.2 completed 8/8 with normal stop reasons, closed HTML fences and documents,
-no placeholders, and JavaScript accepted by `node --check`. The true median
-completion length was 57,956.5 tokens (17,110-67,884), versus r11's 57,029.5
-(47,298-66,123).
-
-Operator-local artifacts are retained under
-`/models/.bench-results/v0.1.0-rc.2-20260808/` on the model PVC and the matching
-gitignored `bench/results/v0.1.0-rc.2-20260808/` project directory.
+Exact cold prefill in the matched post-fix gate was
+7,370 / 8,326 / 7,747 tok/s at 8K/64K/128K. The five-request coding median was
+267.4 tok/s.
 
 ## Previous r11 evidence
 
