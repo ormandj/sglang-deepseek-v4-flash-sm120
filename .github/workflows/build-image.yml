@@ -4,15 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # Only changes to image inputs start a build. Validation, documentation,
+    # and workflow changes cannot replace an already-published immutable tag.
     paths:
       - Containerfile
       - release.json
       - stack.lock.json
       - patches/**
-      - scripts/validate-release.sh
-      - scripts/verify-patches.sh
-      - .github/buildkitd.toml
-      - .github/workflows/build-image.yml
 
 permissions:
   contents: read
