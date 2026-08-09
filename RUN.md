@@ -15,7 +15,7 @@ Check the toolkit before going further:
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:dsv4-0731
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2
 ```
 
 ## Download the model
@@ -34,7 +34,7 @@ uvx --from huggingface-hub hf download \
 The container's `/root/.cache` holds the FlashInfer JIT modules, TileLang and TVM kernels, TorchInductor output, and DeepGEMM artifacts. Mount it from persistent storage, and use a directory dedicated to this image — cache entries from a different build are not reusable.
 
 ```bash
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v2
 mkdir -p "$CACHE_DIR"
 ```
 
@@ -44,7 +44,25 @@ mkdir -p "$CACHE_DIR"
 MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" ./examples/serve-dsv4-0731.sh
 ```
 
-The script sets the validated environment and server flags. `PORT` (host port, default `8000`), `IMAGE`, `CUDA_VISIBLE_DEVICES` (default `0,1`), and `CONTAINER_NAME` can be overridden; the container always listens on port 8000 internally.
+The script defaults to the immutable candidate named by `release.json` and sets
+the complete validated environment and server flags. `PORT` (host port, default
+`8000`), `IMAGE`, `CUDA_VISIBLE_DEVICES` (default `0,1`), and `CONTAINER_NAME`
+can be overridden; the container always listens on port 8000 internally. An
+`IMAGE` override creates a different runtime configuration and must be recorded
+when reporting results.
+
+While the server is running, these commands show the exact image, environment,
+and command line used by the container:
+
+```bash
+docker inspect dsv4-flash-sglang --format '{{.Config.Image}}'
+docker inspect dsv4-flash-sglang \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' | sort
+docker inspect dsv4-flash-sglang --format '{{json .Config.Cmd}}'
+```
+
+The image must be `v0.1.0-rc.2` for the results documented here. The old
+`dsv4-0731` tag names an earlier pre-SemVer build and is not this release.
 
 It runs the container with `--shm-size 64g`. SGLang's TP workers exchange tensors through `/dev/shm`, and Docker's 64 MiB default is far too small for this model — the server fails during startup without it. `--ulimit memlock=-1` is required for pinned host memory.
 

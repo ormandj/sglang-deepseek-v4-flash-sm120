@@ -20,6 +20,7 @@ candidate=$(jq -er '.candidate' "$manifest")
 candidate_tag=$(jq -er '.candidate_tag' "$manifest")
 stable_tag=$(jq -er '.stable_tag' "$manifest")
 cache_schema=$(jq -er '.cache_schema' "$manifest")
+product=$(jq -er '.product' "$manifest")
 
 # The target release is stable SemVer. The candidate suffix is derived so the
 # exact same image manifest can later be promoted without changing its labels.
@@ -70,5 +71,20 @@ check_pin() {
 check_pin DSV4_0731_RELEASE_VERSION "$version"
 check_pin DSV4_0731_RELEASE_CANDIDATE "$candidate"
 check_pin DSV4_0731_CACHE_SCHEMA "$cache_schema"
+
+serve_script="$repo/examples/serve-dsv4-0731.sh"
+expected_image="ghcr.io/ormandj/${product}:${candidate_tag}"
+expected_default="IMAGE=\${IMAGE:-${expected_image}}"
+grep -Fx "$expected_default" "$serve_script" >/dev/null || {
+  echo "serving script default is not the release candidate: $expected_image" >&2
+  exit 1
+}
+
+run_guide="$repo/RUN.md"
+expected_cache="/srv/cache/sglang-dsv4-0731-${cache_schema}"
+grep -F "$expected_cache" "$run_guide" >/dev/null || {
+  echo "RUN.md cache directory does not use cache schema $cache_schema" >&2
+  exit 1
+}
 
 echo "release contract valid: ${candidate_tag} -> ${stable_tag}, cache ${cache_schema}"
