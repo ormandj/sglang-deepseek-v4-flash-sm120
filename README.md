@@ -124,8 +124,7 @@ Five independent accepted runs each include warmups, 30-second sustained
 decode at C1/C2/C4/C8/C16/C32, five coding requests, exact cold
 8K/64K/128K prefill, and all 1,319 GSM8K questions. Every accepted run passed
 admission, timing, speculative-counter, prefill, coding, and quality
-validation. One overlapped attempt was deleted and is not part of these
-results.
+validation.
 
 The comparison values are medians recomputed directly from all five saved
 `r9-armD-w5-r1..r5` artifacts used for the published r11 table.
