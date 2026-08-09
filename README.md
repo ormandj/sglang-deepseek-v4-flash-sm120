@@ -160,55 +160,49 @@ no placeholders, and JavaScript accepted by `node --check`. The true median
 completion length was 57,956.5 tokens (17,110-67,884), versus r11's 57,029.5
 (47,298-66,123).
 
-## Previous r11 evidence
+## Current rc.2 comparison with vLLM
 
-`v0.1.0-rc.1` is not promotable: its DSpark draft skipped the shared-expert
-weights and regressed decode by 41-46%. The figures below describe its
-validated r11 predecessor and remain here as the comparison baseline.
-
-On the validated r11 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W hard
-limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
+On the validated rc.2 configuration (2x RTX PRO 6000 Blackwell **Max-Q**, 300 W
+hard limit, **PCIe Gen 4 x16**, TP=2), benchmarked with
 [llm-inference-bench](https://github.com/local-inference-lab/llm-inference-bench)
-against both r11 and `voipmonitor/vllm` v20 r27 in its documented DSpark
-configuration, same client and same flags:
+against `voipmonitor/vllm` v20 r27 in its documented DSpark configuration,
+using the same client and flags:
 
-### Decode: aggregate tokens/second, per-user tokens/second, TTFT p50
+### Decode: aggregate tokens/second
 
-| concurrency | SGLang agg | SGLang/user | SGLang TTFT | vLLM agg | vLLM/user | vLLM TTFT |
-|---|---:|---:|---:|---:|---:|---:|
-| 1 | 194.1 | 191.2 | **0.179 s** | **199.5** | 199.5 | 0.493 s |
-| 2 | **295.6** | 147.3 | **0.177 s** | 291.3 | 145.6 | 0.642 s |
-| 4 | **439.9** | 108.3 | **0.185 s** | 410.7 | 102.7 | 0.835 s |
-| 8 | **597.7** | 73.2 | **0.195 s** | 589.5 | 73.2 | 0.845 s |
-| 16 | **909.3** | 55.3 | **0.194 s** | 821.4 | 51.3 | 0.942 s |
-| 32 | **1,315.0** | 39.4 | **0.201 s** | — | — | — |
+| concurrency | SGLang rc.2 n=5 median | vLLM v20 r27 | SGLang delta |
+|---|---:|---:|---:|
+| 1 | 187.9 | **199.5** | -5.81% |
+| 2 | **403.0** | 291.3 | +38.35% |
+| 4 | **438.1** | 410.7 | +6.67% |
+| 8 | **606.1** | 589.5 | +2.82% |
+| 16 | **913.1** | 821.4 | +11.16% |
+| 32 | **1,316.5** | — | — |
 
-SGLang figures are medians of five runs; run-to-run spread was 1.7-3.3% at
-every concurrency except C1, where it was 7.2%.
+SGLang figures are medians of five accepted repetitions per concurrency.
 
 vLLM caps at concurrency 16 (`max_num_seqs 16`); 32 is SGLang only.
 
 ### Everything else
 
-| | SGLang (r11 predecessor) | vLLM v20 r27 |
+| | SGLang rc.2 | vLLM v20 r27 |
 |---|---:|---:|
-| prefill @ 8k | 7,342 tok/s | **7,540 tok/s** |
-| prefill @ 64k | 8,320 tok/s | **8,945 tok/s** |
-| prefill @ 128k | 7,732 tok/s | **8,238 tok/s** |
-| GSM8K accuracy | 0.9375 | 0.9393 |
-| **GSM8K wall clock** | **315 s** | 749 s |
-| GSM8K aggregate | **372.4 tok/s** | 159.3 tok/s |
+| prefill @ 8k | 7,378 tok/s | **7,540 tok/s** |
+| prefill @ 64k | 8,530 tok/s | **8,945 tok/s** |
+| prefill @ 128k | 7,934 tok/s | **8,238 tok/s** |
+| GSM8K accuracy | 0.9372 | 0.9393 |
+| **GSM8K wall clock** | **318.3 s** | 749 s |
+| GSM8K aggregate | **369.9 tok/s** | 159.3 tok/s |
 | long-write complete (131k budget) | **8/8** | 4/4 |
-| long-write median tokens | **57,029** | 40,764 |
-| long-write generation rate | 221.2 tok/s | **232.4 tok/s** |
+| long-write median tokens | **57,956.5** | 40,764 |
 | **usable context** | **774,656 tokens** | 133,120 tokens |
 | KV cache | **778,496 tokens** | 143,439 tokens |
 | concurrent 128k requests in KV | **5.9** | 1.1 |
 
-vLLM leads prefill by 3-8% and single-stream decode by 2.7%. SGLang leads
-sustained decode at every concurrency from 2 upward (+1.5% to +10.7%), answers
-2.8x to 4.8x sooner, finishes the 1,319-question GSM8K suite in **less than half
-the wall clock** at comparable accuracy, and serves **5.4x the KV capacity** -- it
+SGLang trails vLLM by 5.8% at C1 and by 2.1-4.6% on prefill. SGLang leads
+sustained decode at C2-C16 by 2.8-38.3%, finishes the 1,319-question GSM8K suite
+in **less than half the wall clock** at comparable accuracy, and serves **5.4x
+the KV capacity** -- it
 accepts the 384K output budget the model card recommends for `high`/`max`
 reasoning, which vLLM rejects outright at `max_model_len 133120`.
 
