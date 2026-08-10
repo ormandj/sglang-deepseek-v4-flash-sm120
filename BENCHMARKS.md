@@ -1,333 +1,172 @@
-# Reproducible RC2 versus vLLM r33 benchmark
+# RC3 and vLLM r33 measurements
 
-This is the canonical cross-engine performance record for this repository. It
-replaces every table from older SGLang images and older vLLM images.
+Last updated: 2026-08-10 CDT.
 
-## Scope
+This document contains the current SGLang `v0.1.0-rc.3` and vLLM r33
+measurements. The executable benchmark is in [`bench/aiperf`](bench/aiperf).
 
-The measurements were collected on 2026-08-09 on one host, one engine at a
-time, using the same model snapshot and the same two NVIDIA RTX PRO 6000
-Blackwell Max-Q GPUs:
+## System and software
 
-- compute capability: SM120;
-- topology: TP=2 over PCIe Gen 4 x16;
-- power limit: 300 W per GPU;
-- model: `deepseek-ai/DeepSeek-V4-Flash-0731` revision
-  `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`;
-- speculative decoding: DSpark K=5 on both engines.
+- two NVIDIA RTX PRO 6000 Blackwell Max-Q GPUs;
+- SM120, TP=2 over PCIe Gen 4 x16;
+- 300 W power limit per GPU;
+- one engine active at a time;
+- clients executed inside the serving pod against `127.0.0.1:8000`;
+- model: `deepseek-ai/DeepSeek-V4-Flash-0731`;
+- speculative decoding: DSpark K=5.
 
-The SGLang side is release `v0.1.0-rc.2` from this repository's exact
-`release.json`, `stack.lock.json`, and patch set. The corresponding public image
-is:
+SGLang used the `v0.1.0-rc.3` source composition in this repository:
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2@sha256:71766e76fd1ffd2bcac4ba79cbeb2317b326144558fc2e7bb49e2bbea05e8cbb
+SGLang main                 5a8e360e705fc7b8046f6b060ba4fc557ff606c7
+SGLang effective tree       70fa46c3f950ff80c3bb3b9160a69ff531935dc5
+FlashInfer main              4fbac49f30e1f40a0dcddd90512b8c56d68037f7
+FlashInfer effective tree    616094d4a8b4a2bc94f3d43a832312c335924696
+FlashInfer version           0.6.18.dev20260810
+cache schema                 v2
 ```
 
-The tested private mirror reported the same release identity recorded by the
-public lock:
+vLLM used the local-inference-lab r33 image and documented DSpark
+configuration:
 
 ```text
-release                    v0.1.0-rc.2
-SGLang main                dc9624deb2f03ebe5e52bd03337addf91386c041
-SGLang effective tree      cee50a9f372b26b64eec189b861b16f2c23c3244
-FlashInfer main             29196cf437778906c72630dc5d9850de547501de
-FlashInfer effective tree   a089f6c4beaf103306775014a7a3d42eed1214c5
-cache schema                v2
+docker.io/voipmonitor/vllm@sha256:fdde59fed7f9fc12f9fd5ef1b3b3ea8d5097bf10ebad54b348497102c3a83f82
 ```
 
-Its non-secret server arguments and tuning environment matched
-[`examples/serve-dsv4-0731.sh`](examples/serve-dsv4-0731.sh), including the
-DeepGEMM indexer selection, fused MHC pre-norm selection, 8,192-token prefill
-chunk, FP8 KV cache, memory fraction, graph sizes, DSpark K=5, and TP=2. The
-private registry address and deployment-specific authentication are not part of
-the published configuration.
+The r33 deployment used TP=2, DSpark K=5, `max_num_seqs=16`,
+`max_num_batched_tokens=8192`, FP8 KV cache, `max_model_len=131072`, and
+`gpu_memory_utilization=0.975`.
 
-The vLLM side is the local-inference-lab r33 configuration documented in
-[`ds4dspark-v20-r33.md`](https://github.com/local-inference-lab/rtx6kpro/blob/3ca3c00c2b23273ed3df5ece5fdf8fd20c5619d8/models/ds4dspark-v20-r33.md):
+## Benchmark implementation
+
+The client is AIPerf `0.12.0` pinned at commit:
 
 ```text
-voipmonitor/vllm:gilded-gnosis-v20-vllmfa13d33-b12x06db0f4-fi1ac6942-cu132-20260809-r33@sha256:fdde59fed7f9fc12f9fd5ef1b3b3ea8d5097bf10ebad54b348497102c3a83f82
+03c9c6ddc5e6227782e53ded177f1227d332af48
 ```
 
-Its relevant runtime settings were TP=2, DSpark K=5, B12x W4A8 MoE,
-`max_num_seqs=16`, `max_num_batched_tokens=8192`, FP8 KV cache,
-`max_model_len=131072`, and `gpu_memory_utilization=0.975`.
+[`bench/aiperf/aiperf.lock.json`](bench/aiperf/aiperf.lock.json) records the
+source and runtime pins. [`bench/aiperf/README.md`](bench/aiperf/README.md)
+documents installation, execution, warmup, cache handling, metric definitions,
+and keyed or keyless endpoint operation.
 
-No other workload ran on these GPUs during an accepted measurement. Every
-decode cell reported the requested effective concurrency, zero average queue,
-zero errors, no admission timeout, and no capacity-limit flag.
+All panel members ran sequentially on one unchanged server process for each
+engine. Each measured decode shape and prefill length was warmed once before
+the measured panel began. Fixed prompts and seeds were used with temperature
+0, top-p 1, and ignored EOS.
 
-Both engines mounted the same read-only model directory. Small-file hashes from
-that snapshot are:
+Decode used a synthetic coding prompt with a nominal 256-token input. Output
+length and average-context analysis windows vary by concurrency as encoded in
+[`run-engine-gate-in-pod.sh`](bench/aiperf/run-engine-gate-in-pod.sh). The
+analyzers require exact request occupancy, an empty request queue, no prefill in
+the decode interval, monotonic counters, and the configured context window.
 
-```text
-config.json                    6c8f3d2d3b48707541b88f32f22ef3f0f8a6b57d8523281e2b8d3cdb0ae9a023
-generation_config.json         5fccff80f55a4d455bbe516bdd552edf3e9623df95e99fbf2a3c3389fdf91af0
-model.safetensors.index.json   98efab455cf08dfbbbaaba6f570e1bf10bf927d2b4c3c453a59c2f6f0e3be92b
-tokenizer.json                 8f9f37ca37fdc4f5fd36d5cf4d3b0e8392edb4e894fd10cc0d70b4957c8633cf
-```
+Cold-prefill requests generated one output token. SGLang was flushed at each
+measured cell. The vLLM analyzer required its cached-prompt-token counter to
+remain zero. The common nominal near-limit input was 130,816 tokens; throughput
+uses the actual engine-reported token count.
 
-## Benchmark source
+## Repetition panel
 
-The client is the unmodified public
-[`local-inference-lab/llm-inference-bench`](https://github.com/local-inference-lab/llm-inference-bench/blob/86cf05c2f42f4d21b909b6e684424ca1aab89fd5/llm_decode_bench.py)
-`main` branch at:
+The reported campaign combines the `quick` and `decode-supplement` modes:
 
-```text
-commit  86cf05c2f42f4d21b909b6e684424ca1aab89fd5
-file    llm_decode_bench.py
-sha256  fa227030012a8b55545af6b6a50fa4adcbdff8d003bb16469dc8e2de024ed0c0
-version 0.4.29
-```
+| C | repetitions |
+|---:|---:|
+| 1 | 3 |
+| 2 | 6 |
+| 4 | 4 |
+| 8 | 2 |
+| 16 | 2 |
+| 32 | 1 SGLang only |
 
-This repository does not carry a modified benchmark. The raw reports in
-[`benchmarks/2026-08-09`](benchmarks/2026-08-09) were produced by that exact
-file.
+The vLLM deployment was not run at C32 because it was configured for at most
+16 sequences and its KV capacity did not admit that cell.
 
-## Sampling and request behavior
+## Decode engine rate
 
-- Decode used the benchmark's built-in encyclopedia prompt.
-- `temperature=1.0` was explicit.
-- Sustained decode does not expose a general top-p option. The request omitted
-  `top_p`; the model's `generation_config.json` and both engines resolve it to
-  `top_p=1.0`.
-- `--max-tokens` was not passed. The pinned source's decode default is 8,192.
-- `--respect-eos` was not passed, so the benchmark kept its default
-  `ignore_eos` behavior for sustained measurement.
-- Decode used a 20-second measured window for every cell.
-- Prefill used exact tokenizer targeting at 8,192, 65,536, and 131,008 input
-  tokens and the benchmark's client metric: reported prompt tokens divided by
-  TTFT.
-- Both clients ran inside the selected serving container against `localhost`.
-  Authentication, when enabled by the server, changes only the request header
-  and is omitted from the published command examples.
+Forward passes per second is calculated from each engine's live decode-step
+counter over the accepted context interval. The change column is the geometric
+mean of matched per-seed RC3/r33 ratios minus one.
 
-The report shows 8,194, 65,538, and 131,010 prompt tokens because the
-OpenAI-compatible chat request adds two fixed control tokens after exact input
-text calibration. Both engines used the same requested targets and the same
-reported-token formula.
+| C | vLLM r33 median forward/s | SGLang rc.3 median forward/s | rc.3 paired change |
+|---:|---:|---:|---:|
+| 1 | 65.622 | 59.614 | -9.28% |
+| 2 | 47.801 | 46.783 | -0.65% |
+| 4 | 34.072 | 34.129 | -0.35% |
+| 8 | 23.862 | 22.828 | -4.34% |
+| 16 | 16.618 | 17.322 | +4.24% |
+| 32 | not run | 12.854 | — |
 
-## Warmup and repetition policy
+## Useful decode throughput and acceptance
 
-Warmup is mandatory:
+Useful tokens per second is calculated from each engine's live generation-token
+counter over the same interval. Accepted tokens per forward per request is the
+ratio of useful-token rate to forward rate and concurrency.
 
-1. After each engine reached readiness, one complete C=1,2,4,8,16 decode sweep
-   ran at three seconds per cell and was discarded.
-2. One exact 8K/64K/131K prefill sweep ran with a one-second duration and was
-   discarded.
-3. Every measured decode repetition retained the benchmark's hidden C=1
-   three-second warmup and its per-cell three-second admission-stability gate.
-   The latter also warmed SGLang's C=32 cell before its timed window.
-4. Five sequential measured decode repetitions and five sequential measured
-   prefill repetitions were retained for each engine.
+| C | vLLM r33 median useful tok/s | SGLang rc.3 median useful tok/s | vLLM accepted tokens/forward/request | rc.3 accepted tokens/forward/request |
+|---:|---:|---:|---:|---:|
+| 1 | 353.0 | 303.4 | 5.405 | 5.082 |
+| 2 | 484.6 | 534.4 | 5.128 | 5.702 |
+| 4 | 632.6 | 706.0 | 4.610 | 5.266 |
+| 8 | 938.1 | 985.5 | 4.872 | 5.378 |
+| 16 | 1,098.3 | 1,358.9 | 4.118 | 4.871 |
+| 32 | not run | 1,890.0 | not run | 4.573 |
 
-The median is computed across the five per-run values. Prefill samples within a
-run are first reduced by the benchmark; the published n=5 median is not a pooled
-sample median.
+## Decode time to first token
 
-For future campaigns, the discarded decode sweep must include every supported
-cell, including SGLang C=32. The hidden and admission-stability warmups remain
-required as well.
+Each entry is the median of the per-run AIPerf p50 TTFT values. Brackets contain
+the minimum and maximum per-run p50 values.
 
-## Exact commands
+| C | vLLM r33 median TTFT [min, max] | SGLang rc.3 median TTFT [min, max] |
+|---:|---:|---:|
+| 1 | 506.5 ms [501.2, 511.5] | 231.8 ms [223.7, 248.9] |
+| 2 | 774.9 ms [769.1, 808.9] | 391.8 ms [379.6, 404.7] |
+| 4 | 1,139.2 ms [1,128.9, 1,369.9] | 407.7 ms [399.1, 427.9] |
+| 8 | 1,533.3 ms [1,255.6, 1,811.0] | 640.0 ms [447.2, 832.8] |
+| 16 | 1,559.0 ms [1,555.1, 1,562.9] | 1,365.2 ms [570.9, 2,159.5] |
+| 32 | not run | 965.4 ms [965.4, 965.4] |
 
-The SGLang decode command was:
+## Cold prefill
 
-```bash
-uv run --quiet --no-project python -B llm_decode_bench.py \
-  --host localhost --port 8000 \
-  --model deepseek-v4-flash \
-  --temperature 1.0 \
-  --concurrency 1,2,4,8,16,32 \
-  --contexts 0 \
-  --duration 20 \
-  --skip-prefill \
-  --display-mode plain \
-  --output run-N/decode.json
-```
-
-The vLLM command was identical except for its supported concurrency set and a
-client-side token-budget override:
-
-```bash
-uv run --quiet --no-project python -B llm_decode_bench.py \
-  --host localhost --port 8000 \
-  --model deepseek-v4-flash \
-  --temperature 1.0 \
-  --concurrency 1,2,4,8,16 \
-  --contexts 0 \
-  --duration 20 \
-  --max-total-tokens 2000000 \
-  --skip-prefill \
-  --display-mode plain \
-  --output run-N/decode.json
-```
-
-`--max-total-tokens` is only the benchmark client's static cell-skip guard. It
-is not sent in the generation request and does not alter vLLM's KV cache,
-server configuration, admission, or timing. At the pinned benchmark revision,
-automatic budget inspection was too conservative and skipped valid
-zero-context cells before sending a request. With the client guard overridden,
-vLLM admitted C=1 through C=16 with no queue. For consistency, future
-zero-context comparisons will pass this same client-only value to both engines;
-it has no effect on cells that the server admits.
-
-The measured prefill command was the same for both engines:
-
-```bash
-uv run --quiet --no-project python -B llm_decode_bench.py \
-  --host localhost --port 8000 \
-  --model deepseek-v4-flash \
-  --concurrency 1 \
-  --contexts 0 \
-  --prefill-only \
-  --standalone-prefill \
-  --prefill-contexts 8k,64k,131008 \
-  --token-targeting exact \
-  --prefill-duration 10 \
-  --display-mode plain \
-  --output run-N/prefill.json
-```
-
-An authenticated server additionally needs its normal `--api-key` argument;
-the key is not part of this repository or the published reports.
-
-## Sustained decode results
-
-Aggregate throughput is OpenAI continuous stream-usage completion tokens per
-measured window. TTFT is the median of the five per-run p50 TTFT values.
-
-| C | SGLang rc.2 tok/s | vLLM r33 tok/s | SGLang vs vLLM | SGLang p50 TTFT | vLLM p50 TTFT |
+| target | vLLM r33 prompt tok/s | SGLang rc.3 prompt tok/s | rc.3 change | vLLM median TTFT | rc.3 median TTFT |
 |---:|---:|---:|---:|---:|---:|
-| 1 | 178.4 | 185.5 | -3.8% | 0.190 s | 0.495 s |
-| 2 | 275.9 | 271.3 | +1.7% | 0.375 s | 0.772 s |
-| 4 | 405.8 | 392.1 | +3.5% | 0.366 s | 1.122 s |
-| 8 | 566.2 | 573.7 | -1.3% | 0.382 s | 1.287 s |
-| 16 | 846.1 | 814.2 | +3.9% | 0.399 s | 1.548 s |
-| 32 | 1,234.9 | — | — | 0.447 s | — |
+| 8K C1 | 7,722.7 | 7,516.2 | -2.67% | 1,068.4 ms | 1,086.3 ms |
+| 64K C1 | 8,647.4 | 8,343.9 | -3.51% | 7,564.6 ms | 7,828.1 ms |
+| near-128K C1 | 8,001.0 | 7,780.1 | -2.76% | 16,358.0 ms | 16,811.6 ms |
 
-vLLM r33 was intentionally limited to C=16. Its deployment is configured for
-16 sequences and its KV envelope does not support the C=32 cell; the blank is
-not a zero.
+The near-limit cell used the same nominal 130,816-token input for both engines.
+Actual engine-reported input medians were 130,900.5 for r33 and 130,821 for
+RC3.
 
-### Per-run aggregate tok/s
+## Running the benchmark
 
-| engine | run | C1 | C2 | C4 | C8 | C16 | C32 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| SGLang rc.2 | 1 | 177.4 | 266.3 | 415.9 | 542.5 | 847.0 | 1,245.0 |
-| SGLang rc.2 | 2 | 178.4 | 275.9 | 399.3 | 566.2 | 846.1 | 1,234.7 |
-| SGLang rc.2 | 3 | 185.8 | 283.2 | 399.9 | 580.8 | 840.2 | 1,234.9 |
-| SGLang rc.2 | 4 | 173.6 | 285.1 | 408.6 | 551.8 | 836.4 | 1,211.4 |
-| SGLang rc.2 | 5 | 193.6 | 275.3 | 405.8 | 573.1 | 862.4 | 1,239.7 |
-| vLLM r33 | 1 | 183.9 | 268.0 | 389.1 | 578.9 | 796.3 | — |
-| vLLM r33 | 2 | 181.0 | 279.4 | 406.6 | 585.9 | 824.1 | — |
-| vLLM r33 | 3 | 189.1 | 271.3 | 390.0 | 565.7 | 814.4 | — |
-| vLLM r33 | 4 | 187.2 | 275.6 | 409.0 | 573.7 | 787.1 | — |
-| vLLM r33 | 5 | 185.5 | 256.6 | 392.1 | 569.8 | 814.2 | — |
-
-## Exact cold-prefill results
-
-| target | reported prompt tokens | SGLang rc.2 tok/s | vLLM r33 tok/s | SGLang vs vLLM | SGLang TTFT | vLLM TTFT |
-|---:|---:|---:|---:|---:|---:|---:|
-| 8,192 | 8,194 | 7,395 | 7,659 | -3.4% | 1.108 s | 1.070 s |
-| 65,536 | 65,538 | 8,367 | 8,755 | -4.4% | 7.833 s | 7.486 s |
-| 131,008 | 131,010 | 7,797 | 8,062 | -3.3% | 16.802 s | 16.250 s |
-
-### Per-run client tok/s
-
-| engine | run | 8K | 64K | 131K |
-|---|---:|---:|---:|---:|
-| SGLang rc.2 | 1 | 6,938 | 8,389 | 7,849 |
-| SGLang rc.2 | 2 | 7,396 | 8,320 | 7,776 |
-| SGLang rc.2 | 3 | 7,260 | 8,344 | 7,782 |
-| SGLang rc.2 | 4 | 7,456 | 8,376 | 7,821 |
-| SGLang rc.2 | 5 | 7,395 | 8,367 | 7,797 |
-| vLLM r33 | 1 | 7,595 | 8,755 | 8,047 |
-| vLLM r33 | 2 | 7,703 | 8,752 | 8,032 |
-| vLLM r33 | 3 | 7,683 | 8,875 | 8,194 |
-| vLLM r33 | 4 | 7,659 | 8,731 | 8,062 |
-| vLLM r33 | 5 | 7,450 | 8,772 | 8,064 |
-
-## What the image changes
-
-RC2 is not a stock SGLang image or a launch-script-only change. The complete
-source composition is in [`stack.lock.json`](stack.lock.json), and the
-remaining patch is reproduced and tree-checked by
-[`scripts/verify-patches.sh`](scripts/verify-patches.sh). The runtime changes
-required by this validated composition include:
-
-- the SM120 DeepSeek-V4 stack supplies the FP4 MoE, batched sparse-MLA prefill,
-  and DeepGEMM paged-MQA indexer paths;
-- the DSpark draft keeps separate shared-expert modules after upstream made
-  fusion decisions runner-local; without the gate, the draft creates an extra
-  fused expert slot and rejects the bundled shared-expert weights;
-- the compressed-state planner rewrites the actual DSpark verifier width rather
-  than a fixed four-row window;
-- the SM120-capable DeepGEMM indexer is selected instead of the forced TileLang
-  fallback;
-- the DeepGEMM fused MHC pre-norm path is enabled on SM120 instead of the eager
-  float32 fallback;
-- all-reduce workspace sizing and dispatch are bounded so prefill-sized
-  collectives stay off the latency-optimized decode path;
-- sliding-window KV eviction runs on the DFLASH/DSPARK speculative path so long
-  generations do not exhaust the smaller SWA pool while full-attention KV is
-  still available;
-- the image uses cache schema `v2`, separated from earlier image caches.
-
-The validated serving flags are in
-[`examples/serve-dsv4-0731.sh`](examples/serve-dsv4-0731.sh). No benchmark-only
-server flag was used.
-
-## Published raw reports
-
-The 20 measured JSON reports are under
-[`benchmarks/2026-08-09`](benchmarks/2026-08-09). Upstream v0.4.29 records the
-entire server environment in `startup_diagnostics`, which can include API keys.
-Before publication we removed only:
-
-- `startup_diagnostics.env`;
-- `startup_diagnostics.hostname`;
-- `startup_diagnostics.uname`.
-
-The exact filter is [`sanitize.jq`](benchmarks/2026-08-09/sanitize.jq). No
-result, request sample, timing, hardware summary, engine version, methodology,
-or event-log field was changed. [`SHA256SUMS`](benchmarks/2026-08-09/SHA256SUMS)
-pins every published report and the filter itself.
-
-Verify the published bytes from the repository root:
+Stage the pinned AIPerf checkout and this repository's `bench/aiperf` directory
+inside the serving pod. Run the warmup and measured panel against the pod's
+localhost endpoint:
 
 ```bash
-sha256sum --check benchmarks/2026-08-09/SHA256SUMS
+BENCH_IMAGE_REF='image@sha256:...' \
+BENCH_GITOPS_REVISION='<deployment-config revision>' \
+BENCH_PROJECT_REVISION='<this repository revision>' \
+AIPERF_REVISION='03c9c6ddc5e6227782e53ded177f1227d332af48' \
+BENCH_MODEL_REVISION='<model snapshot revision>' \
+BENCH_ENGINE='sglang' \
+./bench/aiperf/run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 quick
 ```
 
-Recompute the decode medians for either `sglang` or `vllm-r33` directly from
-the five reports:
+Run `decode-supplement` with the same campaign and build identity for C2, C4,
+and C16. Set `BENCH_ENGINE=vllm` for r33. Set `BENCH_API_KEY` when the endpoint
+requires a key; omit it for a keyless endpoint. A container-provided
+`VLLM_API_KEY` is also accepted.
+
+The runner creates `summary.json`. Compare two matching summaries with:
 
 ```bash
-engine=sglang
-jq -s '
-  [range(0; (.[0].results | length)) as $i
-   | {concurrency: .[0].results[$i].concurrency,
-      aggregate_tps_median:
-        ([.[].results[$i].aggregate_tps] | sort | .[2]),
-      ttft_p50_median:
-        ([.[].results[$i].ttft_p50] | sort | .[2])}]
-' benchmarks/2026-08-09/$engine/run-*-decode.json
+uv run bench/aiperf/compare_engine_gates.py \
+  path/to/vllm-r33/summary.json \
+  path/to/sglang-rc3/summary.json \
+  --allow-decode-cell-mismatch
 ```
 
-Recompute its exact-prefill medians the same way:
-
-```bash
-engine=sglang
-jq -s '
-  ["8192", "65536", "131008"] as $targets
-  | [$targets[] as $target
-     | {target: ($target | tonumber),
-        prompt_tokens: .[0].prefill[$target].prompt_tokens,
-        client_tps_median:
-          ([.[].prefill[$target].client_tok_per_sec] | sort | .[2]),
-        ttft_median:
-          ([.[].prefill[$target].client_ttft_seconds] | sort | .[2])}]
-' benchmarks/2026-08-09/$engine/run-*-prefill.json
-```
+The mismatch flag reports C32 as an engine-only cell instead of assigning a
+value to the unmeasured vLLM cell.

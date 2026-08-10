@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Validate and summarize one same-process engine-performance gate."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import statistics
+import sys
+from collections import defaultdict
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+
+class SummaryError(RuntimeError):
+    """Raised when an engine-gate artifact set is incomplete or invalid."""
+
+
+EXPECTED_DECODE = {
+    "sglang": {
+        "quick": {1: 3, 8: 2, 32: 1},
+        "decode-supplement": {2: 6, 4: 4, 16: 2},
+        "qualification": {1: 8, 2: 6, 4: 4, 8: 3, 16: 2, 32: 2},
+    },
+    "vllm": {
+        "quick": {1: 3, 8: 2},
+        "decode-supplement": {2: 6, 4: 4, 16: 2},
+        "qualification": {1: 8, 2: 6, 4: 4, 8: 3, 16: 2},
+    },
+}
+EXPECTED_PREFILL = {
+    "quick": {"8k-c1", "64k-c1", "128k-c1"},
+    "decode-supplement": set(),
+    "qualification": {"8k-c1", "8k-c2", "8k-c4", "64k-c1", "128k-c1"},
+}
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--mode", choices=tuple(EXPECTED_PREFILL), required=True)
+    parser.add_argument("--engine", choices=tuple(EXPECTED_DECODE), default="sglang")
+    parser.add_argument("--build-id", required=True)
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
+def _load(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as stream:
+        document = json.load(stream)
+    if not isinstance(document, dict):
+        raise SummaryError(f"{path} does not contain a JSON object")
+    return document
+
+
+def _finite_positive(value: Any, source: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise SummaryError(f"{source} is not numeric") from exc
+    if not math.isfinite(numeric) or numeric <= 0:
+        raise SummaryError(f"{source} is not positive and finite")
+    return numeric
+
+
+def _distribution(values: Sequence[float]) -> dict[str, float | int | None]:
+    mean = statistics.fmean(values)
+    sample_stddev = statistics.stdev(values) if len(values) > 1 else None
+    return {
+        "count": len(values),
+        "min": min(values),
+        "median": statistics.median(values),
+        "mean": mean,
+        "max": max(values),
+        "sample_stddev": sample_stddev,
+        "sample_cv": sample_stddev / mean if sample_stddev is not None else None,
+    }
+
+
+def summarize(
+    root: Path, *, mode: str, build_id: str, engine: str = "sglang"
+) -> dict[str, Any]:
+    expected_decode = EXPECTED_DECODE[engine][mode]
+    decode_documents: dict[int, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    for path in sorted(root.glob("decode/c*/r*/decode-analysis.json")):
+        try:
+            concurrency = int(path.parents[1].name.removeprefix("c"))
+        except ValueError as exc:
+            raise SummaryError(f"invalid decode directory: {path}") from exc
+        decode_documents[concurrency].append((path.parent.name, _load(path)))
+
+    if set(decode_documents) != set(expected_decode):
+        raise SummaryError(
+            f"decode cells are {sorted(decode_documents)}; "
+            f"expected {sorted(expected_decode)}"
+        )
+
+    decode: dict[str, Any] = {}
+    for concurrency, expected_repetitions in expected_decode.items():
+        documents = decode_documents[concurrency]
+        if len(documents) != expected_repetitions:
+            raise SummaryError(
+                f"C{concurrency} has {len(documents)} repetitions; "
+                f"expected {expected_repetitions}"
+            )
+        forward_rates: list[float] = []
+        token_rates: list[float] = []
+        accepted_lengths: list[float] = []
+        repetitions: list[dict[str, Any]] = []
+        for repetition, document in documents:
+            if document.get("validation", {}).get("valid") is not True:
+                raise SummaryError(f"C{concurrency}/{repetition} is invalid")
+            if document.get("decode", {}).get("target_concurrency") != concurrency:
+                raise SummaryError(f"C{concurrency}/{repetition} has the wrong shape")
+            forward_rate = _finite_positive(
+                document.get("engine_work", {}).get("forward_passes_per_second_ols"),
+                f"C{concurrency}/{repetition} forward rate",
+            )
+            token_rate = _finite_positive(
+                document.get("decode", {}).get("tokens_per_second_ols"),
+                f"C{concurrency}/{repetition} token rate",
+            )
+            accepted_length = _finite_positive(
+                document.get("engine_work", {}).get(
+                    "useful_tokens_per_forward_per_request"
+                ),
+                f"C{concurrency}/{repetition} accepted length",
+            )
+            forward_rates.append(forward_rate)
+            token_rates.append(token_rate)
+            accepted_lengths.append(accepted_length)
+            repetitions.append(
+                {
+                    "id": repetition,
+                    "forward_passes_per_second": forward_rate,
+                    "useful_tokens_per_second": token_rate,
+                    "useful_tokens_per_forward_per_request": accepted_length,
+                }
+            )
+        decode[f"c{concurrency}"] = {
+            "repetitions": repetitions,
+            "engine_forward_passes_per_second": _distribution(forward_rates),
+            "useful_tokens_per_second": _distribution(token_rates),
+            "useful_tokens_per_forward_per_request": _distribution(accepted_lengths),
+        }
+
+    prefill_paths = sorted(root.glob("prefill/*/prefill-analysis.json"))
+    labels = {path.parent.name for path in prefill_paths}
+    if labels != EXPECTED_PREFILL[mode]:
+        raise SummaryError(
+            f"prefill cells are {sorted(labels)}; "
+            f"expected {sorted(EXPECTED_PREFILL[mode])}"
+        )
+    prefill: dict[str, Any] = {}
+    for path in prefill_paths:
+        document = _load(path)
+        if document.get("validation", {}).get("valid") is not True:
+            raise SummaryError(f"{path.parent.name} is invalid")
+        requests = document.get("requests", {})
+        prefill[path.parent.name] = {
+            "prompt_tokens_per_second": _finite_positive(
+                requests.get("aggregate_prompt_tokens_per_second"),
+                f"{path.parent.name} prefill rate",
+            ),
+            "median_ttft_ms": _finite_positive(
+                requests.get("time_to_first_token_ms", {}).get("median"),
+                f"{path.parent.name} TTFT",
+            ),
+            "requests": requests.get("completed"),
+        }
+
+    return {
+        "schema_version": "1.0",
+        "engine": engine,
+        "build_id": build_id,
+        "mode": mode,
+        "interpretation": (
+            "same-process engineering regression signal; repetitions are prompt-path "
+            "subsamples, not independent deployment replicates"
+        ),
+        "decode": decode,
+        "prefill": prefill,
+    }
+
+
+def main() -> int:
+    args = _parse_args()
+    try:
+        result = summarize(
+            args.root, mode=args.mode, build_id=args.build_id, engine=args.engine
+        )
+        rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            if args.output.exists():
+                raise SummaryError(f"output already exists: {args.output}")
+            args.output.write_text(rendered, encoding="utf-8")
+        else:
+            sys.stdout.write(rendered)
+    except (SummaryError, OSError, json.JSONDecodeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

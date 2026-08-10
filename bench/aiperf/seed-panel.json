@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "selection_rule": "Consecutive integers fixed before final collection; no seed was selected from performance results.",
+  "pilot": [
+    {"pair": "p01", "aiperf_random_seed": 2026081001, "sampling_seed": 2026081001, "order": ["baseline", "candidate"]},
+    {"pair": "p02", "aiperf_random_seed": 2026081002, "sampling_seed": 2026081002, "order": ["candidate", "baseline"]},
+    {"pair": "p03", "aiperf_random_seed": 2026081003, "sampling_seed": 2026081003, "order": ["baseline", "candidate"]}
+  ],
+  "final": [
+    {"pair": "f01", "aiperf_random_seed": 2026081101, "sampling_seed": 2026081101, "order": ["baseline", "candidate"]},
+    {"pair": "f02", "aiperf_random_seed": 2026081102, "sampling_seed": 2026081102, "order": ["candidate", "baseline"]},
+    {"pair": "f03", "aiperf_random_seed": 2026081103, "sampling_seed": 2026081103, "order": ["baseline", "candidate"]},
+    {"pair": "f04", "aiperf_random_seed": 2026081104, "sampling_seed": 2026081104, "order": ["candidate", "baseline"]},
+    {"pair": "f05", "aiperf_random_seed": 2026081105, "sampling_seed": 2026081105, "order": ["baseline", "candidate"]},
+    {"pair": "f06", "aiperf_random_seed": 2026081106, "sampling_seed": 2026081106, "order": ["candidate", "baseline"]},
+    {"pair": "f07", "aiperf_random_seed": 2026081107, "sampling_seed": 2026081107, "order": ["baseline", "candidate"]},
+    {"pair": "f08", "aiperf_random_seed": 2026081108, "sampling_seed": 2026081108, "order": ["candidate", "baseline"]},
+    {"pair": "f09", "aiperf_random_seed": 2026081109, "sampling_seed": 2026081109, "order": ["baseline", "candidate"]},
+    {"pair": "f10", "aiperf_random_seed": 2026081110, "sampling_seed": 2026081110, "order": ["candidate", "baseline"]}
+  ]
+}

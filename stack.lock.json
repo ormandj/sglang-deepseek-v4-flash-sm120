@@ -3,14 +3,14 @@
   "release": {
     "manifest": "release.json",
     "version": "0.1.0",
-    "candidate": 2,
-    "candidate_tag": "v0.1.0-rc.2",
+    "candidate": 3,
+    "candidate_tag": "v0.1.0-rc.3",
     "stable_tag": "v0.1.0",
     "cache_schema": "v2"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.1.0-rc.2",
+    "tag": "v0.1.0-rc.3",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -30,7 +30,7 @@
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
-      "value": "2",
+      "value": "3",
       "description": "Release-candidate ordinal for the 0.1.0 release line."
     },
     {
@@ -40,27 +40,27 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE",
-      "value": "lmsysorg/sglang:nightly-dev-cu13-20260808-ce84df0f@sha256:e65e3995661d16f829f9eb1280feb7d8b8bdcb305eb84e95e68824a2328f9a98",
+      "value": "lmsysorg/sglang:nightly-dev-cu13-20260810-7c90840b@sha256:ed089abad79f36c2129fa2191e3be00efb4cd0950a9a615fc0e1b057c551a1fa",
       "description": "Official CUDA 13 / Torch 2.13 SGLang nightly base image, pinned by digest."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE_HEAD",
-      "value": "52afe87a08c6aa049c52f9507b4f0ca26cecb562",
+      "value": "7c90840badf1e890691944979d45a3bb09808775",
       "description": "SGLang source commit recorded by the base image's editable package and checkout."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "dc9624deb2f03ebe5e52bd03337addf91386c041",
+      "value": "5a8e360e705fc7b8046f6b060ba4fc557ff606c7",
       "description": "SGLang main commit checked out in the image."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "3a32d82ef3599f60c86da23d9e797f0e32c01715",
+      "value": "310b512ccf51280b51f9c73a64766b0b1d6b49d9",
       "description": "Tree of the SGLang main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "cee50a9f372b26b64eec189b861b16f2c23c3244",
+      "value": "70fa46c3f950ff80c3bb3b9160a69ff531935dc5",
       "description": "Final SGLang tree in the image, after the single source patch."
     },
     {
@@ -69,14 +69,9 @@
       "description": "SGLang PR #29927 head included in the source patch."
     },
     {
-      "arg": "DSV4_0731_SGLANG_PR32183_HEAD",
-      "value": "22ef431215b1d8529eaebd8e8c6de9510390afaf",
-      "description": "sgl-project/sglang#32183: propagate the runtime DSpark verifier width into the DeepSeek-V4 compressed-state planner instead of the hardcoded kMaxMTPDraftTokens = 4 rewrite window."
-    },
-    {
       "arg": "DSV4_0731_SGLANG_PR33614_HEAD",
-      "value": "56eae704773c168c687603dcb24b40130d1a9594",
-      "description": "SGLang PR #33614 head included in the source patch."
+      "value": "fca0998feda2bfc2a735286d34d354b979850d72",
+      "description": "Current SGLang PR #33614 head: synchronize DSpark sampling, verify-budget, and graph-capture decisions across TP ranks."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR32194_HEAD",
@@ -119,9 +114,19 @@
       "description": "SGLang PR #33568: match DSV4/DSV32 tool prompts to the reference encoding."
     },
     {
+      "arg": "DSV4_0731_SGLANG_PR33732_HEAD",
+      "value": "d5c25357153db62b15770ea5c82a5d5c81b482cb",
+      "description": "SGLang PR #33732: preserve an explicitly selected SM120 DSV4 indexer backend."
+    },
+    {
       "arg": "DSV4_0731_SGLANG_PR33805_HEAD",
       "value": "26a2a3981798b8deb97d053d163fa3c48668e03f",
       "description": "SGLang PR #33805: run SWA eviction on the DFLASH/DSPARK speculative path."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR34139_HEAD",
+      "value": "16797c8c75a2f87cfd61ad7c4f029cc0f30e9a8a",
+      "description": "SGLang PR #34139: keep DSpark draft shared experts separate after fusion decisions became runner-local."
     },
     {
       "arg": "DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD",
@@ -149,23 +154,23 @@
       "description": "Current-main replay of the local SGLang consumer for FlashInfer PR #4393."
     },
     {
-      "arg": "DSV4_0731_SGLANG_DSPARK_SHARED_EXPERT_HEAD",
-      "value": "16797c8c75a2f87cfd61ad7c4f029cc0f30e9a8a",
-      "description": "Local correctness fix: keep DSpark draft shared experts separate after SGLang #33889 made fusion decisions runner-local."
+      "arg": "DSV4_0731_SGLANG_FLASHINFER_MHC_GATE_HEAD",
+      "value": "eb9004a0115acbee4109626ea8945ec0498de887",
+      "description": "Local performance fix: on SM120, use FlashInfer mHC only at the validated 1024-token prefill threshold so decode retains the faster small-M path."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
-      "value": "29196cf437778906c72630dc5d9850de547501de",
+      "value": "4fbac49f30e1f40a0dcddd90512b8c56d68037f7",
       "description": "FlashInfer main commit the Python wheel is built from."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_TREE",
-      "value": "98ea59af67c5672b8b2af4f00cbc6f61768f39ea",
+      "value": "13df06efa4a91047660249113a3e4f7147edb0c6",
       "description": "Tree of the FlashInfer main commit, before the patch."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_EFFECTIVE_TREE",
-      "value": "a089f6c4beaf103306775014a7a3d42eed1214c5",
+      "value": "616094d4a8b4a2bc94f3d43a832312c335924696",
       "description": "FlashInfer tree after the single source patch, as built into the wheel."
     },
     {
@@ -180,34 +185,34 @@
     },
     {
       "arg": "DSV4_0731_FLASHINFER_VERSION",
-      "value": "0.6.18.dev20260808",
+      "value": "0.6.18.dev20260810",
       "description": "FlashInfer version of both the built Python wheel and the cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_URL",
-      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260808/flashinfer_cubin-0.6.18.dev20260808-py3-none-any.whl",
+      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260810/flashinfer_cubin-0.6.18.dev20260810-py3-none-any.whl",
       "description": "Prebuilt cubin wheel matching the FlashInfer version."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_SHA256",
-      "value": "1717fb97473a1a11684487190122a1a96e2bf5c730537a5b127d3650c51f8149",
+      "value": "df0d5d5ebed57fb407f58a655045887700bc33984175a83f138d794ce67d7bf3",
       "description": "SHA256 of the cubin wheel, enforced by the installer."
     }
   ],
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.2.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.3.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "6acab9a3468067a6313d74fa2269d7047473e5751d6d336fd744ae404bfe0bfe",
-      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #32183, #33518, #33568 and #33805 plus the remaining local all-reduce and DSpark shared-expert fixes. Merged #33616 is supplied by main and is not carried."
+      "sha256": "3acb429a85b4f03576e6f55bedc0f2ead23cf784961a6853448776f38cfa11a8",
+      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #33518, #33568, #33732, #33805 and #34139 plus the remaining local all-reduce and FlashInfer-mHC dispatch fixes. Merged #33616 and #34189 are supplied by main; #34189 replaces the former #32183 carry."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.2.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.3.patch",
       "repository": "flashinfer",
       "order": 1,
-      "sha256": "ec5f9d0369265459f155e060c6282a3d35f22c846ecf900b0ae191cfa7927352",
-      "description": "Open FlashInfer PRs #4308 and #4393. Merged #4329 and #4380 are supplied by main and are not carried; #4380 replaced the former #4309 carry."
+      "sha256": "8cca9f65d848932eb2e9134c6f79e59c890dafc2a12693c2b84277382bed74aa",
+      "description": "Open FlashInfer PRs #4308 and #4393. Merged #4315, #4329 and #4380 are supplied by main and are not carried; #4380 replaced the former #4309 carry."
     }
   ],
   "verification": {
