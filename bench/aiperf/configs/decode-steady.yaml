@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+schemaVersion: "2.0"
+
+randomSeed: ${AIPERF_RANDOM_SEED:20260810}
+
+benchmark:
+  model: ${MODEL_NAME:deepseek-v4-flash}
+
+  endpoint:
+    url: ${INFERENCE_URL:http://127.0.0.1:8000}
+    type: chat
+    streaming: true
+    timeout: ${REQUEST_TIMEOUT_SECONDS:600}
+    useServerTokenCount: true
+    waitForModelTimeout: 300
+    waitForModelMode: both
+    extra:
+      temperature: ${DECODE_TEMPERATURE:1.0}
+      top_p: ${DECODE_TOP_P:0.95}
+      seed: ${SAMPLING_SEED:42}
+      ignore_eos: true
+      min_tokens: ${DECODE_OSL:16384}
+
+  tokenizer:
+    name: ${TOKENIZER_PATH:/models/deepseek-ai/DeepSeek-V4-Flash-0731}
+    trustRemoteCode: true
+    applyChatTemplate: true
+
+  dataset:
+    type: synthetic
+    entries: ${DECODE_CONCURRENCY:1}
+    sampling: sequential
+    prompts:
+      corpus: coding
+      isl: ${DECODE_ISL:256}
+      osl: ${DECODE_OSL:16384}
+
+  phases:
+    - name: profiling
+      type: concurrency
+      requests: ${DECODE_REQUESTS:1}
+      concurrency: ${DECODE_CONCURRENCY:1}
+
+  runtime:
+    ui: none
+    workers: ${AIPERF_WORKERS:4}
+    recordProcessors: ${AIPERF_RECORD_PROCESSORS:2}
+    statsInterval: 0
+
+  gpuTelemetry:
+    enabled: false
+
+  serverMetrics:
+    enabled: true
+    urls:
+      - ${SERVER_METRICS_URL:http://127.0.0.1:8000/metrics}
+    formats: [json, csv, parquet, jsonl]
+    discovery:
+      mode: disabled
+
+  artifacts:
+    dir: ${ARTIFACT_DIR:./artifacts/decode-steady}
+    summary: [json]
+    records: [jsonl]
+    raw: false
+    trace: false
+    sliceDuration: 1
+    autoPlot: false

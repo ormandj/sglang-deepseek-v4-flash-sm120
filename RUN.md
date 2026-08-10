@@ -18,7 +18,7 @@ Check GPU passthrough first:
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3
 ```
 
 ## Download the model
@@ -78,7 +78,7 @@ docker inspect dsv4-flash-sglang --format '{{json .Config.Cmd}}'
 The documented release is:
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3
 ```
 
 The older moving `dsv4-0731` tag is not this release.
@@ -111,24 +111,17 @@ fallback instead.
 
 ### DSpark shared experts
 
-RC2 carries a narrow SGLang gate that keeps the DSpark draft on separate
-shared-expert modules. After upstream made fusion decisions runner-local, the
-draft otherwise creates an extra fused expert slot and rejects the bundled
-shared-expert weights. This fix is part of the release patch, not a launch-time
-benchmark option.
-
-### DSpark compressed-state rewrite
-
-The image carries SGLang PR #32183. The DeepSeek-V4 compressed-state planner
-must rewrite the runtime verifier width, not a fixed four-row window. A partial
-rewrite eventually pollutes compressed attention state during long generation
-when DSpark verifies more than four rows.
+RC3 carries SGLang PR #34139, which keeps the DSpark draft on separate
+shared-expert modules after fusion decisions became runner-local. The change is
+part of the release patch rather than a benchmark-only server option.
 
 ### Fused MHC pre-norm
 
 `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1` selects the SM120-capable DeepGEMM fused MHC
-pre-norm instead of the eager float32 fallback. The TileLang MHC pre-norm
-override remains disabled because that path fails CUDA graph capture on SM120.
+pre-norm. `SGLANG_OPT_USE_FLASHINFER_MHC=1` enables the FlashInfer path; the RC3
+dispatch gate selects it only for token batches of at least 1,024. The TileLang
+MHC pre-norm override remains disabled because that path fails CUDA graph
+capture on SM120.
 
 ### All-reduce workspace and dispatch
 
@@ -151,20 +144,19 @@ unless `SGLANG_EMPTY_CACHE_INTERVAL` is set explicitly.
 
 ## Canonical benchmark procedure
 
-Use the unmodified public benchmark and the exact protocol in
-[BENCHMARKS.md](BENCHMARKS.md). That document records:
+Use the AIPerf harness and protocol in [BENCHMARKS.md](BENCHMARKS.md). The
+executable source is in [`bench/aiperf`](bench/aiperf). The documentation
+records:
 
-- the benchmark commit and script SHA256;
+- the pinned AIPerf commit;
 - image identities and runtime settings;
-- temperature and effective top-p;
-- discarded warmups and per-cell admission gates;
-- exact decode and prefill commands;
-- the client-only KV skip-guard override;
-- all five retained runs and medians;
-- sanitized raw JSON reports.
+- workload shape and sampling settings;
+- warmup and cache controls;
+- decode forward rate, useful throughput, acceptance, and TTFT;
+- cold-prefill throughput and TTFT;
+- commands for authenticated and keyless endpoints.
 
-Do not compare against tables from older image revisions. The repository
-publishes only the current RC2-versus-r33 campaign.
+The repository publishes only the current RC3 and vLLM r33 measurements.
 
 ## Health and API checks
 
@@ -198,11 +190,8 @@ curl -fsS http://localhost:8000/v1/chat/completions \
 
 ## KV capacity and context length
 
-On the validated two-GPU RC2 deployment, the benchmark observed a 770,560-token
-scheduler KV budget and a 774,656-token configured model context. The serving
-script pins `--context-length 774656` so DSA indexer scratch allocation is
-bounded near the usable KV pool instead of the checkpoint's full 1,048,576-token
-window.
+The serving script pins `--context-length 774656` so DSA indexer scratch
+allocation is bounded below the checkpoint's full 1,048,576-token window.
 
 Leaving the checkpoint window unbounded can force a large float32
 `(batch_size, max_seq_len)` indexer allocation on the first sufficiently large

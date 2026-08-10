@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+schemaVersion: "2.0"
+
+randomSeed: ${AIPERF_RANDOM_SEED:20260810}
+
+benchmark:
+  scenario: inferencex-agentx-mvp
+  model: ${MODEL_NAME:deepseek-v4-flash}
+
+  endpoint:
+    url: ${INFERENCE_URL:http://127.0.0.1:8000}
+    type: chat
+    streaming: true
+    timeout: ${REQUEST_TIMEOUT_SECONDS:5400}
+    useServerTokenCount: true
+    waitForModelTimeout: 300
+    waitForModelMode: both
+    extra:
+      temperature: 1.0
+      top_p: 0.95
+      seed: ${SAMPLING_SEED:42}
+      ignore_eos: true
+
+  tokenizer:
+    name: ${TOKENIZER_PATH:/models/deepseek-ai/DeepSeek-V4-Flash-0731}
+    trustRemoteCode: true
+    applyChatTemplate: true
+
+  dataset:
+    type: public
+    name: default
+    dataset: semianalysis_cc_traces_weka_062126
+    maxContextLength: ${MAX_CONTEXT_LENGTH:774656}
+    cacheBust:
+      target: first_turn_prefix
+
+  phases:
+    - name: profiling
+      type: concurrency
+      duration: ${AGENTX_DURATION_SECONDS:1800}
+      concurrency: ${AGENTX_CONCURRENCY:32}
+      systemIdleGapCapSeconds: 10
+      trajectoryStartMinRatio: 0.0
+      trajectoryStartMaxRatio: 1.0
+
+  runtime:
+    ui: none
+    workers: ${AIPERF_WORKERS:8}
+    recordProcessors: ${AIPERF_RECORD_PROCESSORS:2}
+    statsInterval: 0
+
+  gpuTelemetry:
+    enabled: false
+
+  serverMetrics:
+    enabled: true
+    urls:
+      - ${SERVER_METRICS_URL:http://127.0.0.1:8000/metrics}
+    formats: [json, csv, parquet, jsonl]
+    discovery:
+      mode: disabled
+
+  artifacts:
+    dir: ${ARTIFACT_DIR:./artifacts/agentx-mvp}
+    summary: [json]
+    records: [jsonl]
+    raw: false
+    trace: false
+    sliceDuration: 10
+    autoPlot: false

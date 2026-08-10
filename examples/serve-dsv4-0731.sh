@@ -8,7 +8,7 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.2}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
@@ -57,6 +57,7 @@ exec docker run --rm \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
+  --env SGLANG_OPT_USE_FLASHINFER_MHC=1 \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \

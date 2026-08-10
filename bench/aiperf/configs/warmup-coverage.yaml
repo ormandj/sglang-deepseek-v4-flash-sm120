@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+schemaVersion: "2.0"
+
+randomSeed: ${AIPERF_RANDOM_SEED:20260810}
+
+benchmark:
+  model: ${MODEL_NAME:deepseek-v4-flash}
+
+  endpoint:
+    url: ${INFERENCE_URL:http://127.0.0.1:8000}
+    type: chat
+    api_key: ${BENCH_API_KEY:}
+    streaming: true
+    timeout: ${REQUEST_TIMEOUT_SECONDS:900}
+    useServerTokenCount: true
+    waitForModelTimeout: 300
+    waitForModelMode: both
+    extra:
+      temperature: ${WARMUP_TEMPERATURE:0.0}
+      top_p: ${WARMUP_TOP_P:1.0}
+      seed: ${SAMPLING_SEED:42}
+      ignore_eos: true
+      min_tokens: ${WARMUP_OSL:512}
+
+  tokenizer:
+    name: ${TOKENIZER_PATH:/models/deepseek-ai/DeepSeek-V4-Flash-0731}
+    trustRemoteCode: true
+    applyChatTemplate: true
+
+  dataset:
+    type: synthetic
+    entries: ${WARMUP_CONCURRENCY:1}
+    sampling: sequential
+    prompts:
+      corpus: coding
+      isl: ${WARMUP_ISL:256}
+      osl: ${WARMUP_OSL:512}
+      cacheBust:
+        target: first_turn_prefix
+
+  phases:
+    - name: profiling
+      type: concurrency
+      requests: ${WARMUP_REQUESTS:1}
+      concurrency: ${WARMUP_CONCURRENCY:1}
+
+  runtime:
+    ui: none
+    workers: ${AIPERF_WORKERS:4}
+    recordProcessors: 1
+    statsInterval: 0
+
+  gpuTelemetry:
+    enabled: false
+
+  serverMetrics:
+    enabled: false
+
+  artifacts:
+    dir: ${ARTIFACT_DIR:./artifacts/warmup-coverage}
+    summary: [json]
+    records: false
+    raw: false
+    trace: false
+    autoPlot: false
