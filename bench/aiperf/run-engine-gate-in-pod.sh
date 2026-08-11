@@ -6,7 +6,7 @@ if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
   exit 2
 fi
 if [ "$#" -ne 3 ]; then
-  echo "usage: $0 CAMPAIGN_ID BUILD_ID quick|decode-supplement|qualification" >&2
+  echo "usage: $0 CAMPAIGN_ID BUILD_ID quick|decode-supplement|qualification|publication" >&2
   exit 2
 fi
 
@@ -19,8 +19,8 @@ for value in "$campaign" "$build_id"; do
   esac
 done
 case "$mode" in
-  quick|decode-supplement|qualification) ;;
-  *) echo "error: mode must be quick, decode-supplement, or qualification" >&2; exit 2 ;;
+  quick|decode-supplement|qualification|publication) ;;
+  *) echo "error: mode must be quick, decode-supplement, qualification, or publication" >&2; exit 2 ;;
 esac
 
 : "${BENCH_IMAGE_REF:?BENCH_IMAGE_REF must identify the immutable image}"
@@ -174,6 +174,14 @@ case "$mode" in
       decode_shapes='1:8:12288:2048:8192 2:6:10240:2048:7168 4:4:8192:1536:5632 8:3:6144:1280:4352 16:2:4096:1024:3072 32:2:3072:768:2304'
     fi
     prefill_shapes='8k-c1:8192:1:20 8k-c2:8192:2:20 8k-c4:8192:4:20 64k-c1:65536:1:5 128k-c1:130816:1:3'
+    ;;
+  publication)
+    if [ "$bench_engine" = vllm ]; then
+      decode_shapes='1:5:12288:2048:8192 2:5:10240:2048:7168 4:5:8192:1536:5632 8:5:6144:1280:4352 16:5:4096:1024:3072'
+    else
+      decode_shapes='1:5:12288:2048:8192 2:5:10240:2048:7168 4:5:8192:1536:5632 8:5:6144:1280:4352 16:5:4096:1024:3072 32:5:3072:768:2304'
+    fi
+    prefill_shapes='8k-c1:8192:1:5 64k-c1:65536:1:5 128k-c1:130816:1:5'
     ;;
 esac
 

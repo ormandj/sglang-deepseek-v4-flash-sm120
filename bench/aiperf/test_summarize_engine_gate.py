@@ -32,7 +32,7 @@ def _gate(tmp_path):
                     },
                 },
             )
-    for label in ("8k-c1", "64k-c1", "128k-c1"):
+    for label, completed in (("8k-c1", 8), ("64k-c1", 3), ("128k-c1", 2)):
         _write(
             tmp_path / "prefill" / label / "prefill-analysis.json",
             {
@@ -40,7 +40,7 @@ def _gate(tmp_path):
                 "requests": {
                     "aggregate_prompt_tokens_per_second": 8000,
                     "time_to_first_token_ms": {"median": 1000},
-                    "completed": 3,
+                    "completed": completed,
                 },
             },
         )
@@ -114,3 +114,78 @@ def test_decode_supplement_requires_only_mid_concurrency_cells(tmp_path) -> None
 
     assert set(result["decode"]) == {"c2", "c4", "c16"}
     assert result["prefill"] == {}
+
+
+def test_publication_requires_five_repetitions_and_prefill_requests(tmp_path) -> None:
+    for concurrency in (1, 2, 4, 8, 16, 32):
+        for repetition in range(1, 6):
+            _write(
+                tmp_path
+                / "decode"
+                / f"c{concurrency}"
+                / f"r{repetition:02d}"
+                / "decode-analysis.json",
+                {
+                    "validation": {"valid": True},
+                    "decode": {
+                        "target_concurrency": concurrency,
+                        "tokens_per_second_ols": 100 * concurrency + repetition,
+                    },
+                    "engine_work": {
+                        "forward_passes_per_second_ols": 50 + repetition,
+                        "useful_tokens_per_forward_per_request": 5.5,
+                    },
+                },
+            )
+    for label in ("8k-c1", "64k-c1", "128k-c1"):
+        _write(
+            tmp_path / "prefill" / label / "prefill-analysis.json",
+            {
+                "validation": {"valid": True},
+                "requests": {
+                    "aggregate_prompt_tokens_per_second": 8000,
+                    "time_to_first_token_ms": {"median": 1000},
+                    "completed": 5,
+                },
+            },
+        )
+
+    result = summarize(tmp_path, mode="publication", build_id="rc3")
+
+    assert set(result["decode"]) == {"c1", "c2", "c4", "c8", "c16", "c32"}
+    assert all(
+        cell["engine_forward_passes_per_second"]["count"] == 5
+        for cell in result["decode"].values()
+    )
+    assert all(cell["requests"] == 5 for cell in result["prefill"].values())
+
+
+def test_publication_rejects_nonuniform_prefill_count(tmp_path) -> None:
+    root = _gate(tmp_path)
+    for concurrency in (2, 4, 16):
+        for repetition in range(1, 6):
+            _write(
+                root
+                / "decode"
+                / f"c{concurrency}"
+                / f"r{repetition:02d}"
+                / "decode-analysis.json",
+                {
+                    "validation": {"valid": True},
+                    "decode": {
+                        "target_concurrency": concurrency,
+                        "tokens_per_second_ols": 100 * concurrency + repetition,
+                    },
+                    "engine_work": {
+                        "forward_passes_per_second_ols": 50 + repetition,
+                        "useful_tokens_per_forward_per_request": 5.5,
+                    },
+                },
+            )
+    for concurrency, current in ((1, 3), (8, 2), (32, 1)):
+        for repetition in range(current + 1, 6):
+            source = root / "decode" / f"c{concurrency}" / "r01" / "decode-analysis.json"
+            target = root / "decode" / f"c{concurrency}" / f"r{repetition:02d}" / "decode-analysis.json"
+            _write(target, json.loads(source.read_text(encoding="utf-8")))
+    with pytest.raises(SummaryError, match="completed requests; expected 5"):
+        summarize(root, mode="publication", build_id="rc3")

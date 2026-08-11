@@ -56,6 +56,13 @@ Panel members then execute sequentially without another warmup or restart.
 | `quick` | C1 x3, C8 x2, plus C32 x1 where supported | 8K, 64K, 128K C1 | routine per-change regression signal |
 | `decode-supplement` | C2 x6, C4 x4, C16 x2 | none | add the intermediate concurrency cells to an existing matched quick comparison without repeating it |
 | `qualification` | C1 x8, C2 x6, C4 x4, C8 x3, C16 x2, plus C32 x2 where supported | 8K C1/C2/C4, 64K C1, 128K C1 | complete candidate characterization |
+| `publication` | C1/C2/C4/C8/C16 x5, plus C32 x5 where supported | 8K, 64K, 128K C1, five requests each | public cross-engine results |
+
+Publication tables use only one fresh `publication` run per engine. They do
+not combine quick, supplement, qualification, or earlier publication cells.
+Every reported decode concurrency therefore has exactly five repetitions.
+Both engines use the same five prompt seeds. C32 is absent only when the
+deployment cannot admit that concurrency.
 
 The vLLM r33 deployment is configured for at most 16 sequences and cannot run
 C32. Its summary records only supported cells; cross-engine comparison records
@@ -138,7 +145,7 @@ BENCH_PROJECT_REVISION='<this repository revision>' \
 AIPERF_REVISION='03c9c6ddc5e6227782e53ded177f1227d332af48' \
 BENCH_MODEL_REVISION='<model snapshot revision>' \
 BENCH_ENGINE='sglang' \
-./run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 quick
+./run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 publication
 ```
 
 Set `BENCH_ENGINE=vllm` for vLLM. Add `BENCH_API_KEY` only when the endpoint
@@ -147,6 +154,13 @@ requires a key; a container-provided `VLLM_API_KEY` is discovered automatically.
 Arguments are campaign ID, build ID, and mode. Output is immutable under
 `/models/bench/results/aiperf-greenfield/engine-gates/` by default. Override
 `AIPERF_CAMPAIGN_ROOT` only to select another retained artifact volume.
+
+For a public comparison, run `publication` once on a fresh, idle server process
+for each engine. Keep that process unchanged while all cells execute
+sequentially. The runner warms every decode concurrency and prefill length once
+before recording any cell. It then records five repetitions at every supported
+decode concurrency and five cold-prefill requests at each published length.
+Do not publish partial cells or fill an unsupported cell with a synthetic zero.
 
 Use `decode-supplement` after matched quick gates when a cross-engine report
 needs C2/C4/C16 but does not need to repeat already valid C1/C8/prefill cells.
