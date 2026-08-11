@@ -2,8 +2,9 @@
 
 Last updated: 2026-08-10 CDT.
 
-This document contains the current SGLang `v0.1.0-rc.3` and vLLM r33
-measurements. The executable benchmark is in [`bench/aiperf`](bench/aiperf).
+This document contains only the current SGLang `v0.1.0-rc.3` and vLLM r33
+publication measurements. The executable benchmark is in
+[`bench/aiperf`](bench/aiperf).
 
 ## System and software
 
@@ -12,14 +13,15 @@ measurements. The executable benchmark is in [`bench/aiperf`](bench/aiperf).
 - 300 W power limit per GPU;
 - one engine active at a time;
 - clients executed inside the serving pod against `127.0.0.1:8000`;
-- model: `deepseek-ai/DeepSeek-V4-Flash-0731`;
+- model: `deepseek-ai/DeepSeek-V4-Flash-0731` at
+  `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`;
 - speculative decoding: DSpark K=5.
 
 SGLang used the `v0.1.0-rc.3` source composition in this repository:
 
 ```text
-SGLang main                 5a8e360e705fc7b8046f6b060ba4fc557ff606c7
-SGLang effective tree       70fa46c3f950ff80c3bb3b9160a69ff531935dc5
+SGLang main                  5a8e360e705fc7b8046f6b060ba4fc557ff606c7
+SGLang effective tree        70fa46c3f950ff80c3bb3b9160a69ff531935dc5
 FlashInfer main              4fbac49f30e1f40a0dcddd90512b8c56d68037f7
 FlashInfer effective tree    616094d4a8b4a2bc94f3d43a832312c335924696
 FlashInfer version           0.6.18.dev20260810
@@ -45,104 +47,124 @@ The client is AIPerf `0.12.0` pinned at commit:
 03c9c6ddc5e6227782e53ded177f1227d332af48
 ```
 
-[`bench/aiperf/aiperf.lock.json`](bench/aiperf/aiperf.lock.json) records the
-source and runtime pins. [`bench/aiperf/README.md`](bench/aiperf/README.md)
-documents installation, execution, warmup, cache handling, metric definitions,
-and keyed or keyless endpoint operation.
+The benchmark method used project harness revision:
 
-All panel members ran sequentially on one unchanged server process for each
-engine. Each measured decode shape and prefill length was warmed once before
-the measured panel began. Fixed prompts and seeds were used with temperature
-0, top-p 1, and ignored EOS.
+```text
+24a33782e1f894e6e4ae2c4f9d01a394b1027663
+```
 
-Decode used a synthetic coding prompt with a nominal 256-token input. Output
-length and average-context analysis windows vary by concurrency as encoded in
-[`run-engine-gate-in-pod.sh`](bench/aiperf/run-engine-gate-in-pod.sh). The
-analyzers require exact request occupancy, an empty request queue, no prefill in
-the decode interval, monotonic counters, and the configured context window.
+This public repository contains the same executable harness. Its
+[`aiperf.lock.json`](bench/aiperf/aiperf.lock.json) records the source and
+runtime pins. [`bench/aiperf/README.md`](bench/aiperf/README.md) documents
+installation, execution, warmup, cache handling, metric definitions, and keyed
+or keyless endpoint operation.
 
-Cold-prefill requests generated one output token. SGLang was flushed at each
-measured cell. The vLLM analyzer required its cached-prompt-token counter to
-remain zero. The common nominal near-limit input was 130,816 tokens; throughput
-uses the actual engine-reported token count.
+## Publication method
 
-## Repetition panel
+Each engine used one fresh server process. The process was not restarted or
+reconfigured while its panel ran. All clients ran inside the selected serving
+pod against localhost, and panel members ran sequentially.
 
-The reported campaign combines the `quick` and `decode-supplement` modes:
+The `publication` mode is fixed as follows:
 
-| C | repetitions |
-|---:|---:|
-| 1 | 3 |
-| 2 | 6 |
-| 4 | 4 |
-| 8 | 2 |
-| 16 | 2 |
-| 32 | 1 SGLang only |
+| workload | SGLang rc.3 | vLLM r33 |
+|---|---:|---:|
+| decode C1 | 5 repetitions | 5 repetitions |
+| decode C2 | 5 repetitions | 5 repetitions |
+| decode C4 | 5 repetitions | 5 repetitions |
+| decode C8 | 5 repetitions | 5 repetitions |
+| decode C16 | 5 repetitions | 5 repetitions |
+| decode C32 | 5 repetitions | not measured |
+| cold prefill 8K C1 | 5 requests | 5 requests |
+| cold prefill 64K C1 | 5 requests | 5 requests |
+| cold prefill near-128K C1 | 5 requests | 5 requests |
 
-The vLLM deployment was not run at C32 because it was configured for at most
-16 sequences and its KV capacity did not admit that cell.
+vLLM r33 was not measured at C32 because that deployment cannot admit C32. No
+value is assigned to the unmeasured cell.
+
+Before measurement, the runner warms every supported decode concurrency and
+each prefill length once. It then records all decode cells and all prefill cells
+sequentially on the unchanged process. A publication table is generated from
+one fresh `publication` campaign per engine; quick, supplement,
+qualification, and earlier publication cells are not combined with it.
+
+Decode uses fixed synthetic coding prompts and five fixed seeds, temperature
+0, top-p 1, ignored EOS, a nominal 256-token input, exact occupancy, and an
+empty request queue. Output lengths and equal-context analysis windows vary by
+concurrency as encoded in
+[`run-engine-gate-in-pod.sh`](bench/aiperf/run-engine-gate-in-pod.sh).
+The analyzers reject wrong occupancy, queued work, prefill in the decode
+interval, counter resets, and an insufficient analysis window.
+
+Cold prefill generates one output token per request. Every request is
+cache-busted. SGLang is flushed at each measured cell. The vLLM analyzer
+requires its cached-prompt-token counter to remain zero. The common nominal
+near-limit input is 130,816 tokens; throughput uses the actual engine-reported
+input count.
 
 ## Decode engine rate
 
 Forward passes per second is calculated from each engine's live decode-step
-counter over the accepted context interval. The change column is the geometric
-mean of matched per-seed RC3/r33 ratios minus one.
+counter over the accepted context interval. Each value is the median of five
+repetitions.
 
-| C | vLLM r33 median forward/s | SGLang rc.3 median forward/s | rc.3 paired change |
-|---:|---:|---:|---:|
-| 1 | 65.622 | 59.614 | -9.28% |
-| 2 | 47.801 | 46.783 | -0.65% |
-| 4 | 34.072 | 34.129 | -0.35% |
-| 8 | 23.862 | 22.828 | -4.34% |
-| 16 | 16.618 | 17.322 | +4.24% |
-| 32 | not run | 12.854 | — |
+| C | vLLM r33 median forward/s | SGLang rc.3 median forward/s |
+|---:|---:|---:|
+| 1 | 65.410 | 60.013 |
+| 2 | 46.940 | 46.479 |
+| 4 | 33.637 | 32.887 |
+| 8 | 23.914 | 23.329 |
+| 16 | 16.488 | 17.444 |
+| 32 | not measured | 12.989 |
 
 ## Useful decode throughput and acceptance
 
-Useful tokens per second is calculated from each engine's live generation-token
-counter over the same interval. Accepted tokens per forward per request is the
-ratio of useful-token rate to forward rate and concurrency.
+Useful tokens per second is calculated from each engine's live
+generation-token counter over the same interval. Useful tokens per forward per
+request is the ratio of useful-token rate to forward rate and concurrency.
+Each value is the median of five repetitions.
 
-| C | vLLM r33 median useful tok/s | SGLang rc.3 median useful tok/s | vLLM accepted tokens/forward/request | rc.3 accepted tokens/forward/request |
+| C | vLLM r33 median useful tok/s | SGLang rc.3 median useful tok/s | vLLM useful tokens/forward/request | rc.3 useful tokens/forward/request |
 |---:|---:|---:|---:|---:|
-| 1 | 353.0 | 303.4 | 5.405 | 5.082 |
-| 2 | 484.6 | 534.4 | 5.128 | 5.702 |
-| 4 | 632.6 | 706.0 | 4.610 | 5.266 |
-| 8 | 938.1 | 985.5 | 4.872 | 5.378 |
-| 16 | 1,098.3 | 1,358.9 | 4.118 | 4.871 |
-| 32 | not run | 1,890.0 | not run | 4.573 |
+| 1 | 355.7 | 326.8 | 5.179 | 5.331 |
+| 2 | 511.2 | 498.3 | 5.404 | 5.492 |
+| 4 | 678.6 | 687.5 | 4.937 | 5.175 |
+| 8 | 863.1 | 956.5 | 4.401 | 5.067 |
+| 16 | 1,122.5 | 1,410.6 | 4.189 | 4.993 |
+| 32 | not measured | 1,952.9 | not measured | 4.690 |
 
 ## Decode time to first token
 
-Each entry is the median of the per-run AIPerf p50 TTFT values. Brackets contain
-the minimum and maximum per-run p50 values.
+Each entry is the median of five per-run AIPerf p50 TTFT values. Brackets
+contain the minimum and maximum per-run p50 values.
 
 | C | vLLM r33 median TTFT [min, max] | SGLang rc.3 median TTFT [min, max] |
 |---:|---:|---:|
-| 1 | 506.5 ms [501.2, 511.5] | 231.8 ms [223.7, 248.9] |
-| 2 | 774.9 ms [769.1, 808.9] | 391.8 ms [379.6, 404.7] |
-| 4 | 1,139.2 ms [1,128.9, 1,369.9] | 407.7 ms [399.1, 427.9] |
-| 8 | 1,533.3 ms [1,255.6, 1,811.0] | 640.0 ms [447.2, 832.8] |
-| 16 | 1,559.0 ms [1,555.1, 1,562.9] | 1,365.2 ms [570.9, 2,159.5] |
-| 32 | not run | 965.4 ms [965.4, 965.4] |
+| 1 | 502.4 ms [497.8, 504.1] | 239.6 ms [230.3, 240.9] |
+| 2 | 784.1 ms [779.7, 797.5] | 402.1 ms [386.3, 403.5] |
+| 4 | 1,148.2 ms [1,119.8, 1,379.5] | 379.1 ms [361.8, 400.2] |
+| 8 | 1,291.7 ms [1,268.1, 1,787.6] | 371.2 ms [350.1, 412.6] |
+| 16 | 1,559.3 ms [1,527.1, 1,595.5] | 466.4 ms [460.2, 474.8] |
+| 32 | not measured | 1,050.6 ms [706.3, 2,656.5] |
 
 ## Cold prefill
 
-| target | vLLM r33 prompt tok/s | SGLang rc.3 prompt tok/s | rc.3 change | vLLM median TTFT | rc.3 median TTFT |
-|---:|---:|---:|---:|---:|---:|
-| 8K C1 | 7,722.7 | 7,516.2 | -2.67% | 1,068.4 ms | 1,086.3 ms |
-| 64K C1 | 8,647.4 | 8,343.9 | -3.51% | 7,564.6 ms | 7,828.1 ms |
-| near-128K C1 | 8,001.0 | 7,780.1 | -2.76% | 16,358.0 ms | 16,811.6 ms |
+Each length used five requests.
 
-The near-limit cell used the same nominal 130,816-token input for both engines.
-Actual engine-reported input medians were 130,900.5 for r33 and 130,821 for
-RC3.
+| target | vLLM r33 prompt tok/s | SGLang rc.3 prompt tok/s | vLLM median TTFT | rc.3 median TTFT |
+|---:|---:|---:|---:|---:|
+| 8K C1 | 7,699.7 | 7,479.6 | 1,072.1 ms | 1,087.1 ms |
+| 64K C1 | 8,572.4 | 8,264.6 | 7,649.8 ms | 7,905.2 ms |
+| near-128K C1 | 7,941.9 | 7,758.4 | 16,551.1 ms | 16,996.9 ms |
+
+The common nominal near-limit input was 130,816 tokens. Actual
+engine-reported input medians were 130,899 for r33 and 130,821 for RC3.
 
 ## Running the benchmark
 
-Stage the pinned AIPerf checkout and this repository's `bench/aiperf` directory
-inside the serving pod. Run the warmup and measured panel against the pod's
-localhost endpoint:
+Stage the pinned AIPerf checkout and this repository's `bench/aiperf`
+directory inside the serving pod. Use one fresh, otherwise idle server process
+per engine and run against the pod's localhost endpoint:
 
 ```bash
 BENCH_IMAGE_REF='image@sha256:...' \
@@ -151,15 +173,20 @@ BENCH_PROJECT_REVISION='<this repository revision>' \
 AIPERF_REVISION='03c9c6ddc5e6227782e53ded177f1227d332af48' \
 BENCH_MODEL_REVISION='<model snapshot revision>' \
 BENCH_ENGINE='sglang' \
-./bench/aiperf/run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 quick
+./bench/aiperf/run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 publication
 ```
 
-Run `decode-supplement` with the same campaign and build identity for C2, C4,
-and C16. Set `BENCH_ENGINE=vllm` for r33. Set `BENCH_API_KEY` when the endpoint
-requires a key; omit it for a keyless endpoint. A container-provided
-`VLLM_API_KEY` is also accepted.
+Set `BENCH_ENGINE=vllm` and use a distinct build ID for r33. Set
+`BENCH_API_KEY` when the endpoint requires a key; omit it for a keyless
+endpoint. A container-provided `VLLM_API_KEY` is also accepted. Neither key is
+written to benchmark output.
 
-The runner creates `summary.json`. Compare two matching summaries with:
+The runner rejects execution outside Kubernetes or against a non-loopback
+endpoint. It also rejects an existing output directory, incomplete request
+sets, and any publication cell that does not contain exactly five
+repetitions or five cold-prefill requests.
+
+Compare the two completed summaries with:
 
 ```bash
 uv run bench/aiperf/compare_engine_gates.py \
@@ -169,4 +196,4 @@ uv run bench/aiperf/compare_engine_gates.py \
 ```
 
 The mismatch flag reports C32 as an engine-only cell instead of assigning a
-value to the unmeasured vLLM cell.
+value to vLLM.

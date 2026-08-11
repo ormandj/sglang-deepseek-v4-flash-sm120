@@ -82,6 +82,7 @@ more repetitions to low concurrency, where one path otherwise dominates:
 | quick | 3 | - | - | 2 | - | 1 |
 | decode supplement | - | 6 | 4 | - | 2 | - |
 | qualification | 8 | 6 | 4 | 3 | 2 | 2 |
+| publication | 5 | 5 | 5 | 5 | 5 | 5 where supported |
 
 The decode supplement is used only to extend a matched quick comparison with
 the missing intermediate concurrency cells. Keeping it separate avoids
@@ -90,6 +91,14 @@ qualification repetition budget for C2/C4/C16.
 
 C32 is omitted, not imputed, for a deployment whose configured sequence or KV
 capacity cannot admit it. Comparisons publish the resulting capacity mismatch.
+
+The publication panel is deliberately uniform: every reported decode
+concurrency contains five fresh prompt-path repetitions from one unchanged
+server process. A publication comparison never splices cells from quick,
+supplement, qualification, or an earlier run. Each of the three published cold
+prefill lengths likewise contains five cache-cold requests. This fixed rule
+keeps the public method simple and repeatable; it does not turn same-process
+prompt paths into independent deployment replicates.
 
 These counts are engineering budgets, not claims of a universal statistically
 correct sample size. The summary publishes every value, median, mean, range,

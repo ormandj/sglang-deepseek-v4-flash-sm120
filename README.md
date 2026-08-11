@@ -99,55 +99,60 @@ workarounds live in [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
 
 SGLang `v0.1.0-rc.3` and vLLM r33 were measured separately on the same two RTX
 PRO 6000 Blackwell Max-Q GPUs at TP=2 and 300 W per GPU. Clients ran inside each
-serving container against localhost. The fixed decode panel used temperature
-0, top-p 1, ignored EOS, and one unchanged server process per engine.
+serving container against localhost. One fresh server process was used per
+engine. Every supported decode concurrency used five fresh repetitions, and
+each cold-prefill length used five requests. The runner warmed every measured
+shape once before recording the sequential panel. Decode used fixed prompts and
+seeds, temperature 0, top-p 1, and ignored EOS.
+
+vLLM r33 was not measured at C32 because that deployment cannot admit C32.
 
 ### Decode engine rate
 
-| C | repetitions | vLLM r33 median forward/s | SGLang rc.3 median forward/s | rc.3 paired change |
-|---:|---:|---:|---:|---:|
-| 1 | 3 | 65.622 | 59.614 | -9.28% |
-| 2 | 6 | 47.801 | 46.783 | -0.65% |
-| 4 | 4 | 34.072 | 34.129 | -0.35% |
-| 8 | 2 | 23.862 | 22.828 | -4.34% |
-| 16 | 2 | 16.618 | 17.322 | +4.24% |
-| 32 | 1 SGLang only | not run | 12.854 | — |
+| C | vLLM r33 median forward/s | SGLang rc.3 median forward/s |
+|---:|---:|---:|
+| 1 | 65.410 | 60.013 |
+| 2 | 46.940 | 46.479 |
+| 4 | 33.637 | 32.887 |
+| 8 | 23.914 | 23.329 |
+| 16 | 16.488 | 17.444 |
+| 32 | not measured | 12.989 |
 
 ### Useful decode throughput and acceptance
 
-| C | vLLM r33 median useful tok/s | SGLang rc.3 median useful tok/s | vLLM accepted tokens/forward/request | rc.3 accepted tokens/forward/request |
+| C | vLLM r33 median useful tok/s | SGLang rc.3 median useful tok/s | vLLM useful tokens/forward/request | rc.3 useful tokens/forward/request |
 |---:|---:|---:|---:|---:|
-| 1 | 353.0 | 303.4 | 5.405 | 5.082 |
-| 2 | 484.6 | 534.4 | 5.128 | 5.702 |
-| 4 | 632.6 | 706.0 | 4.610 | 5.266 |
-| 8 | 938.1 | 985.5 | 4.872 | 5.378 |
-| 16 | 1,098.3 | 1,358.9 | 4.118 | 4.871 |
-| 32 | not run | 1,890.0 | not run | 4.573 |
+| 1 | 355.7 | 326.8 | 5.179 | 5.331 |
+| 2 | 511.2 | 498.3 | 5.404 | 5.492 |
+| 4 | 678.6 | 687.5 | 4.937 | 5.175 |
+| 8 | 863.1 | 956.5 | 4.401 | 5.067 |
+| 16 | 1,122.5 | 1,410.6 | 4.189 | 4.993 |
+| 32 | not measured | 1,952.9 | not measured | 4.690 |
 
 ### Decode TTFT
 
-Each entry is the median of the per-run p50 TTFT values. Brackets contain the
+Each entry is the median of five per-run p50 TTFT values. Brackets contain the
 minimum and maximum per-run p50 values.
 
-| C | repetitions | vLLM r33 median TTFT [min, max] | SGLang rc.3 median TTFT [min, max] |
-|---:|---:|---:|---:|
-| 1 | 3 | 506.5 ms [501.2, 511.5] | 231.8 ms [223.7, 248.9] |
-| 2 | 6 | 774.9 ms [769.1, 808.9] | 391.8 ms [379.6, 404.7] |
-| 4 | 4 | 1,139.2 ms [1,128.9, 1,369.9] | 407.7 ms [399.1, 427.9] |
-| 8 | 2 | 1,533.3 ms [1,255.6, 1,811.0] | 640.0 ms [447.2, 832.8] |
-| 16 | 2 | 1,559.0 ms [1,555.1, 1,562.9] | 1,365.2 ms [570.9, 2,159.5] |
-| 32 | 1 SGLang only | not run | 965.4 ms [965.4, 965.4] |
+| C | vLLM r33 median TTFT [min, max] | SGLang rc.3 median TTFT [min, max] |
+|---:|---:|---:|
+| 1 | 502.4 ms [497.8, 504.1] | 239.6 ms [230.3, 240.9] |
+| 2 | 784.1 ms [779.7, 797.5] | 402.1 ms [386.3, 403.5] |
+| 4 | 1,148.2 ms [1,119.8, 1,379.5] | 379.1 ms [361.8, 400.2] |
+| 8 | 1,291.7 ms [1,268.1, 1,787.6] | 371.2 ms [350.1, 412.6] |
+| 16 | 1,559.3 ms [1,527.1, 1,595.5] | 466.4 ms [460.2, 474.8] |
+| 32 | not measured | 1,050.6 ms [706.3, 2,656.5] |
 
 ### Cold prefill
 
-| target | vLLM r33 prompt tok/s | SGLang rc.3 prompt tok/s | rc.3 change | vLLM median TTFT | rc.3 median TTFT |
-|---:|---:|---:|---:|---:|---:|
-| 8K C1 | 7,722.7 | 7,516.2 | -2.67% | 1,068.4 ms | 1,086.3 ms |
-| 64K C1 | 8,647.4 | 8,343.9 | -3.51% | 7,564.6 ms | 7,828.1 ms |
-| near-128K C1 | 8,001.0 | 7,780.1 | -2.76% | 16,358.0 ms | 16,811.6 ms |
+| target | vLLM r33 prompt tok/s | SGLang rc.3 prompt tok/s | vLLM median TTFT | rc.3 median TTFT |
+|---:|---:|---:|---:|---:|
+| 8K C1 | 7,699.7 | 7,479.6 | 1,072.1 ms | 1,087.1 ms |
+| 64K C1 | 8,572.4 | 8,264.6 | 7,649.8 ms | 7,905.2 ms |
+| near-128K C1 | 7,941.9 | 7,758.4 | 16,551.1 ms | 16,996.9 ms |
 
-[BENCHMARKS.md](BENCHMARKS.md) documents the metric definitions, fixed panel,
-commands, and source versions. The executable harness is in
+[BENCHMARKS.md](BENCHMARKS.md) documents the metric definitions, uniform n=5
+publication mode, commands, and source versions. The executable harness is in
 [`bench/aiperf`](bench/aiperf).
 
 ## Validated configuration

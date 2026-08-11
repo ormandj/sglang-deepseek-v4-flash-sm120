@@ -23,17 +23,26 @@ EXPECTED_DECODE = {
         "quick": {1: 3, 8: 2, 32: 1},
         "decode-supplement": {2: 6, 4: 4, 16: 2},
         "qualification": {1: 8, 2: 6, 4: 4, 8: 3, 16: 2, 32: 2},
+        "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5, 32: 5},
     },
     "vllm": {
         "quick": {1: 3, 8: 2},
         "decode-supplement": {2: 6, 4: 4, 16: 2},
         "qualification": {1: 8, 2: 6, 4: 4, 8: 3, 16: 2},
+        "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5},
     },
 }
 EXPECTED_PREFILL = {
-    "quick": {"8k-c1", "64k-c1", "128k-c1"},
-    "decode-supplement": set(),
-    "qualification": {"8k-c1", "8k-c2", "8k-c4", "64k-c1", "128k-c1"},
+    "quick": {"8k-c1": 8, "64k-c1": 3, "128k-c1": 2},
+    "decode-supplement": {},
+    "qualification": {
+        "8k-c1": 20,
+        "8k-c2": 20,
+        "8k-c4": 20,
+        "64k-c1": 5,
+        "128k-c1": 3,
+    },
+    "publication": {"8k-c1": 5, "64k-c1": 5, "128k-c1": 5},
 }
 
 
@@ -148,10 +157,11 @@ def summarize(
 
     prefill_paths = sorted(root.glob("prefill/*/prefill-analysis.json"))
     labels = {path.parent.name for path in prefill_paths}
-    if labels != EXPECTED_PREFILL[mode]:
+    expected_prefill = EXPECTED_PREFILL[mode]
+    if labels != set(expected_prefill):
         raise SummaryError(
             f"prefill cells are {sorted(labels)}; "
-            f"expected {sorted(EXPECTED_PREFILL[mode])}"
+            f"expected {sorted(expected_prefill)}"
         )
     prefill: dict[str, Any] = {}
     for path in prefill_paths:
@@ -159,6 +169,13 @@ def summarize(
         if document.get("validation", {}).get("valid") is not True:
             raise SummaryError(f"{path.parent.name} is invalid")
         requests = document.get("requests", {})
+        completed = requests.get("completed")
+        expected_requests = expected_prefill[path.parent.name]
+        if completed != expected_requests:
+            raise SummaryError(
+                f"{path.parent.name} has {completed} completed requests; "
+                f"expected {expected_requests}"
+            )
         prefill[path.parent.name] = {
             "prompt_tokens_per_second": _finite_positive(
                 requests.get("aggregate_prompt_tokens_per_second"),
@@ -168,7 +185,7 @@ def summarize(
                 requests.get("time_to_first_token_ms", {}).get("median"),
                 f"{path.parent.name} TTFT",
             ),
-            "requests": requests.get("completed"),
+            "requests": completed,
         }
 
     return {

@@ -158,6 +158,12 @@ records:
 
 The repository publishes only the current RC3 and vLLM r33 measurements.
 
+Public comparison runs use the harness's `publication` mode: one fresh,
+unchanged server process per engine; one warmup for every measured shape; five
+fresh repetitions at every supported decode concurrency; and five cold
+requests at each published prefill length. vLLM C32 is omitted because that
+deployment cannot admit it; no value is imputed.
+
 ## Health and API checks
 
 `SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a liveness check
