@@ -57,6 +57,11 @@ The launch script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. The carried SM120
 implementation selects DeepGEMM for large-token prefill batches and retains
 the existing fallback below its 1,024-token dispatch threshold.
 
+The launch script also sets `SGLANG_OPT_FUSE_MHC_POST_PRE=1`. The fused
+implementation and runtime selector are already present in the image; open
+[SGLang PR #34019](https://github.com/sgl-project/sglang/pull/34019) changes the
+upstream SM120 default and is tracked rather than applied to this image.
+
 The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v10
 cache for subsequent starts of the identical image; do not time compilation as
 serving startup or inference.

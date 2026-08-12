@@ -72,6 +72,7 @@ exec docker run --rm \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
+  --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
   "$IMAGE" \
   serve \
   --model-path "$container_model_path" \

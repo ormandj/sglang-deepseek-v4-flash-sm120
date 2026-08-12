@@ -72,6 +72,7 @@ docker run --rm \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
+  --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
   ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
@@ -150,6 +151,13 @@ and executes this same Docker configuration.
 TRT/MNNVL all-reduce fusion, PCIe-IPC communication paths, TBO, or other
 performance experiments from the previous release line.
 
+The launch command enables the fused MHC post+pre implementation already in
+the image with `SGLANG_OPT_FUSE_MHC_POST_PRE=1`. This follows the open upstream
+[SGLang PR #34019](https://github.com/sgl-project/sglang/pull/34019), which
+changes the SM120 default. That PR is tracked but is not part of this image's
+source patch, and enabling the existing runtime selector does not rebuild or
+change the image.
+
 ## Source composition
 
 - Base image: `lmsysorg/sglang:nightly-dev-cu13-20260812-c7c03ec5`, pinned by
@@ -178,6 +186,11 @@ the pinned upstream commits, applies the recorded patches, and checks both
 effective trees.
 
 ## Measurements
+
+The published table below predates the fused-MHC runtime opt-in above. It is
+retained as the immutable `v0.2.0-rc.0` publication record until the matching
+same-process measurement is replaced; no fused-MHC throughput claim is derived
+from these values.
 
 Both engines were measured on the same two RTX PRO 6000 Blackwell Max-Q GPUs
 at TP2 over PCIe Gen 4 x16, with a 300 W limit per GPU. Only one engine was
