@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "engine": "vllm",
+  "image_tag": "r33",
+  "benchmark": "gsm8k",
+  "questions": 1319,
+  "correct": 1243,
+  "accuracy": 0.942380591357,
+  "request_errors": 0
+}

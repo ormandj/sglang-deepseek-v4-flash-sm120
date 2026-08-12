@@ -151,12 +151,13 @@ Each entry is the median of the five per-run means.
 
 ## Completed quality result
 
-The full GSM8K set ran once at concurrency 16, temperature 0, seed 42, and a
-16,384-token completion cap.
+Each engine ran the full GSM8K set once at concurrency 16, temperature 0, seed
+42, and a 16,384-token completion cap.
 
 | Engine | Questions | Correct | Accuracy | Request errors |
 |---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | 1,319 | 1,258 | 95.38% | 0 |
+| vLLM r33 | 1,319 | 1,243 | 94.24% | 0 |
 
 Near-context and AgentX checks are not represented as completed results.
 
@@ -165,6 +166,7 @@ Near-context and AgentX checks are not represented as completed results.
 - [`sglang-v0.2.0-rc.0-publication-summary.json`](bench/results/sglang-v0.2.0-rc.0-publication-summary.json)
 - [`vllm-r33-publication-summary.json`](bench/results/vllm-r33-publication-summary.json)
 - [`sglang-v0.2.0-rc.0-gsm8k.json`](bench/results/sglang-v0.2.0-rc.0-gsm8k.json)
+- [`vllm-r33-gsm8k.json`](bench/results/vllm-r33-gsm8k.json)
 
 The summaries retain TTFT and request latency because AIPerf records them, but
 neither is scored or interpreted as an independent engine-performance result.

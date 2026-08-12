@@ -108,6 +108,7 @@ One output token and five cache-cold requests were used per cell.
 | Engine | Gate | Questions | Correct | Accuracy | Request errors |
 |---|---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | GSM8K | 1,319 | 1,258 | 95.38% | 0 |
+| vLLM r33 | GSM8K | 1,319 | 1,243 | 94.24% | 0 |
 
 Near-context and AgentX checks are not represented as completed results.
 
