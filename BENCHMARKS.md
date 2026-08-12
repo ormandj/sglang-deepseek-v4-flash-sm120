@@ -156,6 +156,10 @@ Each entry is the median of the five per-run means.
 Each engine ran the full GSM8K set once at concurrency 16, temperature 0, seed
 42, and a 16,384-token completion cap.
 
+The SGLang GSM8K run used the same RC0 image with HC prenorm enabled and the
+fused-MHC selector unset. It is retained as a separate quality result; the
+performance sweep above does not replace it.
+
 | Engine | Questions | Correct | Accuracy | Request errors |
 |---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | 1,319 | 1,258 | 95.38% | 0 |

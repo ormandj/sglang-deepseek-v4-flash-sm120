@@ -243,6 +243,10 @@ One output token and five cache-cold requests were used per cell.
 
 ### Completed quality result
 
+The SGLang GSM8K run used the same RC0 image with HC prenorm enabled and the
+fused-MHC selector unset. It is retained as a separate quality result; the
+performance sweep above does not replace it.
+
 | Engine | Gate | Questions | Correct | Accuracy | Request errors |
 |---|---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | GSM8K | 1,319 | 1,258 | 95.38% | 0 |
