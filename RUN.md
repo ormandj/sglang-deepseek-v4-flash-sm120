@@ -43,9 +43,11 @@ MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
   ./examples/serve-dsv4-0731.sh
 ```
 
-The script defaults to the candidate tag and two GPUs. `IMAGE`, `PORT`,
-`CUDA_VISIBLE_DEVICES`, and `CONTAINER_NAME` may be overridden. Record all
-overrides with results.
+The script defaults to the candidate tag, GPUs 0 and 1, TP2, and a 774,656
+context length. `IMAGE`, `PORT`, `CUDA_VISIBLE_DEVICES`, `TP_SIZE`,
+`CONTEXT_LENGTH`, and `CONTAINER_NAME` may be overridden. The number of devices
+listed in `CUDA_VISIBLE_DEVICES` must equal `TP_SIZE`. Record all overrides with
+results.
 
 The runtime intentionally does not enable FlashInfer PCIe-IPC all-reduce,
 PCIe-IPC all-gather, or TRT/MNNVL fusion. The reimage establishes an upstream-

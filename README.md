@@ -45,6 +45,10 @@ uvx --from huggingface-hub hf download \
 
 export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
 mkdir -p "$CACHE_DIR"
+
+export GPU_IDS=0,1
+export TP_SIZE=2
+export CONTEXT_LENGTH=774656
 ```
 
 Start the prebuilt image directly:
@@ -59,7 +63,7 @@ docker run --rm \
   --publish 8000:8000 \
   --volume "$MODEL_DIR:/models/deepseek-ai/DeepSeek-V4-Flash-0731:ro" \
   --volume "$CACHE_DIR:/root/.cache" \
-  --env CUDA_VISIBLE_DEVICES=0,1 \
+  --env CUDA_VISIBLE_DEVICES="$GPU_IDS" \
   --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
@@ -73,10 +77,10 @@ docker run --rm \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
   --trust-remote-code \
-  --tensor-parallel-size 2 \
+  --tensor-parallel-size "$TP_SIZE" \
   --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.93 \
-  --context-length 774656 \
+  --context-length "$CONTEXT_LENGTH" \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
@@ -94,10 +98,33 @@ docker run --rm \
   --port 8000
 ```
 
-This command mounts the model read-only, uses GPUs 0 and 1, persists compiled
-kernels under `CACHE_DIR`, and exposes the OpenAI-compatible API on port 8000.
-The first launch compiles SM120 kernels; subsequent launches reuse the
-persistent `v10` cache.
+This command mounts the model read-only, persists compiled kernels under
+`CACHE_DIR`, and exposes the OpenAI-compatible API on port 8000. The first
+launch compiles SM120 kernels; subsequent launches reuse the persistent `v10`
+cache.
+
+`GPU_IDS` selects the devices and `TP_SIZE` sets the tensor-parallel size. The
+number of comma-separated devices must equal `TP_SIZE`. For example, change to
+TP4 before running the same Docker command with:
+
+```bash
+export GPU_IDS=0,1,2,3
+export TP_SIZE=4
+```
+
+TP2 is the published validated configuration, not an image limitation. TP4 or
+TP8 uses the same image with a matching device list and `TP_SIZE`; published
+performance and capacity numbers do not yet cover those topologies. Keep the
+TP2 context limit as the initial value, then inspect the actual pool after
+startup before increasing it:
+
+```bash
+curl -fsS http://localhost:8000/get_server_info \
+  | jq '{max_total_num_tokens, max_req_input_len}'
+```
+
+Complete a near-limit request before advertising a larger context. No
+topology-specific image is required.
 
 In another shell, verify the server and send a request:
 

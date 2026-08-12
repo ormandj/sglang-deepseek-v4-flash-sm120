@@ -11,6 +11,8 @@ set -euo pipefail
 IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
+TP_SIZE=${TP_SIZE:-2}
+CONTEXT_LENGTH=${CONTEXT_LENGTH:-774656}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
 
 if [[ ! -d "$MODEL_DIR" ]]; then
@@ -31,6 +33,14 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
 fi
 if [[ -z "$IMAGE" || "$IMAGE" =~ [[:space:]] ]]; then
   echo "IMAGE must be a non-empty image reference without whitespace" >&2
+  exit 2
+fi
+if ! [[ "$TP_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+  echo "TP_SIZE must be a positive integer" >&2
+  exit 2
+fi
+if ! [[ "$CONTEXT_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+  echo "CONTEXT_LENGTH must be a positive integer" >&2
   exit 2
 fi
 
@@ -67,10 +77,10 @@ exec docker run --rm \
   --model-path "$container_model_path" \
   --served-model-name deepseek-v4-flash \
   --trust-remote-code \
-  --tensor-parallel-size 2 \
+  --tensor-parallel-size "$TP_SIZE" \
   --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.93 \
-  --context-length 774656 \
+  --context-length "$CONTEXT_LENGTH" \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
