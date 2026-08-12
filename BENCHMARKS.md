@@ -16,6 +16,7 @@ quality graders, and tests are under [`bench/`](bench/).
 - model `deepseek-ai/DeepSeek-V4-Flash-0731` at
   `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`;
 - speculative decoding: DSpARK block size 5;
+- HC prenorm: `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`;
 - SGLang communication: NCCL with custom all-reduce disabled.
 
 SGLang used this repository's `v0.2.0-rc.0` source composition:

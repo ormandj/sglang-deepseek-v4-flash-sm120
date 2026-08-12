@@ -61,6 +61,7 @@ exec docker run --rm \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
+  --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   "$IMAGE" \
   serve \
   --model-path "$container_model_path" \

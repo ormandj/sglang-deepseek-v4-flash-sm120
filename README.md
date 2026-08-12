@@ -124,6 +124,8 @@ graders, and machine-readable summaries are under [`bench/`](bench/).
 - KV cache: FP8 E4M3.
 - Context length: 774,656.
 - Chunked prefill: 8,192 tokens.
+- HC prenorm: SM120 DeepGEMM for large-token prefill batches; the existing
+  fallback remains selected below the 1,024-token dispatch threshold.
 - DSpARK block size: 5.
 - Communication: upstream NCCL; custom all-reduce disabled.
 

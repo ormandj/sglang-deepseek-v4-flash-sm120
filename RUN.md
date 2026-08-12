@@ -51,6 +51,10 @@ The runtime intentionally does not enable FlashInfer PCIe-IPC all-reduce,
 PCIe-IPC all-gather, or TRT/MNNVL fusion. The reimage establishes an upstream-
 default NCCL baseline before communication experiments are reconsidered.
 
+The launch script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. The carried SM120
+implementation selects DeepGEMM for large-token prefill batches and retains
+the existing fallback below its 1,024-token dispatch threshold.
+
 The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v10
 cache for subsequent starts of the identical image; do not time compilation as
 serving startup or inference.
