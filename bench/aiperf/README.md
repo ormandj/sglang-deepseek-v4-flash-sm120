@@ -1,211 +1,230 @@
-# Engine-performance benchmark
+# AIPerf benchmark harness
 
-This directory provides the current performance gate for DeepSeek V4 Flash on
-the two-card SM120 system. It measures an already-running server; it never
-starts, stops, or restarts the serving process.
+This directory measures an already-running DeepSeek-V4-Flash-0731 server. The
+client runs inside the serving pod against `127.0.0.1:8000`; the harness never
+starts, stops, or restarts the server.
 
-The benchmark separates three effects that must not be collapsed into one
-number:
+The method deliberately separates three questions:
 
-1. engine forward-work rate at fixed concurrency and context shape;
-2. useful output-token rate and speculative acceptance;
-3. cold-prefill throughput and TTFT.
+1. Does the engine execute a fixed decode shape faster?
+2. How much useful output does the speculative stack produce?
+3. How does the server behave on cold prefill and production-shaped agentic
+   traffic?
 
-Agentic traffic, GSM8K, and long-output stability remain separate workload and
-quality checks. They are not substitutes for the engine gate.
+[`STATISTICAL-DESIGN.md`](STATISTICAL-DESIGN.md) records why the workloads and
+sample counts were selected.
 
-[`STATISTICAL-DESIGN.md`](STATISTICAL-DESIGN.md) explains the measurement units,
-prompt panel, and variability controls.
+## Pinned implementation
 
-## Why the decode metric changed
-
-One long generated response is one model trajectory. Repeated byte-identical C1
-inputs can produce different useful-token rates as DSPark acceptance changes.
-Temperature zero reduces sampling choices but does not make the engine
-numerically deterministic.
-
-The engine-specific analyzers therefore report two decode rates over the same
-validated plateau:
-
-- `engine_work.forward_passes_per_second_ols`: slope of the live speculative
-  decode-step counter. SGLang uses
-  `sglang:cuda_graph_passes{mode=decode_cuda_graph|decode_none,tp_rank=0}`;
-  vLLM uses the observation count of
-  `vllm:iteration_tokens_total{engine=0}`. The running r33 source updates that
-  histogram exactly once per engine step.
-- `decode.tokens_per_second_ols`: slope of the live useful decode-token
-  counter: `sglang:realtime_tokens{mode=decode,tp_rank=0}` or
-  `vllm:generation_tokens{engine=0}`. This is retained with accepted tokens per
-  step so a fast or slow sampled path cannot be mistaken for a kernel or
-  scheduler change.
-
-The analyzer compares the same average context-length interval on every run,
-holds exact request occupancy, requires an empty queue, and rejects any prefill
-inside the decode window. For vLLM, average context is derived from live
-prompt-token and generation-token deltas, including the actual chat-template
-expansion; no fixed template offset is assumed. AIPerf client throughput is not
-used for the plateau because it includes ramp and drain.
-
-## Gate sizes
-
-All modes keep one server process running and warm each measured shape once.
-Panel members then execute sequentially without another warmup or restart.
-
-| Mode | Decode panel | Cold prefill | Intended use |
-|---|---|---|---|
-| `quick` | C1 x3, C8 x2, plus C32 x1 where supported | 8K, 64K, 128K C1 | routine per-change regression signal |
-| `decode-supplement` | C2 x6, C4 x4, C16 x2 | none | add the intermediate concurrency cells to an existing matched quick comparison without repeating it |
-| `qualification` | C1 x8, C2 x6, C4 x4, C8 x3, C16 x2, plus C32 x2 where supported | 8K C1/C2/C4, 64K C1, 128K C1 | complete candidate characterization |
-| `publication` | C1/C2/C4/C8/C16 x5, plus C32 x5 where supported | 8K, 64K, 128K C1, five requests each | public cross-engine results |
-
-Publication tables use only one fresh `publication` run per engine. They do
-not combine quick, supplement, qualification, or earlier publication cells.
-Every reported decode concurrency therefore has exactly five repetitions.
-Both engines use the same five prompt seeds. C32 is absent only when the
-deployment cannot admit that concurrency.
-
-The vLLM r33 deployment is configured for at most 16 sequences and cannot run
-C32. Its summary records only supported cells; cross-engine comparison records
-C32 as SGLang-only instead of treating missing capacity as a zero throughput
-measurement. The common near-limit prefill target is 130,816 synthetic content
-tokens. On r33, a nominal 131,008-token input expanded to at least 131,072
-prompt tokens before the one-token output and was correctly rejected by the
-131,072-token context limit. The retained headroom admits engine chat-template
-expansion without changing the nominal workload between engines.
-
-Lower concurrency receives more prompt paths because it averages fewer paths
-within a single batch. The seed sequence is fixed in
-`run-engine-gate-in-pod.sh`; each run retains AIPerf's exact `inputs.json`.
-
-## Network and client placement
-
-All measured requests originate inside the selected serving pod and target
-`127.0.0.1:8000`. `run-in-pod.sh` rejects execution outside Kubernetes and
-rejects non-loopback inference or metrics URLs. The workstation may stage the
-pinned source and retrieve artifacts but is never in the timed path.
-
-AIPerf is pinned by `aiperf.lock.json`. The current install is built from the
-audited local checkout revision recorded there. Each cell captures the AIPerf
-environment, exact config hash, server command, image provenance supplied by
-the caller, CPU, GPU, and driver. Credentials and arbitrary environment
-variables are not captured.
-
-Authentication is optional. `BENCH_API_KEY` takes precedence; otherwise the
-runner consumes `VLLM_API_KEY` when the container provides it. With neither
-variable, requests are keyless; pinned AIPerf adds the `Authorization` header
-only when `endpoint.api_key` is nonempty. AIPerf redacts configured API keys,
-environment capture never records either variable, and the committed configs
-retain only the `${BENCH_API_KEY:}` placeholder.
-
-The pinned Linux `uv` executable is staged at
-`/models/.bench-tools/uv-0.12.3-linux-x86_64/uv`; its release artifact and
-digests are recorded in `aiperf.lock.json`. This keeps execution identical in
-serving images that do and do not bundle `uv` themselves.
-
-Download the archive URL recorded in the lock file, copy it and this directory
-into the serving pod, then perform the one-time immutable install before
-preparing AIPerf:
+AIPerf is pinned by [`aiperf.lock.json`](aiperf.lock.json). The harness uses
+the exact source revision in that file, not a moving package release. Install
+that checkout once in the serving pod's persistent tools directory:
 
 ```bash
 ./stage-uv-in-pod.sh /tmp/uv-x86_64-unknown-linux-gnu.tar.gz \
   /models/.bench-tools/uv-0.12.3-linux-x86_64
 ./prepare-in-pod.sh /tmp/aiperf \
-  /models/.bench-tools/aiperf-0.12.0-03c9c6dd
+  /models/.bench-tools/aiperf-0.12.0-6ed4823d
 ```
 
-## Warmup and cache rules
+The committed configs accept both authenticated and keyless endpoints.
+`BENCH_API_KEY` takes precedence, then a container-provided `VLLM_API_KEY`;
+with neither set, no authorization header is sent. Keys, arbitrary environment
+variables, internal endpoint names, and registry credentials are not captured.
 
-Warmup is mandatory once after a server start, image or configuration change,
-or profiler run that perturbs the process. The gate covers every measured
-decode batch size and prefill length before recording results. It does not
-repeat warmup between panel members on the same healthy process.
+## Controlled engine gate
 
-Decode uses exact occupancy and ignores EOS. Cold prefill uses temperature
-zero, one output token, and a first-token cache-bust marker. SGLang's supported
-cache endpoint is flushed at each measured cell. The r33 deployment does not
-mount vLLM's development-only cache-reset endpoint, so its coldness is enforced
-without enabling unsafe development APIs: the marker prevents a reusable first
-block and `vllm:prompt_tokens_cached` must remain exactly zero.
-`analyze_prefill.py` rejects cached prompts, wrong token shapes, incomplete
-request sets, and failure to reach requested concurrency. The r33 analyzer
-allows up to 128 tokens of engine-reported template expansion;
-SGLang retains the 16-token default. Every actual input length remains in the
-result artifacts and is used for throughput rather than the nominal target.
+Every decode cell uses the same workload:
 
-## Run
+- OpenAI chat-completions endpoint with streaming;
+- synthetic coding prompt, 16,384 requested input tokens;
+- 4,096 output tokens, `ignore_eos=true` and `min_tokens=4096`;
+- temperature 0, top-p 1, and a fixed seed panel;
+- exact occupancy at C1, C2, C4, C8, C16, and C32 where supported;
+- analysis over the same 17,408–20,480 average-context interval.
 
-First verify that no image build, compiler work, storage maintenance, profiler,
-or unrelated GPU workload is active. Then invoke the staged runner inside the
-serving pod:
+The primary engine rate is the OLS slope of server-side decode forward passes.
+Useful output-token rate and useful tokens per forward are reported beside it,
+so speculative-acceptance variation remains visible. Every repetition also
+records the mean, median, minimum, and maximum DSpARK acceptance rate and
+accepted draft length; the summary describes those run-level values without
+pooling them. SGLang uses its acceptance gauges. vLLM uses the deltas of its
+cumulative draft, draft-token, and accepted-token counters between adjacent
+server-metric scrapes; the per-run record also retains each whole-window
+counter ratio. The analyzer rejects a window with queueing, prefill work,
+counter resets, wrong occupancy, or an insufficient equal-context interval.
+
+Client metrics are retained in the machine-readable summary, not substituted
+for the server-side plateau. AIPerf computes ITL for each request as
+`(request latency - TTFT) / (output tokens - 1)`. It is the average
+post-first-token time per generated token, including speculative acceptance and
+scheduler effects; it is not a distribution of literal streamed-chunk gaps.
+Request latency is the end-to-end completion time for the fixed 16K-input/4K-
+output request and is a secondary integrated workload measurement.
+
+TTFT is retained as raw input to the prefill calculation and for bounds
+validation. It is not scored or published as a separate performance result.
+For these long prompts it primarily restates prefill speed, while decode-sweep
+TTFT additionally mixes prefill and concurrent scheduling.
+
+For each latency metric, the summary preserves each run's average and
+p50/p90/p99, then summarizes those run-level values without pooling requests
+across repetitions.
+
+Cold prefill uses one output token, temperature 0, top-p 1, an explicit cache
+bust, and 8K/32K/64K/130,816-token input targets. SGLang is flushed at the cell
+boundary. The vLLM r33 analyzer instead requires its cached-prompt counter to
+remain zero because that deployment does not expose the development cache-reset
+API. Throughput is observed input tokens divided by TTFT. Only the resulting
+prompt-token rate is used for comparison and publication.
+
+## Gate sizes
+
+All cells run sequentially on one unchanged server process. Each distinct shape
+is warmed once before any timed cell. There is no restart or per-repetition
+warmup.
+
+| Mode | Decode panel | Cold-prefill panel | Use |
+|---|---|---|---|
+| `quick` | C1/C4/C8 x3 | 8K/32K/64K/128K x3 | fast candidate screen |
+| `decode-supplement` | C2/C16 x3 | none | fill scale guardrails after a quick run |
+| `prefill-quick` | none | 8K/32K/64K/128K x3 | matched prefill-only comparison |
+| `qualification` | C1/C2/C4/C8 x5; C16/C32 x3 | all lengths x5 | release decision |
+| `publication` | every supported C x5 | all lengths x5 | uniform public table |
+
+C1 is the primary single-user programming workload. C2/C4/C8 cover ordinary
+sub-agent fan-out. C16/C32 are scale and regression guardrails. vLLM r33 is
+configured for at most 16 sequences, so C32 is recorded as unsupported rather
+than assigned a synthetic value.
+
+Run an engine gate inside the selected pod:
 
 ```bash
-BENCH_IMAGE_REF='public-image@sha256:...' \
+BENCH_IMAGE_REF='image@sha256:...' \
 BENCH_GITOPS_REVISION='<deployment revision>' \
 BENCH_PROJECT_REVISION='<this repository revision>' \
-AIPERF_REVISION='03c9c6ddc5e6227782e53ded177f1227d332af48' \
+AIPERF_REVISION='6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23' \
 BENCH_MODEL_REVISION='<model snapshot revision>' \
-BENCH_ENGINE='sglang' \
-./run-engine-gate-in-pod.sh rc3-vllm-r33 rc3 publication
+BENCH_ENGINE=sglang \
+./run-engine-gate-in-pod.sh <campaign> <build> qualification
 ```
 
-Set `BENCH_ENGINE=vllm` for vLLM. Add `BENCH_API_KEY` only when the endpoint
-requires a key; a container-provided `VLLM_API_KEY` is discovered automatically.
+Set `BENCH_ENGINE=vllm` for vLLM. `BENCH_DP_SIZE` defaults to one and should
+match a genuinely data-parallel deployment; it is not the tensor-parallel
+size.
 
-Arguments are campaign ID, build ID, and mode. Output is immutable under
-`/models/bench/results/aiperf-greenfield/engine-gates/` by default. Override
-`AIPERF_CAMPAIGN_ROOT` only to select another retained artifact volume.
+The output includes raw AIPerf request/server/GPU exports, exact inputs and
+config, the analyzer results, `summary.json`, environment provenance, and a
+checksum inventory. Performance value is never an exclusion rule.
 
-For a public comparison, run `publication` once on a fresh, idle server process
-for each engine. Keep that process unchanged while all cells execute
-sequentially. The runner warms every decode concurrency and prefill length once
-before recording any cell. It then records five repetitions at every supported
-decode concurrency and five cold-prefill requests at each published length.
-Do not publish partial cells or fill an unsupported cell with a synthetic zero.
+## Production-shaped AgentX gate
 
-Use `decode-supplement` after matched quick gates when a cross-engine report
-needs C2/C4/C16 but does not need to repeat already valid C1/C8/prefill cells.
-It is a separate checksum-bound artifact, not a replacement for the larger
-`qualification` panel.
+The controlled engine gate is intentionally deterministic. It does not claim
+to reproduce a coding-agent session. For that separate question,
+[`agentx-mvp.yaml`](configs/agentx-mvp.yaml) uses AIPerf's date-pinned
+InferenceX AgentX MVP scenario with its public Weka coding traces:
 
-The runner produces `summary.json` plus every raw AIPerf export, analyzer JSON,
-input file, environment capture, and a relative-path checksum inventory.
+- temperature 1.0 and top-p 0.95;
+- fixed random and sampling seeds;
+- C1 and C8 as separate 900-second minimum runs;
+- built-in warmup, replay timing, cache behavior, and submission-validity
+  checks.
 
-Compare matching summaries without hiding any prompt-pair value:
+Run it inside the pod:
 
 ```bash
-uv run compare_engine_gates.py baseline/summary.json candidate/summary.json
+BENCH_IMAGE_REF='image@sha256:...' \
+BENCH_GITOPS_REVISION='<deployment revision>' \
+BENCH_PROJECT_REVISION='<this repository revision>' \
+AIPERF_REVISION='6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23' \
+BENCH_MODEL_REVISION='<model snapshot revision>' \
+./run-agentx-gate-in-pod.sh <campaign> <build>
 ```
 
-For SGLang versus the C16-limited vLLM r33 deployment, add
-`--allow-decode-cell-mismatch`; the output then lists common and engine-only
-cells explicitly.
+AgentX results are reported separately. They are not averaged into the fixed
+engine gate and cannot turn an engine regression into a pass.
 
-## Metric definitions
+## Execution rules
 
-Every prompt-path value remains visible. Compare builds using the same mode,
-seed panel, image configuration, and hardware state.
+- Run only when the host has no image build, compiler, profiler, maintenance,
+  or unrelated GPU workload.
+- Verify the immutable image digest, exact server command, model revision,
+  driver, and clocks/power state before comparing builds.
+- Keep one healthy process unchanged while its panel runs sequentially.
+- Warm every shape once after a process start, configuration change, or
+  profiler attachment. Do not repeatedly restart between samples.
+- Retain every valid measurement. Exclude only objective validation failures.
+- Compare like-for-like summaries. Do not splice cells from different modes or
+  old methods into one table.
 
-- Speculative decode steps/sec measures execution of the fixed decode work
-  shape. The JSON field retains its original
-  `forward_passes_per_second` name for schema continuity.
-- Useful tokens/sec answers how much output the production speculative stack
-  delivered.
-- Useful tokens per forward explains how much of that result came from
-  acceptance rather than engine execution rate.
-- Prefill throughput and TTFT remain independent release dimensions.
+Publication uses only a fresh `publication` panel for each engine. It includes
+all five run values plus medians and dispersion, and states unsupported cells
+directly.
 
-Quick and qualification repetitions are prompt-path subsamples from one
-serving process, not independent deployment replicates. They are designed for
-fast engineering decisions and transparent effect sizes, not a p-value claim.
-If a small effect needs formal inference, collect independent process blocks
-only for that accepted candidate and size that experiment from the observed
-paired variance.
+## Release quality and stability checks
 
-## Other workloads
+These checks are reported separately from the engine-performance panel. They
+do not count as additional decode repetitions.
 
-- `agentx-mvp.yaml`: production-shaped multi-turn workload at its explicitly
-  declared sampling settings.
-- `gsm8k.yaml`: deterministic full-dataset correctness gate.
-- `run-performance-block-in-pod.sh` and the paired-analysis utilities: retained
-  for experiments that specifically require independent deployment blocks;
-  they are not the routine per-change gate.
+### GSM8K
+
+[`gsm8k.yaml`](configs/gsm8k.yaml) runs the complete 1,319-question GSM8K test
+set once at concurrency 16, temperature 0, seed 42, and a 16,384-token response
+cap. Accuracy is `correct / 1,319`; this is a dataset accuracy check, not an
+`n=5` timing cell.
+
+The pinned AIPerf GSM8K grader prefers the dataset's `####` answer marker. A
+response without that marker is recorded as `unparsed` when the documented
+last-number fallback is used. A fallback-extracted answer can still be correct,
+so the correct count and fallback count are separate facts.
+
+Run it from the serving pod with the same provenance variables as the engine
+gate:
+
+```bash
+AIPERF_ARTIFACT_ROOT=/path/to/quality-results \
+GSM8K_REQUESTS=1319 \
+GSM8K_CONCURRENCY=16 \
+GSM8K_MAX_TOKENS=16384 \
+./run-in-pod.sh configs/gsm8k.yaml gsm8k-full
+```
+
+### Long single-file generation
+
+[`../long_write_quality.py`](../long_write_quality.py) issues five sequential
+single-file HTML/JavaScript requests at temperature 1.0, top-p 0.95,
+`reasoning_effort=max`, and a 131,072-token response cap. Request traffic must
+originate inside the serving pod against localhost. Authentication is optional:
+set `LLM_API_KEY` or `BENCH_API_KEY` when the endpoint requires it.
+
+The serving image need not contain Node.js. Save the responses in the pod,
+retrieve that JSON, and run the deterministic validator wherever `node` is
+available:
+
+```bash
+uv run --no-project python ../long_write_quality.py run \
+  --model deepseek-v4-flash \
+  --runs 5 \
+  --output /path/to/long-output-responses.json
+
+uv run --no-project python ../long_write_quality.py validate \
+  --input /path/to/long-output-responses.json \
+  --output /path/to/long-output-validation.json
+```
+
+A response is complete only when its HTML fence closes, `</html>` is present,
+no configured placeholder expression is present, and every inline script body
+passes `node --check`. The validation output records the SHA-256 of the response
+artifact it grades. The response artifact records the prompt hash and the same
+image, GitOps, project, and model provenance variables used by the engine gate.
+
+### Near-context and AgentX
+
+[`../near_context_bench.py`](../near_context_bench.py) sends one persisted-corpus
+request near the configured context limit. Its authorization header is omitted
+when the selected API-key environment variable is unset.
+
+[`run-agentx-gate-in-pod.sh`](run-agentx-gate-in-pod.sh) runs the pinned AgentX
+MVP scenario for 900 seconds each at C1 and C8 with temperature 1.0 and top-p
+0.95. It requires AIPerf's `submission_valid` result and writes a checksum
+inventory on success.

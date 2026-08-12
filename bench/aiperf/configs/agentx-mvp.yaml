@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23/src/aiperf/config/schema/aiperf-config.schema.json
 schemaVersion: "2.0"
 
 randomSeed: ${AIPERF_RANDOM_SEED:20260810}
@@ -10,6 +10,7 @@ benchmark:
   endpoint:
     url: ${INFERENCE_URL:http://127.0.0.1:8000}
     type: chat
+    api_key: ${BENCH_API_KEY:}
     streaming: true
     timeout: ${REQUEST_TIMEOUT_SECONDS:5400}
     useServerTokenCount: true
@@ -37,8 +38,8 @@ benchmark:
   phases:
     - name: profiling
       type: concurrency
-      duration: ${AGENTX_DURATION_SECONDS:1800}
-      concurrency: ${AGENTX_CONCURRENCY:32}
+      duration: ${AGENTX_DURATION_SECONDS:900}
+      concurrency: ${AGENTX_CONCURRENCY:1}
       systemIdleGapCapSeconds: 10
       trajectoryStartMinRatio: 0.0
       trajectoryStartMaxRatio: 1.0
@@ -50,7 +51,7 @@ benchmark:
     statsInterval: 0
 
   gpuTelemetry:
-    enabled: false
+    enabled: ${GPU_TELEMETRY_ENABLED:true}
 
   serverMetrics:
     enabled: true

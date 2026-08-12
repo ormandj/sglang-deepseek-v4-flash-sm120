@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23/src/aiperf/config/schema/aiperf-config.schema.json
 schemaVersion: "2.0"
 
 randomSeed: ${AIPERF_RANDOM_SEED:20260810}
@@ -17,6 +17,7 @@ benchmark:
     waitForModelMode: both
     extra:
       temperature: 0.0
+      top_p: 1.0
       seed: ${SAMPLING_SEED:42}
       ignore_eos: true
       min_tokens: 1

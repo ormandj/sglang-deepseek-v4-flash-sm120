@@ -29,8 +29,8 @@ semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
   echo "release version is not strict stable SemVer: $version" >&2
   exit 1
 }
-[[ "$candidate" =~ ^[1-9][0-9]*$ ]] || {
-  echo "candidate must be a positive integer: $candidate" >&2
+[[ "$candidate" =~ ^(0|[1-9][0-9]*)$ ]] || {
+  echo "candidate must be a non-negative integer: $candidate" >&2
   exit 1
 }
 [[ "$candidate_tag" == "v${version}-rc.${candidate}" ]] || {

@@ -1,27 +1,26 @@
 # Running the image
 
-This is the validated procedure for Linux x86_64 with two NVIDIA RTX PRO 6000
-Blackwell GPUs (SM120) at TP=2. SM121 has not been validated.
+This candidate targets Linux x86_64 and NVIDIA RTX PRO 6000 Blackwell
+(SM120). TP2 is the primary qualification topology. TP4 must pass the release
+regression gate before public promotion.
 
 ## Requirements
 
-- A driver that supports CUDA 13.
-- Two RTX PRO 6000 Blackwell GPUs visible to the container.
-- Docker with the
-  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for the model
-  download.
+- A driver compatible with CUDA 13.
+- Two or more SM120 GPUs visible to the container.
+- Docker and the NVIDIA Container Toolkit.
+- `uv` for downloading the model.
 - Persistent storage for the model and compiled-kernel cache.
 
-Check GPU passthrough first:
+Check GPU passthrough:
 
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
 ```
 
-## Download the model
+## Model and cache
 
 ```bash
 export MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731
@@ -29,159 +28,41 @@ uvx --from huggingface-hub hf download \
   deepseek-ai/DeepSeek-V4-Flash-0731 \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
-```
 
-That is the exact model revision used for the published comparison. Keep the
-snapshot on persistent storage. The serving script mounts it read-only.
-
-## Prepare the cache
-
-The container's `/root/.cache` stores FlashInfer JIT modules, TileLang and TVM
-kernels, TorchInductor output, and DeepGEMM artifacts. Cache contents are build
-specific; do not share a directory with an older image.
-
-```bash
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v2
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
 mkdir -p "$CACHE_DIR"
 ```
 
-`v2` is the cache schema recorded by `release.json`. A later schema must use a
-new directory even when the image tag is similar.
+`v10` is a fresh cache schema. Do not reuse a `v0.1.0` cache directory for
+this reimage.
 
-## Start the server
-
-```bash
-MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" ./examples/serve-dsv4-0731.sh
-```
-
-The script defaults to the immutable candidate in `release.json` and supplies
-the complete validated environment and server flags. These values may be
-overridden:
-
-- `PORT` — host port, default `8000`;
-- `IMAGE` — exact image reference;
-- `CUDA_VISIBLE_DEVICES` — default `0,1`;
-- `CONTAINER_NAME` — default `dsv4-flash-sglang`.
-
-Record every override with benchmark results. An image override is a different
-runtime composition even if the serving arguments are unchanged.
-
-Inspect the live container before reporting a result:
+## Start TP2
 
 ```bash
-docker inspect dsv4-flash-sglang --format '{{.Config.Image}}'
-docker inspect dsv4-flash-sglang \
-  --format '{{range .Config.Env}}{{println .}}{{end}}' | sort
-docker inspect dsv4-flash-sglang --format '{{json .Config.Cmd}}'
+MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+  ./examples/serve-dsv4-0731.sh
 ```
 
-The documented release is:
+The script defaults to the candidate tag and two GPUs. `IMAGE`, `PORT`,
+`CUDA_VISIBLE_DEVICES`, and `CONTAINER_NAME` may be overridden. Record all
+overrides with results.
 
-```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3
-```
+The runtime intentionally does not enable FlashInfer PCIe-IPC all-reduce,
+PCIe-IPC all-gather, or TRT/MNNVL fusion. The reimage establishes an upstream-
+default NCCL baseline before communication experiments are reconsidered.
 
-The older moving `dsv4-0731` tag is not this release.
+The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v10
+cache for subsequent starts of the identical image; do not time compilation as
+serving startup or inference.
 
-## Required container resources
-
-The serving script uses `--shm-size 64g`. SGLang TP workers exchange tensors
-through `/dev/shm`; Docker's 64 MiB default is insufficient. It also uses
-`--ulimit memlock=-1` for pinned host memory.
-
-The first start compiles the patched SM120 FlashInfer, TileLang, and DeepGEMM
-kernels into `$CACHE_DIR`. Later starts with the same image and cache reuse
-those artifacts. Do not compare a cold compiler startup with a warmed server.
-
-## Why the validated settings differ from upstream defaults
-
-### Chunked prefill
-
-`--chunked-prefill-size 8192` matches the tested SGLang and vLLM batch setting.
-Prefill comparisons are meaningful only when the engines use the same chunk
-size.
-
-### DeepGEMM DSA indexer
-
-The script selects the DeepGEMM DSA indexer with
-`--enable-deepseek-v4-fp4-indexer` and disables the forced TileLang and Torch
-fallbacks. The image ships an SM120-capable DeepGEMM with
-`fp8_fp4_paged_mqa_logits`; stock compositions without that symbol must use the
-fallback instead.
-
-### DSpark shared experts
-
-RC3 carries SGLang PR #34139, which keeps the DSpark draft on separate
-shared-expert modules after fusion decisions became runner-local. The change is
-part of the release patch rather than a benchmark-only server option.
-
-### Fused MHC pre-norm
-
-`SGLANG_OPT_DEEPGEMM_HC_PRENORM=1` selects the SM120-capable DeepGEMM fused MHC
-pre-norm. `SGLANG_OPT_USE_FLASHINFER_MHC=1` enables the FlashInfer path; the RC3
-dispatch gate selects it only for token batches of at least 1,024. The TileLang
-MHC pre-norm override remains disabled because that path fails CUDA graph
-capture on SM120.
-
-### All-reduce workspace and dispatch
-
-The release patch sizes the FlashInfer all-reduce workspace before graph capture
-and applies a token cap to the latency-optimized all-reduce path. This keeps
-prefill-sized collectives on the appropriate backend while retaining the
-decode-oriented path for small token counts.
-
-### Prefix-cache reporting
-
-`--enable-cache-report` exposes
-`usage.prompt_tokens_details.cached_tokens` on OpenAI responses. The value
-already exists in SGLang request metadata; the flag makes it visible to clients.
-
-### Idle CPU usage
-
-`--sleep-on-idle` blocks the rank-0 scheduler on its request sockets instead of
-busy-waiting when the server is idle. The optional allocator flush remains off
-unless `SGLANG_EMPTY_CACHE_INTERVAL` is set explicitly.
-
-## Canonical benchmark procedure
-
-Use the AIPerf harness and protocol in [BENCHMARKS.md](BENCHMARKS.md). The
-executable source is in [`bench/aiperf`](bench/aiperf). The documentation
-records:
-
-- the pinned AIPerf commit;
-- image identities and runtime settings;
-- workload shape and sampling settings;
-- warmup and cache controls;
-- decode forward rate, useful throughput, acceptance, and TTFT;
-- cold-prefill throughput and TTFT;
-- commands for authenticated and keyless endpoints.
-
-The repository publishes only the current RC3 and vLLM r33 measurements.
-
-Public comparison runs use the harness's `publication` mode: one fresh,
-unchanged server process per engine; one warmup for every measured shape; five
-fresh repetitions at every supported decode concurrency; and five cold
-requests at each published prefill length. vLLM C32 is omitted because that
-deployment cannot admit it; no value is imputed.
-
-## Health and API checks
-
-`SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0` makes `/health` a liveness check
-rather than a generation request:
+## Health and API
 
 ```bash
 curl -fsS http://localhost:8000/health
-```
-
-The OpenAI-compatible API is at `http://localhost:8000/v1`, with served model
-name `deepseek-v4-flash`:
-
-```bash
 curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
 ```
 
-This deterministic smoke test uses greedy sampling only to make the expected
-answer stable. It is not the recommended production sampling configuration:
+A deterministic smoke request:
 
 ```bash
 curl -fsS http://localhost:8000/v1/chat/completions \
@@ -194,59 +75,33 @@ curl -fsS http://localhost:8000/v1/chat/completions \
   }' | jq -r '.choices[0].message.content'
 ```
 
-## KV capacity and context length
+Agentic requests should follow the model card: temperature `1.0` and top-p
+`0.95`. The deterministic performance gate uses temperature `0` to isolate
+engine behavior; the AgentX trace replay covers the agentic request shape.
 
-The serving script pins `--context-length 774656` so DSA indexer scratch
-allocation is bounded below the checkpoint's full 1,048,576-token window.
+## Capacity
 
-Leaving the checkpoint window unbounded can force a large float32
-`(batch_size, max_seq_len)` indexer allocation on the first sufficiently large
-request. The same shape requirement exists on the TileLang and DeepGEMM indexer
-paths, so switching indexers does not remove it.
-
-`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` reduces allocator
-fragmentation around these large workspaces.
-
-If GPU count, memory fraction, KV dtype, graph sizes, or another GPU consumer
-changes, read the new capacity rather than copying the value above:
+The TP2 script uses `--context-length 774656`. Confirm the actual pool after
+every image, topology, memory-fraction, or graph change:
 
 ```bash
 curl -fsS http://localhost:8000/get_server_info \
   | jq '{max_total_num_tokens, max_req_input_len}'
 ```
 
-Set `--context-length` to a value the resulting pool can actually serve.
+Do not copy the TP2 context limit to TP4 without checking the TP4 server
+information and completing a near-limit request.
 
-## Recommended request sampling
+## Benchmarking
 
-The
-[model card](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731#how-to-run-locally)
-recommends `temperature=1.0` with `top_p=0.95` for agentic requests and
-`top_p=1.0` otherwise. Chat completions may set `reasoning_effort` to `low`,
-`high`, or `max`.
+The executable harness lives in [`bench/aiperf`](bench/aiperf). Clients run
+inside the selected serving pod against localhost. The frozen protocol uses:
 
-Treat tool-using coding harnesses as agentic workloads. A maximum-deliberation
-request is:
+- identical 16,384-token input and 4,096-token output shapes at C1–C32;
+- five repetitions at each published supported concurrency;
+- separate cache-cold prefill diagnostics;
+- C1 and C8 AgentX programming-trace replay;
+- correctness, long-generation, and near-context-limit gates.
 
-```json
-{
-  "reasoning_effort": "max",
-  "temperature": 1.0,
-  "top_p": 0.95,
-  "max_tokens": 393216
-}
-```
-
-Use `high` when latency matters more than maximum deliberation. `393216` is the
-numeric API value for the model card's 384K output budget; reducing it can
-truncate a long reasoning chain. This is a request limit, not a server launch
-flag.
-
-## Long-generation SWA eviction
-
-This image carries SGLang PR #33805, which runs sliding-window KV eviction on
-the DFLASH/DSPARK speculative path. Without that change, SWA KV accumulates
-with generated tokens until the scheduler retracts a long request even though
-the full-attention pool still has capacity. With the fix, long single-request
-generation is bounded by the full scheduler KV pool rather than the smaller SWA
-fraction.
+Results from the previous benchmark shape are historical and are not mixed
+with `v0.2.0` measurements.

@@ -1,0 +1,2298 @@
+diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
+index b52ab9ff14..f54e90bb86 100644
+--- a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
++++ b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
+@@ -7,6 +7,8 @@
+ #include <dlpack/dlpack.h>
+ #include <tvm/ffi/container/tensor.h>
+ 
++#include <utility>
++
+ namespace sglang {
+ 
+ constexpr uint32_t kBlockSize = 1024;
+@@ -72,14 +74,32 @@ __global__ __launch_bounds__(kBlockSize, 1)  //
+   }
+ }
+ 
++// Opts into kMaxDynamicSMEM capped by the device budget (the per-block opt-in
++// limit less the kernel's static smem) and returns what was granted.
+ template <auto* f, size_t kMaxDynamicSMEM>
+-void setup_kernel_smem_once(host::DebugInfo where = {}) {
+-  [[maybe_unused]]
+-  static const auto result = [] {
++size_t setup_kernel_smem_once(host::DebugInfo where = {}) {
++  static const auto granted = [] {
+     const auto fptr = std::bit_cast<const void*>(f);
+-    return ::cudaFuncSetAttribute(fptr, ::cudaFuncAttributeMaxDynamicSharedMemorySize, kMaxDynamicSMEM);
++    int device = 0;
++    int device_max = 0;
++    ::cudaFuncAttributes attr{};
++    auto result = ::cudaGetDevice(&device);
++    if (result == ::cudaSuccess) {
++      result = ::cudaDeviceGetAttribute(&device_max, ::cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
++    }
++    if (result == ::cudaSuccess) {
++      result = ::cudaFuncGetAttributes(&attr, fptr);
++    }
++    auto smem = kMaxDynamicSMEM;
++    if (result == ::cudaSuccess) {
++      const auto budget = static_cast<size_t>(device_max) - attr.sharedSizeBytes;
++      if (budget < smem) smem = budget;
++      result = ::cudaFuncSetAttribute(fptr, ::cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
++    }
++    return std::pair{result, smem};
+   }();
+-  host::RuntimeDeviceCheck(result, where);
++  host::RuntimeDeviceCheck(granted.first, where);
++  return granted.second;
+ }
+ 
+ struct IndexerMetadataKernel {
+@@ -101,7 +121,10 @@ struct IndexerMetadataKernel {
+     const auto batch_size = static_cast<uint32_t>(N.unwrap());
+     const auto num_sm = static_cast<uint32_t>(M.unwrap()) - 1;
+     RuntimeCheck(num_sm <= 1024);
+-    const auto use_smem = batch_size <= kMaxBatchSizeInSmem;
++    constexpr auto kernel = smxx_paged_mqa_logits_metadata;
++    const auto max_smem = setup_kernel_smem_once<kernel, (kMaxBatchSizeInSmem + 1) * sizeof(uint32_t)>();
++    // Batches that no longer fit read context_lens from global memory instead.
++    const auto use_smem = (batch_size + 1) * sizeof(uint32_t) <= max_smem;
+     const auto params = MetadataParams{
+         .batch_size = batch_size,
+         .num_sm = num_sm,
+@@ -109,8 +132,6 @@ struct IndexerMetadataKernel {
+         .schedule_metadata = static_cast<uint32_t*>(metadata.data_ptr()),
+         .use_smem = use_smem,
+     };
+-    constexpr auto kernel = smxx_paged_mqa_logits_metadata;
+-    setup_kernel_smem_once<kernel, (kMaxBatchSizeInSmem + 1) * sizeof(uint32_t)>();
+     const auto smem = use_smem ? (batch_size + 1) * sizeof(uint32_t) : 0;
+     LaunchKernel(1, kBlockSize, device.unwrap(), smem)(kernel, params);
+   }
+diff --git a/python/sglang/kernels/ops/attention/flash_mla_sm120.py b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
+index ec43c55089..5ad6e13d09 100644
+--- a/python/sglang/kernels/ops/attention/flash_mla_sm120.py
++++ b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
+@@ -210,6 +210,64 @@ def _sm120_sparse_decode_fwd(
+ _sm120_default_backend = envs.SGLANG_SM120_FLASHMLA_BACKEND.get()
+ 
+ 
++SM120_DECODE_MAX_TOKENS = 64
++
++
++def _flash_mla_sm120_prefill(
++    q,
++    k_cache,
++    indices,
++    topk_length,
++    attn_sink,
++    head_dim_v,
++    softmax_scale,
++    extra_k_cache,
++    extra_indices,
++    extra_topk_length,
++):
++    from flashinfer.mla._sparse_mla_sm120 import _sparse_mla_sm120_paged_attention
++
++    q2 = q.squeeze(1) if q.ndim == 4 else q
++    num_tokens, num_heads, _ = q2.shape
++    dev = q2.device
++    kv_u8 = k_cache.view(torch.uint8) if k_cache.dtype != torch.uint8 else k_cache
++    src_pbs = k_cache.shape[1] if k_cache.ndim >= 3 else _PBS_SRC
++    idx = indices.squeeze(1) if indices.dim() == 3 else indices
++    kv_64 = (
++        _split_kv_pages_to_64(kv_u8, src_pbs, touched_indices=idx)
++        if src_pbs != _PBS_DST
++        else kv_u8
++    )
++    extra_kv_u8 = (
++        extra_k_cache.view(torch.uint8)
++        if extra_k_cache is not None and extra_k_cache.dtype != torch.uint8
++        else extra_k_cache
++    )
++    extra_idx = (
++        extra_indices.squeeze(1)
++        if extra_indices is not None and extra_indices.dim() == 3
++        else extra_indices
++    )
++    output = q2.new_empty((num_tokens, num_heads, head_dim_v), dtype=torch.bfloat16)
++    out_lse = torch.empty((num_tokens, num_heads), dtype=torch.float32, device=dev)
++    _sparse_mla_sm120_paged_attention(
++        q2,
++        kv_64,
++        idx,
++        output,
++        out_lse,
++        softmax_scale,
++        topk_length=topk_length,
++        attn_sink=attn_sink,
++        extra_kv_cache=extra_kv_u8,
++        extra_indices=extra_idx,
++        extra_topk_length=extra_topk_length,
++        mid_out=None,
++        mid_lse=None,
++    )
++    return (output.unsqueeze(1), None)
++
++
+ def flash_mla_with_kvcache_sm120(**kwargs):
+     """SM120 FlashMLA sparse decode entry point.
+ 
+@@ -229,6 +287,19 @@ def flash_mla_with_kvcache_sm120(**kwargs):
+     extra_topk_length = kwargs.get("extra_topk_length")
+ 
+     if _sm120_default_backend == "flashinfer":
++        if q.shape[0] > SM120_DECODE_MAX_TOKENS:
++            return _flash_mla_sm120_prefill(
++                q,
++                k_cache,
++                indices,
++                topk_length,
++                attn_sink,
++                head_dim_v,
++                softmax_scale,
++                extra_k_cache,
++                extra_indices,
++                extra_topk_length,
++            )
+         return _flash_mla_flashinfer(
+             q,
+             k_cache,
+@@ -326,24 +397,31 @@ def _page_split_kernel(
+         if tl.load(mask_ptr + page_idx) == 0:
+             return
+ 
+-    src_base = src_ptr + page_idx * src_stride0
+-    dst_base = dst_ptr + (page_idx * RATIO + sub) * dst_stride0
++    # All layout strides/offsets are 8-byte aligned (asserted at the call
++    # site), so copy in u64 lanes instead of single bytes.
++    src_u64 = src_ptr.to(tl.pointer_type(tl.uint64))
++    dst_u64 = dst_ptr.to(tl.pointer_type(tl.uint64))
++    src_base = src_u64 + page_idx * (src_stride0 // 8)
++    dst_base = dst_u64 + (page_idx * RATIO + sub) * (dst_stride0 // 8)
+ 
+-    # Copy data region: DATA_PER_SUB bytes from src offset sub*DATA_PER_SUB
+-    data_src_off = sub * DATA_PER_SUB
+-    for start in tl.range(0, DATA_PER_SUB, BLOCK_SIZE):
++    DATA_U64: tl.constexpr = DATA_PER_SUB // 8
++    SCALE_U64: tl.constexpr = SCALE_PER_SUB // 8
++
++    # Copy data region: DATA_U64 u64 lanes from src offset sub*DATA_U64
++    data_src_off = sub * DATA_U64
++    for start in tl.range(0, DATA_U64, BLOCK_SIZE):
+         offs = start + tl.arange(0, BLOCK_SIZE)
+-        mask = offs < DATA_PER_SUB
++        mask = offs < DATA_U64
+         vals = tl.load(src_base + data_src_off + offs, mask=mask)
+         tl.store(dst_base + offs, vals, mask=mask)
+ 
+-    # Copy scale region: SCALE_PER_SUB bytes
+-    scale_src_off = SRC_SCALE_OFF + sub * SCALE_PER_SUB
+-    for start in tl.range(0, SCALE_PER_SUB, BLOCK_SIZE):
++    # Copy scale region: SCALE_U64 u64 lanes
++    scale_src_off = SRC_SCALE_OFF // 8 + sub * SCALE_U64
++    for start in tl.range(0, SCALE_U64, BLOCK_SIZE):
+         offs = start + tl.arange(0, BLOCK_SIZE)
+-        mask = offs < SCALE_PER_SUB
++        mask = offs < SCALE_U64
+         vals = tl.load(src_base + scale_src_off + offs, mask=mask)
+-        tl.store(dst_base + DST_SCALE_OFF + offs, vals, mask=mask)
++        tl.store(dst_base + DST_SCALE_OFF // 8 + offs, vals, mask=mask)
+ 
+ 
+ @triton.jit
+@@ -400,12 +478,16 @@ def _split_kv_pages_to_64(
+     key = f"flash_mla_sm120_split:{dev}"
+     buf = buffers.get(key)
+     if buf is None or buf.shape[0] < num_dst_pages:
+-        buf = torch.empty(
+-            num_dst_pages,
+-            _BYTES_PER_DST_PAGE_PADDED,
+-            dtype=torch.uint8,
+-            device=dev,
+-        )
++        # The first allocation can happen under inference mode (autotune), but
++        # the buffer is written again during CUDA graph capture outside
++        # inference mode, where an inference tensor cannot be mutated.
++        with torch.inference_mode(False):
++            buf = torch.empty(
++                num_dst_pages,
++                _BYTES_PER_DST_PAGE_PADDED,
++                dtype=torch.uint8,
++                device=dev,
++            )
+         buffers[key] = buf
+     out = buf[:num_dst_pages]
+ 
+@@ -446,6 +528,7 @@ def _split_kv_pages_to_64(
+         )
+         mask_ptr = mask
+ 
++    assert src_stride0 % 8 == 0 and _BYTES_PER_DST_PAGE_PADDED % 8 == 0
+     grid = (N * ratio,)
+     _page_split_kernel[grid](
+         src_2d,
+diff --git a/python/sglang/kernels/ops/layernorm/mhc.py b/python/sglang/kernels/ops/layernorm/mhc.py
+index 1f310d82a5..e9edbf11f5 100644
+--- a/python/sglang/kernels/ops/layernorm/mhc.py
++++ b/python/sglang/kernels/ops/layernorm/mhc.py
+@@ -6,6 +6,8 @@ import threading
+ from typing import Tuple
+ 
+ import torch
++import triton
++import triton.language as tl
+ 
+ from sglang.kernels.jit.utils import is_arch_support_pdl
+ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+@@ -412,6 +414,20 @@ def mhc_pre_gemm_sqrsum_tilelang(
+             T.pdl_trigger()
+ 
+ 
++@functools.cache
++def _mhc_pre_gemm_sqrsum_dispatch():
++    """SM120's TileLang pipeline cannot warp-specialize this kernel (the role
++    marker fails on tirx.Bind), so re-wrap it there with warp specialization
++    disabled. Other archs keep the original compiled form."""
++    from sglang.srt.utils import is_sm120_supported
++
++    if not is_sm120_supported():
++        return mhc_pre_gemm_sqrsum_tilelang
++    _tl = _load_tilelang()
++    cfg = {_tl.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True}
++    return _tl.jit(pass_configs=cfg)(mhc_pre_gemm_sqrsum_tilelang.__wrapped__)
++
++
+ @functools.cache
+ def mhc_pre_gemm_sqrsum_splitk_kernel(
+     hc_mult3: int,
+@@ -432,7 +448,18 @@ def mhc_pre_gemm_sqrsum_splitk_kernel(
+ 
+     ENABLE_PDL = is_arch_support_pdl()
+ 
+-    @tilelang.jit
++    from sglang.srt.utils import is_sm120_supported
++
++    _tl = _load_tilelang()
++    # See _mhc_pre_gemm_sqrsum_dispatch: SM120 cannot compile the
++    # warp-specialized form of these kernels.
++    _cfg = (
++        {_tl.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True}
++        if is_sm120_supported()
++        else None
++    )
++
++    @tilelang.jit(pass_configs=_cfg)
+     def mhc_pre_gemm_sqrsum_splitk_stage_0(
+         x: T.Tensor[(num_tokens, hc_hidden_size), T.bfloat16],
+         fn: T.Tensor[(hc_mult3, hc_hidden_size), T.float32],
+@@ -908,7 +935,7 @@ def mhc_pre(
+             assert (
+                 n_splits == 1
+             ), "The simple TileLang version gemm_sqrsum doesn't support split-k"
+-            mhc_pre_gemm_sqrsum_tilelang(
++            _mhc_pre_gemm_sqrsum_dispatch()(
+                 residual_flat.view(num_tokens, hc_mult * hidden_size),
+                 fn_flat,
+                 gemm_out_mul.squeeze(0),
+@@ -1464,7 +1491,7 @@ def mhc_fused_post_pre(
+             gemm_out_sqrsum_1d = torch.empty(
+                 num_tokens, dtype=torch.float32, device=residual.device
+             )
+-            mhc_pre_gemm_sqrsum_tilelang(
++            _mhc_pre_gemm_sqrsum_dispatch()(
+                 residual_cur.view(num_tokens, hc_hidden_size),
+                 fn,
+                 gemm_out_mul_2d,
+@@ -1616,3 +1643,49 @@ def npu_hc_pre(
+     # not fold input_layernorm. Return norm_fused=False so the caller
+     # applies the layernorm itself, matching the deepgemm/torch paths.
+     return y.to(dtype), post, comb, False
++
++
++@triton.jit
++def _hc_combine_kernel(
++    x_ptr,
++    pre_ptr,
++    y_ptr,
++    H,
++    x_stride_m,
++    y_stride_m,
++    HC: tl.constexpr,
++    BLOCK_H: tl.constexpr,
++):
++    pid_m = tl.program_id(0)
++    pid_h = tl.program_id(1)
++    offs_h = pid_h * BLOCK_H + tl.arange(0, BLOCK_H)
++    mask = offs_h < H
++    acc = tl.zeros([BLOCK_H], dtype=tl.float32)
++    for k in tl.static_range(HC):
++        pk = tl.load(pre_ptr + pid_m * HC + k).to(tl.float32)
++        xv = tl.load(
++            x_ptr + pid_m * x_stride_m + k * H + offs_h, mask=mask, other=0.0
++        ).to(tl.float32)
++        acc += pk * xv
++    tl.store(y_ptr + pid_m * y_stride_m + offs_h, acc, mask=mask)
++
++
++def hc_combine(
++    x_flat: torch.Tensor, pre: torch.Tensor, hc: int, out_dtype: torch.dtype
++) -> torch.Tensor:
++    """Fused y[m, h] = sum_k pre[m, k] * x_flat[m, k*H + h]."""
++    m = x_flat.shape[0]
++    h = x_flat.shape[1] // hc
++    y = torch.empty((m, h), dtype=out_dtype, device=x_flat.device)
++    block_h = 1024
++    _hc_combine_kernel[(m, triton.cdiv(h, block_h))](
++        x_flat,
++        pre,
++        y,
++        h,
++        x_flat.stride(0),
++        y.stride(0),
++        HC=hc,
++        BLOCK_H=block_h,
++    )
++    return y
+diff --git a/python/sglang/srt/distributed/bootstrap.py b/python/sglang/srt/distributed/bootstrap.py
+index 173b5ee619..c50b7d2e68 100644
+--- a/python/sglang/srt/distributed/bootstrap.py
++++ b/python/sglang/srt/distributed/bootstrap.py
+@@ -26,6 +26,7 @@ from sglang.srt.distributed.parallel_state import (
+ from sglang.srt.distributed.parallel_state_wrapper import ParallelState
+ from sglang.srt.environ import envs
+ from sglang.srt.layers.dp_attention import initialize_dp_attention
++from sglang.srt.model_executor.cuda_graph_config import Backend
+ from sglang.srt.platforms import current_platform
+ from sglang.srt.runtime_context import get_parallel
+ from sglang.srt.server_args import ServerArgs
+@@ -190,6 +191,22 @@ def _init_cpu_threads_env(
+         )
+ 
+ 
++def _needs_attn_tp_pynccl(server_args: ServerArgs) -> bool:
++    graph_config = server_args.cuda_graph_config
++    decode_graph_enabled = graph_config.decode.backend != Backend.DISABLED
++    supports_pynccl_graph = current_platform.is_cuda() or current_platform.is_rocm()
++    algo = (server_args.speculative_algorithm or "").upper()
++    return supports_pynccl_graph and (
++        (algo == "DSPARK" and server_args.enable_dp_attention and decode_graph_enabled)
++        or (
++            envs.SGLANG_DSA_TOPK_BROADCAST.get()
++            and (
++                decode_graph_enabled or graph_config.prefill.backend != Backend.DISABLED
++            )
++        )
++    )
++
++
+ def _init_parallel_groups(
+     *,
+     backend: str,
+@@ -239,6 +256,7 @@ def _init_parallel_groups(
+         recovered_rank=is_ep_joiner,
+         rank_offset=rank_offset,
+         max_world_size=server_args.max_ep_size,
++        use_attn_tp_pynccl=_needs_attn_tp_pynccl(server_args),
+     )
+     _tag_groups_for_flashinfer_allreduce_only()
+     initialize_dp_attention(
+diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
+index 903fdff793..c4c6b9ea3b 100644
+--- a/python/sglang/srt/distributed/parallel_state.py
++++ b/python/sglang/srt/distributed/parallel_state.py
+@@ -1469,6 +1469,24 @@ class GroupCoordinator:
+         )
+         return input_
+ 
++    def broadcast_capture_safe(self, input_: torch.Tensor, src: int = 0):
++        assert 0 <= src < self.world_size, f"Invalid src rank ({src})"
++
++        if self.world_size == 1:
++            return input_
++        if input_.device.type != "cuda" or not torch.cuda.is_current_stream_capturing():
++            return self.broadcast(input_, src=src)
++
++        pynccl_comm = self.pynccl_comm
++        if pynccl_comm is None or not pynccl_comm.available:
++            raise RuntimeError(
++                f"CUDA graph broadcast on group {self.unique_name!r} requires "
++                "an available PyNCCL communicator."
++            )
++        with pynccl_comm.change_state(enable=True):
++            pynccl_comm.broadcast(input_, src=src)
++        return input_
++
+     def broadcast_object(self, obj: Optional[Any] = None, src: int = 0):
+         """Broadcast the input object.
+         NOTE: `src` is the local rank of the source rank.
+@@ -2296,6 +2314,7 @@ def initialize_model_parallel(
+     recovered_rank: bool = False,
+     rank_offset: int = 0,
+     max_world_size: Optional[int] = None,
++    use_attn_tp_pynccl: bool = False,
+ ) -> None:
+     """
+     Initialize model parallel groups.
+@@ -2318,6 +2337,9 @@ def initialize_model_parallel(
+             tensor-parallel group during decoding. Must be a divisor of
+             tensor_model_parallel_size and is currently only supported on the
+             AMD HIP platform.
++        use_attn_tp_pynccl: create a PyNCCL communicator for a split
++            attention tensor-parallel group. This is required by collectives
++            captured in CUDA graphs on that group.
+ 
+     Let's say we have a total of 8 GPUs denoted by g0 ... g7 and we
+     use 2 GPUs to parallelize the model tensor, and 4 GPUs to parallelize
+@@ -2513,7 +2535,9 @@ def initialize_model_parallel(
+             group_ranks,
+             get_world_group().local_rank,
+             backend,
+-            use_pynccl=SYNC_TOKEN_IDS_ACROSS_TP or enable_symm_mem,
++            use_pynccl=(
++                SYNC_TOKEN_IDS_ACROSS_TP or enable_symm_mem or use_attn_tp_pynccl
++            ),
+             use_custom_allreduce=False,
+             use_torch_symm_mem_allreduce=False,
+             use_message_queue_broadcaster=envs.SGLANG_USE_MESSAGE_QUEUE_BROADCASTER.get(),
+diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
+index 6919dadf67..73f49cf2fe 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_chat.py
++++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
+@@ -1227,7 +1227,13 @@ class OpenAIServingChat(OpenAIServingBase):
+                 # insert an empty system prompt to help render tool system prompt
+                 messages.insert(0, {"role": "system", "content": ""})
+             if request.tools:
+-                messages[0]["tools"] = [tool.model_dump() for tool in request.tools]
++                # exclude_unset keeps protocol-model defaults (e.g. strict=False)
++                # out of the rendered tool schemas so the prompt matches the
++                # checkpoint's reference encoding exactly.
++                messages[0]["tools"] = [
++                    tool.model_dump(exclude_unset=True, by_alias=True)
++                    for tool in request.tools
++                ]
+ 
+             # Default encoding (dsv4/dsv32)
+             if self.chat_encoding_spec == "dsv4":
+diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
+index eff734c6ca..b39bffd4bd 100644
+--- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
++++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
+@@ -1751,9 +1751,21 @@ class DeepseekV4AttnBackend(
+ 
+             if _is_sm120:
+                 from sglang.kernels.ops.attention.flash_mla_sm120 import (
++                    SM120_DECODE_MAX_TOKENS,
+                     flash_mla_with_kvcache_sm120,
+                 )
+ 
++                # The pad to 64 heads only serves the decode kernel's h_q
++                # specialization; the prefill kernel takes arbitrary h_q, so
++                # drop it instead of attending on garbage heads (4x the work
++                # at attn-TP 4).
++                real_heads = layer.tp_q_head_num
++                if q.shape[0] > SM120_DECODE_MAX_TOKENS:
++                    if q.shape[-2] > real_heads:
++                        q = q[..., :real_heads, :].contiguous()
++                    if attn_sink is not None and attn_sink.shape[0] > real_heads:
++                        attn_sink = attn_sink[:real_heads]
++
+                 o = flash_mla_with_kvcache_sm120(
+                     q=q,
+                     k_cache=swa_k_cache,
+diff --git a/python/sglang/srt/layers/attention/dsa/dsa_indexer.py b/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
+index 05eb1819e8..c2d367b4c0 100644
+--- a/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
++++ b/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
+@@ -151,19 +151,7 @@ if _is_cuda:
+ 
+ 
+ def _broadcast_indexer_topk_from_rank0_impl(topk_indices: torch.Tensor) -> None:
+-    group = get_attn_tp_group()
+-    if group.world_size == 1:
+-        return
+-
+-    if topk_indices.device.type == "cuda" and torch.cuda.is_current_stream_capturing():
+-        if group.pynccl_comm is None:
+-            raise RuntimeError(
+-                "SGLANG_DSA_TOPK_BROADCAST requires PyNCCL during CUDA graph capture."
+-            )
+-        with group.pynccl_comm.change_state(enable=True):
+-            group.pynccl_comm.broadcast(topk_indices, src=0)
+-    else:
+-        group.broadcast(topk_indices, src=0)
++    get_attn_tp_group().broadcast_capture_safe(topk_indices, src=0)
+ 
+ 
+ def _broadcast_indexer_topk_from_rank0(
+diff --git a/python/sglang/srt/layers/attention/dsv4/indexer.py b/python/sglang/srt/layers/attention/dsv4/indexer.py
+index f596caade6..6a637681ca 100644
+--- a/python/sglang/srt/layers/attention/dsv4/indexer.py
++++ b/python/sglang/srt/layers/attention/dsv4/indexer.py
+@@ -29,6 +29,7 @@ from sglang.srt.layers.attention.dsa.dsa_topk_backend import DSATopKBackend
+ from sglang.srt.layers.attention.dsa.utils import aiter_can_use_preshuffle_paged_mqa
+ from sglang.srt.layers.attention.dsv4.compressor import Compressor
+ from sglang.srt.layers.attention.dsv4.metadata import (
++    _SM120_INDEXER_M_CHUNK,
+     NonPagedIndexerPlan,
+     PagedIndexerMetadata,
+ )
+@@ -753,35 +754,6 @@ class C4IndexerBackendMixin:
+             c4_seq_lens=c4_seq_lens,
+             query_rows=query_rows,
+         )
+-        if nonpaged_plan is not None:
+-            assert isinstance(q_indexer, torch.Tensor)
+-            logits = self._forward_nonpaged_indexer(
+-                q_indexer=q_indexer,
+-                weights=weights,
+-                c4_indexer=c4_indexer,
+-                token_to_kv_pool=token_to_kv_pool,
+-                plan=nonpaged_plan,
+-            )
+-        else:
+-            c4_indexer_kv_cache = token_to_kv_pool.get_index_k_with_scale_buffer(
+-                layer_id=c4_indexer.layer_id,
+-            )
+-            assert c4_indexer_kv_cache.dim() == 2
+-            head_dim_with_sf = 68 if use_fp4_indexer else 132
+-            c4_indexer_kv_cache = c4_indexer_kv_cache.view(
+-                c4_indexer_kv_cache.shape[0], 64, 1, head_dim_with_sf
+-            )
+-            logits = fn(
+-                q,
+-                c4_indexer_kv_cache,
+-                weights,
+-                _c4sl,
+-                page_table,
+-                indexer_metadata.deep_gemm_metadata,
+-                indexer_metadata.max_c4_seq_len,
+-                False,
+-            )
+-
+         assert indexer_metadata.page_table is core_metadata.page_table
+         if self.debug_use_external_c4_sparse_indices:
+             return
+@@ -804,45 +776,96 @@ class C4IndexerBackendMixin:
+         elif core_metadata.c4_sparse_raw_indices is not None:
+             raw_indices = core_metadata.c4_sparse_raw_indices
+ 
+-        if (
+-            envs.SGLANG_TOPK_TRANSFORM_512_TORCH.get()
+-            or self.dsa_topk_backend.is_torch()
+-        ):
+-            topk_transform_512_pytorch_vectorized(
+-                logits,
+-                c4_seq_lens,
+-                page_table,
+-                c4_sparse_page_indices,
+-                indexer_metadata.c4_page_size,
+-                raw_indices,
+-            )
+-        elif self.dsa_topk_backend.is_flashinfer():
+-            topk_transform_512_flashinfer_unfused(
+-                logits,
+-                c4_seq_lens,
+-                page_table,
+-                c4_sparse_page_indices,
+-                indexer_metadata.c4_page_size,
+-                raw_indices,
+-            )
+-        elif envs.SGLANG_OPT_USE_TOPK_V2.get() and raw_indices is None:
+-            topk_transform_512_v2(
+-                logits,
+-                c4_seq_lens,
+-                page_table,
+-                c4_sparse_page_indices,
+-                indexer_metadata.c4_page_size,
+-                indexer_metadata.topk_metadata,
++        all_rows = slice(0, _c4sl.shape[0])
++
++        def run_topk_transform(rows: slice, logits: torch.Tensor) -> None:
++            row_raw_indices = raw_indices[rows] if raw_indices is not None else None
++            if (
++                envs.SGLANG_TOPK_TRANSFORM_512_TORCH.get()
++                or self.dsa_topk_backend.is_torch()
++            ):
++                topk_transform_512_pytorch_vectorized(
++                    logits,
++                    c4_seq_lens[rows],
++                    page_table[rows],
++                    c4_sparse_page_indices[rows],
++                    indexer_metadata.c4_page_size,
++                    row_raw_indices,
++                )
++            elif self.dsa_topk_backend.is_flashinfer():
++                topk_transform_512_flashinfer_unfused(
++                    logits,
++                    c4_seq_lens[rows],
++                    page_table[rows],
++                    c4_sparse_page_indices[rows],
++                    indexer_metadata.c4_page_size,
++                    row_raw_indices,
++                )
++            elif envs.SGLANG_OPT_USE_TOPK_V2.get() and raw_indices is None:
++                topk_transform_512_v2(
++                    logits,
++                    c4_seq_lens[rows],
++                    page_table[rows],
++                    c4_sparse_page_indices[rows],
++                    indexer_metadata.c4_page_size,
++                    indexer_metadata.topk_metadata,
++                )
++            else:
++                topk_transform_512(
++                    logits,
++                    c4_seq_lens[rows],
++                    page_table[rows],
++                    c4_sparse_page_indices[rows],
++                    indexer_metadata.c4_page_size,
++                    row_raw_indices,
++                )
++
++        if nonpaged_plan is not None:
++            assert isinstance(q_indexer, torch.Tensor)
++            logits = self._forward_nonpaged_indexer(
++                q_indexer=q_indexer,
++                weights=weights,
++                c4_indexer=c4_indexer,
++                token_to_kv_pool=token_to_kv_pool,
++                plan=nonpaged_plan,
+             )
++            run_topk_transform(all_rows, logits)
+         else:
+-            topk_transform_512(
+-                logits,
+-                c4_seq_lens,
+-                page_table,
+-                c4_sparse_page_indices,
+-                indexer_metadata.c4_page_size,
+-                raw_indices,
++            c4_indexer_kv_cache = token_to_kv_pool.get_index_k_with_scale_buffer(
++                layer_id=c4_indexer.layer_id,
++            )
++            assert c4_indexer_kv_cache.dim() == 2
++            head_dim_with_sf = 68 if use_fp4_indexer else 132
++            c4_indexer_kv_cache = c4_indexer_kv_cache.view(
++                c4_indexer_kv_cache.shape[0], 64, 1, head_dim_with_sf
+             )
++
++            def run_paged_indexer(rows: slice, metadata: torch.Tensor) -> None:
++                row_q = (q[0][rows], q[1][rows]) if isinstance(q, tuple) else q[rows]
++                logits = fn(
++                    row_q,
++                    c4_indexer_kv_cache,
++                    weights[rows],
++                    _c4sl[rows],
++                    page_table[rows],
++                    metadata,
++                    indexer_metadata.max_c4_seq_len,
++                    False,
++                )
++                run_topk_transform(rows, logits)
++
++            deep_gemm_metadata = indexer_metadata.deep_gemm_metadata
++            if isinstance(deep_gemm_metadata, list):
++                # SM120 only: DeepGEMM's metadata kernel caps the row count, so
++                # PagedIndexerMetadata split it; run indexer + topk per chunk.
++                num_rows = _c4sl.shape[0]
++                for chunk_idx, start in enumerate(
++                    range(0, num_rows, _SM120_INDEXER_M_CHUNK)
++                ):
++                    rows = slice(start, min(start + _SM120_INDEXER_M_CHUNK, num_rows))
++                    run_paged_indexer(rows, deep_gemm_metadata[chunk_idx])
++            else:
++                run_paged_indexer(all_rows, deep_gemm_metadata)
+         if hisparse_coordinator is not None:
+             if hisparse_decode:
+                 compress_layer_id = token_to_kv_pool.layer_mapping[
+diff --git a/python/sglang/srt/layers/attention/dsv4/metadata.py b/python/sglang/srt/layers/attention/dsv4/metadata.py
+index d245ddce3c..0f2a8d735a 100644
+--- a/python/sglang/srt/layers/attention/dsv4/metadata.py
++++ b/python/sglang/srt/layers/attention/dsv4/metadata.py
+@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, List, Optional
+ import torch
+ 
+ from sglang.srt.environ import envs
+-from sglang.srt.utils import is_hip, is_xpu
++from sglang.srt.utils import is_hip, is_sm120_supported, is_xpu
++
++_IS_SM120 = is_sm120_supported()
+ 
+ if TYPE_CHECKING:
+     pass
+@@ -50,6 +52,8 @@ Some other notes:
+ """
+ _LARGE_INDEXER_QUERY_THRESHOLD = 11673
+ 
++_SM120_INDEXER_M_CHUNK = 4096
++
+ 
+ def copy_metadata(
+     *,
+@@ -144,13 +148,26 @@ class PagedIndexerMetadata:
+             _c4 = self.c4_seq_lens.to(torch.int32)
+             if _c4.dim() == 1:
+                 _c4 = _c4.unsqueeze(-1)
+-            self.deep_gemm_metadata = get_paged_mqa_logits_metadata(
+-                _c4,
+-                self.c4_page_size,
+-                deep_gemm.get_num_sms(),
+-            )
++            if _IS_SM120 and _c4.shape[0] > _SM120_INDEXER_M_CHUNK:
++                # Chunk metadata is identical for every layer in the forward
++                # pass; compute the per-chunk list once here instead of per
++                # layer in the indexer.
++                self.deep_gemm_metadata = [
++                    get_paged_mqa_logits_metadata(
++                        _c4[_s : _s + _SM120_INDEXER_M_CHUNK],
++                        self.c4_page_size,
++                        deep_gemm.get_num_sms(),
++                    )
++                    for _s in range(0, _c4.shape[0], _SM120_INDEXER_M_CHUNK)
++                ]
++            else:
++                self.deep_gemm_metadata = get_paged_mqa_logits_metadata(
++                    _c4,
++                    self.c4_page_size,
++                    deep_gemm.get_num_sms(),
++                )
+ 
+-            assert isinstance(self.deep_gemm_metadata, torch.Tensor)
++            assert isinstance(self.deep_gemm_metadata, (torch.Tensor, list))
+ 
+         from sglang.kernels.ops.attention.dsv4 import plan_topk_v2
+ 
+diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
+index 5f06cdafce..d9db697651 100644
+--- a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
++++ b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
+@@ -4,7 +4,7 @@ import os
+ import time
+ from contextlib import contextmanager, nullcontext
+ from enum import IntEnum, auto
+-from typing import Dict, List, Tuple
++from typing import Dict, List, Optional, Tuple
+ 
+ import torch
+ from tqdm import tqdm
+@@ -154,6 +154,28 @@ def _maybe_compile_deep_gemm_one_type_all(
+         )
+ 
+ 
++def _select_max_m_within_budget(
++    kernel_type: DeepGemmKernelType,
++    m_list: List[int],
++    n: int,
++    k: int,
++    num_groups: int,
++    memory_budget: float,
++) -> Optional[int]:
++    # Reduce geometrically because the estimate is monotonic in max_m.
++    min_m, max_m = min(m_list), max(m_list)
++    while (
++        _BaseWarmupExecutor.get_memory_requirement(
++            kernel_type, max_m=max_m, n=n, k=k, num_groups=num_groups
++        )
++        > memory_budget
++    ):
++        if max_m <= min_m:
++            return None
++        max_m = max(max_m // 2, min_m)
++    return max_m
++
++
+ # NOTE(alcanderian): get_num_sms should be change when 2-batch-overlap is introduced
+ def _compile_deep_gemm_one_type_all(
+     kernel_type: DeepGemmKernelType,
+@@ -185,15 +207,20 @@ def _compile_deep_gemm_one_type_all(
+             f"Required memory for warmup: {required_memory}GB, Available memory: {memory_budget}GB"
+         )
+         if memory_budget < required_memory:
+-            # TODO: Maybe compute the max_m based on the memory budget
+-            while (
+-                _BaseWarmupExecutor.get_memory_requirement(
+-                    kernel_type, max_m=max_m, n=n, k=k, num_groups=num_groups
++            max_m = _select_max_m_within_budget(
++                kernel_type,
++                m_list=m_list,
++                n=n,
++                k=k,
++                num_groups=num_groups,
++                memory_budget=memory_budget,
++            )
++            if max_m is None:
++                logger.warning(
++                    f"Available memory {memory_budget}GB is not enough for warmup even at M={min(m_list)}, "
++                    f"skipping warmup for <{kernel_type.name}> N={n}, K={k}, num_groups={num_groups}"
+                 )
+-                > memory_budget
+-                and max_m > 4096
+-            ):
+-                max_m = max_m // 2
++                return
+             logger.warning(
+                 f"Available memory {memory_budget}GB is less than required memory {required_memory}GB for warmup, reducing max_m to {max_m} to avoid out of memory"
+             )
+diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
+index 09e14f69df..c81a1002a2 100644
+--- a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
++++ b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
+@@ -18,9 +18,13 @@ def _compute_enable_deep_gemm():
+     sm_version = get_device_sm()
+     if (_is_cuda and sm_version < 90) or (_is_musa and sm_version < 31):
+         return False
+-    # DeepGEMM requires TMEM/tcgen05 (SM100+datacenter), not available on SM120
++    # SM120 support (mma.sync block-scale, no TMEM) landed in DeepGEMM#324;
++    # probe the entry point since installed builds may predate it.
+     if sm_version == 120:
+-        return False
++        try:
++            from deep_gemm import m_grouped_fp8_fp4_gemm_nt_contiguous  # noqa: F401
++        except (ImportError, AttributeError):
++            return False
+     if not (_is_cuda or _is_musa):
+         return False
+ 
+@@ -35,5 +39,7 @@ def _compute_enable_deep_gemm():
+ ENABLE_JIT_DEEPGEMM = _compute_enable_deep_gemm()
+ 
+ DEEPGEMM_BLACKWELL = ENABLE_JIT_DEEPGEMM and is_sm100_supported()
+-DEEPGEMM_SCALE_UE8M0 = DEEPGEMM_BLACKWELL
++DEEPGEMM_SCALE_UE8M0 = ENABLE_JIT_DEEPGEMM and (
++    is_sm100_supported() or get_device_sm() == 120
++)
+ DEEPGEMM_NEED_TMA_ALIGNED_SCALES = not (DEEPGEMM_SCALE_UE8M0 or _is_musa)
+diff --git a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
+index 67bdb5ea8b..7964217599 100644
+--- a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
++++ b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
+@@ -21,6 +21,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+ from sglang.srt.environ import envs
+ from sglang.srt.layers import deep_gemm_wrapper
+ from sglang.srt.layers.dp_attention import is_allocation_symmetric
++from sglang.srt.layers.moe.moe_runner import deep_gemm_sm120
+ from sglang.srt.layers.moe.moe_runner.base import (
+     MoeQuantInfo,
+     MoeRunnerConfig,
+@@ -257,7 +258,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
+         if envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
+             assert envs.SGLANG_OPT_SWIGLU_CLAMP_FUSION.get()
+             assert envs.SGLANG_OPT_USE_JIT_EP_ACTIVATION.get()
+-            self.use_swizzle = True
++            self.use_swizzle = deep_gemm_sm120.use_swizzle()
+ 
+     def run(
+         self,
+@@ -848,6 +849,19 @@ def pre_permute_standard_to_deep_gemm(
+         dispatch_output.topk_output,
+     )
+     topk_weights, topk_ids, _ = topk_output
++    # SM120's DeepGEMM grouped GEMM consumes standard-layout activations only.
++    # Feeding it the shared masked/swizzled layout does not raise -- it silently
++    # returns wrong results (GSM8K 0.96 -> 0.06, measured on 4x RTX 6000D), so
++    # refuse the combination rather than corrupt output.
++    assert deep_gemm_sm120.is_supported(), (
++        "--moe-runner-backend deep_gemm on consumer Blackwell (SM120) requires "
++        "the standard-layout MoE path, which is unavailable in this build."
++    )
++    sm120_input = deep_gemm_sm120.maybe_pre_permute(
++        hidden_states, topk_ids, topk_weights, quant_info, runner_config, running_state
++    )
++    if sm120_input is not None:
++        return sm120_input
+ 
+     hidden_states_shape = hidden_states.shape
+     hidden_states_dtype = hidden_states.dtype
+@@ -856,7 +870,10 @@ def pre_permute_standard_to_deep_gemm(
+ 
+     topk_weights, topk_ids = topk_weights, topk_ids
+ 
+-    if _should_use_masked_standard_layout(runner_config, quant_info, hidden_states):
++    if (
++        deep_gemm_sm120.allows_masked_standard_layout()
++        and _should_use_masked_standard_layout(runner_config, quant_info, hidden_states)
++    ):
+         output_dtype = (
+             torch.bfloat16
+             if quant_info.w13_weight.dtype == torch.bfloat16
+@@ -1031,6 +1048,12 @@ def post_permute_deep_gemm_to_standard(
+     from sglang.kernels.ops.moe.ep_moe_kernels import post_reorder_deepgemm
+     from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
+ 
++    sm120_output = deep_gemm_sm120.maybe_post_permute(
++        runner_output, runner_config, running_state
++    )
++    if sm120_output is not None:
++        return sm120_output
++
+     hidden_states_shape = running_state["hidden_states_shape"]
+     hidden_states_dtype = running_state["hidden_states_dtype"]
+     hidden_states_device = running_state["hidden_states_device"]
+diff --git a/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py b/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py
+new file mode 100644
+index 0000000000..d5f2be56f9
+--- /dev/null
++++ b/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py
+@@ -0,0 +1,198 @@
++"""SM120-specific DeepGEMM MoE path.
++
++Consumer Blackwell's DeepGEMM contiguous grouped GEMM takes standard-layout
++activations, so SM120 uses a contiguous scatter/gather permute instead of the
++masked layout the other architectures use. Kept out of ``deep_gemm.py`` so the
++shared runner keeps a single code path.
++
++Entry points, all no-ops off SM120:
++  * ``use_swizzle`` — layout choice for the shared runner
++  * ``maybe_pre_permute`` — contiguous scatter, or ``None`` to fall through
++  * ``maybe_post_permute`` — matching gather, or ``None`` to fall through
++"""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Optional
++
++import torch
++
++from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
++from sglang.srt.utils import ceil_div, dispose_tensor, is_sm120_supported
++
++if TYPE_CHECKING:
++    from sglang.srt.layers.moe.moe_runner.deep_gemm import DeepGemmRunnerInput
++    from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
++
++_is_sm120 = is_sm120_supported()
++
++# Above this the standard path uses the contiguous grouped GEMM; the masked
++# layout's [num_local_experts, capacity, k] transients OOM at prefill sizes.
++_STANDARD_CONTIG_MIN_TOKENS = 1024
++
++
++def is_supported() -> bool:
++    """True when this build can serve the SM120 standard-layout MoE path.
++
++    Off SM120 the shared masked path is correct, so this is vacuously true;
++    on SM120 it reports whether the contiguous implementation is present.
++    """
++    return True
++
++
++def use_swizzle() -> bool:
++    """SM120's contiguous GEMM consumes standard-layout activations only."""
++    return not _is_sm120
++
++
++def allows_masked_standard_layout() -> bool:
++    """SM120 cannot serve the masked-standard layout for DSV4 shapes: its varlen
++    activation kernel requires ``D // 8 >= num_experts`` (512 // 8 = 64 < 256),
++    so keep upstream's memory-budget heuristic off this path.
++    """
++    return not _is_sm120
++
++
++def _eligible(hidden_states, quant_info, runner_config) -> bool:
++    return (
++        _is_sm120
++        and hidden_states.shape[0] >= _STANDARD_CONTIG_MIN_TOKENS
++        and quant_info.w13_weight.dtype != torch.bfloat16
++        # Under EP the standard dispatcher maps non-local experts to -1,
++        # which the contiguous path does not handle; keep the masked path.
++        and runner_config.num_local_experts == runner_config.num_experts
++    )
++
++
++def maybe_pre_permute(
++    hidden_states: torch.Tensor,
++    topk_ids: torch.Tensor,
++    topk_weights: torch.Tensor,
++    quant_info,
++    runner_config: MoeRunnerConfig,
++    running_state: dict,
++) -> Optional["DeepGemmRunnerInput"]:
++    """Contiguous scatter for SM120; ``None`` means use the shared masked path."""
++    if not _eligible(hidden_states, quant_info, runner_config):
++        return None
++    return _pre_permute_standard_contig(
++        hidden_states, topk_ids, topk_weights, runner_config, running_state
++    )
++
++
++def maybe_post_permute(
++    runner_output,
++    runner_config: MoeRunnerConfig,
++    running_state: dict,
++) -> Optional["StandardCombineInput"]:
++    """Gather matching ``maybe_pre_permute``; ``None`` means fall through."""
++    if not running_state.get("contig_mode"):
++        return None
++
++    from sglang.kernels.ops.moe.ep_moe_kernels import ep_gather
++    from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
++
++    gather_out = torch.empty(
++        running_state["hidden_states_shape"],
++        device=running_state["hidden_states_device"],
++        dtype=running_state["hidden_states_dtype"],
++    )
++    ep_gather(
++        runner_output.hidden_states,
++        running_state["topk_ids"],
++        running_state["topk_weights"],
++        running_state["output_index"],
++        gather_out,
++    )
++    dispose_tensor(runner_output.hidden_states)
++    if runner_config.routed_scaling_factor is not None:
++        gather_out *= runner_config.routed_scaling_factor
++    return StandardCombineInput(hidden_states=gather_out)
++
++
++def _pre_permute_standard_contig(
++    hidden_states: torch.Tensor,
++    topk_ids: torch.Tensor,
++    topk_weights: torch.Tensor,
++    runner_config: MoeRunnerConfig,
++    running_state: dict,
++) -> "DeepGemmRunnerInput":
++    from sglang.kernels.ops.moe.ep_moe_kernels import ep_scatter
++    from sglang.kernels.ops.quantization.fp8_kernel import (
++        sglang_per_token_group_quant_fp8,
++    )
++    from sglang.srt.layers import deep_gemm_wrapper
++    from sglang.srt.layers.moe.moe_runner.deep_gemm import DeepGemmRunnerInput
++
++    num_tokens, K = hidden_states.shape
++    num_experts = runner_config.num_local_experts
++    device = hidden_states.device
++
++    running_state["topk_ids"] = topk_ids
++    running_state["topk_weights"] = topk_weights
++    running_state["hidden_states_shape"] = hidden_states.shape
++    running_state["hidden_states_device"] = device
++    running_state["hidden_states_dtype"] = hidden_states.dtype
++    running_state["contig_mode"] = True
++
++    ue8m0 = deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0
++    q, q_scale = sglang_per_token_group_quant_fp8(
++        hidden_states,
++        128,
++        column_major_scales=ue8m0,
++        scale_tma_aligned=ue8m0,
++        scale_ue8m0=ue8m0,
++    )
++    dispose_tensor(hidden_states)
++
++    # ep_scatter fills expert slots in blocks of 128; size from a static upper
++    # bound and accumulate counts on-device to avoid a GPU->CPU sync.
++    flat_ids = topk_ids.flatten().to(torch.int64)
++    counts = torch.zeros(num_experts, device=device, dtype=torch.int32)
++    counts.index_add_(0, flat_ids.clamp_min(0), (flat_ids >= 0).to(torch.int32))
++    counts_aligned = (counts + 127) // 128 * 128
++    all_tokens = ceil_div(num_tokens * runner_config.top_k, 128) * 128 + (
++        num_experts * 128
++    )
++    running_state["all_tokens"] = all_tokens
++
++    # Pad slots (m_indices == -1) are skipped by the grouped GEMM, so the
++    # buffer needs no zero fill.
++    input_tensor = torch.empty((all_tokens, K), device=device, dtype=q.dtype)
++    if ue8m0:
++        input_tensor_scale = torch.zeros(
++            (ceil_div(K // 128, 4), all_tokens), device=device, dtype=torch.int
++        ).transpose(0, 1)
++    else:
++        input_tensor_scale = torch.empty(
++            (all_tokens, K // 128), device=device, dtype=torch.float32
++        )
++    m_indices = torch.full((all_tokens,), -1, device=device, dtype=torch.int32)
++    output_index = torch.empty_like(topk_ids)
++    expert_start_loc = torch.empty_like(counts_aligned)
++
++    ep_scatter(
++        q,
++        q_scale,
++        topk_ids,
++        counts_aligned,
++        counts,
++        expert_start_loc,
++        input_tensor,
++        input_tensor_scale,
++        m_indices,
++        output_index,
++        scale_ue8m0=ue8m0,
++    )
++    dispose_tensor(q)
++    if q_scale is not None:
++        dispose_tensor(q_scale)
++
++    running_state["output_index"] = output_index
++
++    return DeepGemmRunnerInput(
++        hidden_states=input_tensor,
++        hidden_states_scale=input_tensor_scale,
++        use_masked_gemm=False,
++        m_indices=m_indices,
++    )
+diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
+index 1996033216..c82e5d60fb 100644
+--- a/python/sglang/srt/model_loader/utils.py
++++ b/python/sglang/srt/model_loader/utils.py
+@@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
+ 
+ from sglang.srt.configs.model_config import ModelConfig, ModelImpl
+ from sglang.srt.layers import deep_gemm_wrapper
++from sglang.srt.utils import get_device_sm
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -277,6 +278,10 @@ def should_deepgemm_weight_requant_ue8m0(
+         and weight_block_size is not None
+     ):
+         return False
++    # SM120 routes dense block-FP8 GEMMs to CUTLASS/Triton (fp32 scales);
++    # only the grouped MoE GEMM consumes DeepGEMM layouts there.
++    if get_device_sm() == 120:
++        return False
+     if output_dtype is not None and output_dtype != torch.bfloat16:
+         return False
+     if weight_shape is not None and (
+diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
+index 292aa5bfe8..50a554601f 100644
+--- a/python/sglang/srt/models/deepseek_v4.py
++++ b/python/sglang/srt/models/deepseek_v4.py
+@@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
+     fused_rope_inplace,
+     sglang_per_token_group_quant_fp8_dsv4_wo_a,
+ )
++from sglang.kernels.ops.attention.flash_mla_sm120 import SM120_DECODE_MAX_TOKENS
+ from sglang.kernels.ops.quantization.fp8_kernel import (
+     sglang_per_token_group_quant_fp8,
+ )
+@@ -207,6 +208,7 @@ logger = logging.getLogger(__name__)
+ 
+ _FP8_WO_A_GEMM = envs.SGLANG_OPT_FP8_WO_A_GEMM.get()
+ _MHC_POST_MULT_VALUE = 2.0
++_HC_PRENORM_DEEPGEMM_MIN_TOKENS = 1024
+ 
+ DEEPSEEK_V4_STACKED_PARAMS_MAPPING: List[Tuple[str, str, int]] = [
+     ("gate_up_proj", "gate_proj", 0),
+@@ -1271,12 +1273,19 @@ class MQALayer(MqaAttentionBase):
+         )
+ 
+         tp_slice, q_padded, q_out = slice(None), None, None
++        # Above this the SM120 route is the prefill kernel, which takes
++        # arbitrary h_q, so the decode pad below would just be sliced back off.
++        skip_decode_pad = is_sm120_supported() and x.shape[0] > SM120_DECODE_MAX_TOKENS
+         if self.attn_tp_size > 1:
+             # FlashMLA's fp8 sparse decode kernel only specializes h_q for {64, 128}.
+             # Pad the per-rank heads to 64 (not the full n_heads) when they fit, to
+             # dispatch the cheaper decode::head64 variant; attn_sink is sliced to
+             # this rank and padded to match.
+-            padded_num_heads = 64 if self.n_local_heads <= 64 else self.n_heads
++            padded_num_heads = (
++                self.n_local_heads
++                if skip_decode_pad
++                else (64 if self.n_local_heads <= 64 else self.n_heads)
++            )
+             # Only [0:n_local_heads] is written below. Uninitialized padded TP
+             # heads inject NaN into attention on gfx942 (fnuz), so zero-init
+             # there; other archs tolerate new_empty and skip the per-forward
+@@ -1637,7 +1646,12 @@ class DeepseekV4DecoderLayer(nn.Module):
+             )
+             return y, post.squeeze(-1), comb, False
+ 
+-        if envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.get():
++        # The deepgemm tf32 gemm wins at large M (prefill) but its fixed
++        # dispatch cost dominates at small M (decode): dispatch by token count.
++        if (
++            envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.get()
++            and x.shape[0] >= _HC_PRENORM_DEEPGEMM_MIN_TOKENS
++        ):
+             from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
+                 tf32_hc_prenorm_gemm,
+             )
+@@ -1664,6 +1678,8 @@ class DeepseekV4DecoderLayer(nn.Module):
+             self.hc_sinkhorn_iters,
+             self.hc_eps,
+         )
++        from sglang.kernels.ops.layernorm.mhc import hc_combine
++
+         # y is the post-norm activation fed into the MoE. Allocate it in the
+         # symmetric memory pool so the downstream all-reduce uses the low-latency
+         # NCCL symmetric path: the Triton inplace MoE runner writes the expert
+@@ -1673,7 +1689,7 @@ class DeepseekV4DecoderLayer(nn.Module):
+         with use_symmetric_memory(
+             get_tp_group(), disabled=not is_allocation_symmetric()
+         ):
+-            y = (pre.squeeze(1).unsqueeze(-1) * x_flat.view(shape)).sum(dim=1).to(dtype)
++            y = hc_combine(x_flat, pre.squeeze(1).contiguous(), self.hc_mult, dtype)
+         return y, post.squeeze(1), comb.squeeze(1), False
+ 
+     def hc_post(
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index 03a92501fc..957f9f6bbf 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -5424,11 +5424,18 @@ class ServerArgs:
+                 # DeepGEMM or require >99KB SMEM (topk_v2).
+                 envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
+                 envs.SGLANG_OPT_USE_TOPK_V2.set(False)
+-                envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
+-                envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
+-                envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.set(True)
+-                # Prefer TileLang over the Torch fallback.
+-                envs.SGLANG_OPT_USE_TILELANG_INDEXER.set(True)
++                if not envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.is_set():
++                    envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
++                if not envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.is_set():
++                    envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
++                # Out of the box the indexer runs the TileLang kernel (works on
++                # stock DeepGEMM); both knobs stay env-overridable so a DeepGEMM
++                # build with SM120 attention support can opt into
++                # fp8_paged_mqa_logits by setting them to 0.
++                if not envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.is_set():
++                    envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.set(True)
++                if not envs.SGLANG_OPT_USE_TILELANG_INDEXER.is_set():
++                    envs.SGLANG_OPT_USE_TILELANG_INDEXER.set(True)
+             elif is_hip():
+                 envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
+                 envs.SGLANG_OPT_USE_FUSED_COMPRESS.set(True)
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft.py b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
+index c7f27428ef..c5c6e05aab 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_draft.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
+@@ -22,6 +22,7 @@ from sglang.srt.runtime_context import get_parallel
+ from sglang.srt.speculative.dflash_info_v2 import DFlashDraftInputV2
+ from sglang.srt.speculative.draft_worker_common import make_draft_input_v2
+ from sglang.srt.speculative.dspark_components.dspark_planner import VerifyWindow
++from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
+ from sglang.srt.speculative.spec_info import (
+     SpeculativeAlgorithm,
+     spec_scale_global_num_tokens,
+@@ -99,6 +100,7 @@ def sample_draft_block(
+     sampling_info,
+     markov_head,
+     device: torch.device,
++    tp_sync: DsparkTpSync,
+ ) -> DraftBlockResult:
+     bs = base_logits.shape[0]
+     greedy_mask = resolve_greedy_mask(bs=bs, sampling_info=sampling_info, device=device)
+@@ -116,7 +118,7 @@ def sample_draft_block(
+ 
+         def sampler(step_logits: torch.Tensor, step_idx: int) -> torch.Tensor:
+             expect(_DRAFT_STEP_LOGITS, step_logits, msg=f"step {step_idx}")
+-            return torch.argmax(step_logits, dim=-1)
++            return tp_sync.sync(torch.argmax(step_logits, dim=-1))
+ 
+     else:
+ 
+@@ -126,11 +128,13 @@ def sample_draft_block(
+                 exp_noise = torch.empty(
+                     step_logits.shape, dtype=torch.float32, device=step_logits.device
+                 ).exponential_(1)
+-                return SampleStepTokens.execute(
+-                    step_logits=step_logits,
+-                    temperatures=temperatures,
+-                    greedy_mask=greedy_mask,
+-                    exp_noise=exp_noise,
++                return tp_sync.sync(
++                    SampleStepTokens.execute(
++                        step_logits=step_logits,
++                        temperatures=temperatures,
++                        greedy_mask=greedy_mask,
++                        exp_noise=exp_noise,
++                    )
+                 )
+             else:
+                 probs = torch.softmax(
+@@ -139,7 +143,9 @@ def sample_draft_block(
+                 probs = expect(_DRAFT_PROBS, probs)
+                 argmax_tokens = torch.argmax(step_logits, dim=-1)
+                 sampled_tokens = torch.multinomial(probs, num_samples=1).squeeze(-1)
+-                return torch.where(greedy_mask, argmax_tokens, sampled_tokens)
++                return tp_sync.sync(
++                    torch.where(greedy_mask, argmax_tokens, sampled_tokens)
++                )
+ 
+     draft_tokens, corrected_logits = markov_head.sample_block(
+         base_logits,
+@@ -164,6 +170,7 @@ class DraftBlockProposer:
+         gamma: int,
+         mask_token_id: int,
+         draft_block_spec_info,
++        tp_sync: DsparkTpSync,
+         dp_moe_sync: bool = False,
+     ) -> None:
+         self.draft_model = draft_model
+@@ -171,6 +178,7 @@ class DraftBlockProposer:
+         self.gamma = gamma
+         self._mask_token_id = mask_token_id
+         self._draft_block_spec_info = draft_block_spec_info
++        self._tp_sync = tp_sync
+         self._draft_sampler = None
+         self._dp_moe_sync = dp_moe_sync
+ 
+@@ -265,6 +273,7 @@ class DraftBlockProposer:
+                 sampling_info=sampling_info,
+                 markov_head=self.draft_model.markov_head,
+                 device=device,
++                tp_sync=self._tp_sync,
+             )
+         return DraftProposal(
+             draft_block_ids=draft_block_ids,
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
+index a01c93a7a8..e9385d5f33 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
+@@ -9,6 +9,7 @@ from sglang.kernels.ops.speculative.dspark.dspark_draft_model import (
+     SampleStepTokens,
+ )
+ from sglang.srt.environ import DsparkFoldedSampling, envs
++from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
+ from sglang.srt.utils import get_available_gpu_memory
+ 
+ logger = logging.getLogger(__name__)
+@@ -33,6 +34,7 @@ class DsparkDraftSampler:
+         gamma,
+         max_bs,
+         device,
++        tp_sync: DsparkTpSync,
+         confidence_fn=None,
+         out=None,
+         folded_sampling: bool = True,
+@@ -55,6 +57,7 @@ class DsparkDraftSampler:
+             else None
+         )
+         self.folded_sampling = folded_sampling
++        self._tp_sync = tp_sync
+         self.temperatures = None
+         self.greedy_mask = None
+         self.exp_noise = None
+@@ -103,15 +106,19 @@ class DsparkDraftSampler:
+                 # In-graph philox noise: each replay advances the generator
+                 # and redraws.
+                 noise = self.exp_noise[:bs].exponential_()
+-                return SampleStepTokens.execute(
+-                    step_logits=step_logits,
+-                    temperatures=self.temperatures[:bs],
+-                    greedy_mask=self.greedy_mask[:bs],
+-                    exp_noise=noise,
++                return self._tp_sync.sync(
++                    SampleStepTokens.execute(
++                        step_logits=step_logits,
++                        temperatures=self.temperatures[:bs],
++                        greedy_mask=self.greedy_mask[:bs],
++                        exp_noise=noise,
++                    )
+                 )
+ 
+         else:
+-            sampler = greedy_step_sampler
++
++            def sampler(step_logits: torch.Tensor, step_idx: int) -> torch.Tensor:
++                return self._tp_sync.sync(greedy_step_sampler(step_logits, step_idx))
+ 
+         draft_tokens, corrected_logits = self.markov_head.sample_block(
+             base_logits,
+@@ -134,9 +141,12 @@ class DsparkDraftSampler:
+             self.confidence_out[:bs].copy_(confidence)
+ 
+ 
+-def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
++def _resolve_folded_sampling(
++    *, model, gamma, max_bs, device, tp_rank, available_memory_gb: Optional[float]
++) -> bool:
+     """The sampling buffers are baked into the captured draft graph, so AUTO
+-    must decide before capture from a free-memory probe."""
++    must decide before capture from a free-memory probe. With TP > 1, pass
++    the group-min ``available_memory_gb`` so ranks fold identically."""
+     mode = envs.SGLANG_DSPARK_FOLDED_SAMPLING.get()
+     if mode == DsparkFoldedSampling.OFF:
+         return False
+@@ -146,8 +156,11 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
+     noise_bytes = max_bs * vocab * 4
+     logits_bytes = max_bs * gamma * vocab * model.lm_head.weight.dtype.itemsize
+     need_gb = (noise_bytes + logits_bytes) / (1 << 30)
+-    available_gb = get_available_gpu_memory(device, torch.cuda.current_device())
+-    if available_gb - need_gb >= _CAPTURE_HEADROOM_GB:
++    if available_memory_gb is None:
++        available_memory_gb = get_available_gpu_memory(
++            device, torch.cuda.current_device()
++        )
++    if available_memory_gb - need_gb >= _CAPTURE_HEADROOM_GB:
+         return True
+     if tp_rank == 0:
+         logger.warning(
+@@ -156,7 +169,7 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
+             "the eager proposal path. Set SGLANG_DSPARK_FOLDED_SAMPLING=%d "
+             "to force.",
+             need_gb,
+-            available_gb,
++            available_memory_gb,
+             int(DsparkFoldedSampling.FORCE),
+         )
+     return False
+@@ -169,6 +182,8 @@ def maybe_build_draft_sampler(
+     max_bs: int,
+     device,
+     tp_rank: int,
++    tp_sync: DsparkTpSync,
++    available_memory_gb: Optional[float] = None,
+     confidence_fn=None,
+     out=None,
+ ) -> Optional[DsparkDraftSampler]:
+@@ -187,7 +202,12 @@ def maybe_build_draft_sampler(
+     if getattr(draft_model, "markov_head", None) is None:
+         return _eager("no markov head")
+     folded_sampling = _resolve_folded_sampling(
+-        model=draft_model, gamma=gamma, max_bs=max_bs, device=device, tp_rank=tp_rank
++        model=draft_model,
++        gamma=gamma,
++        max_bs=max_bs,
++        device=device,
++        tp_rank=tp_rank,
++        available_memory_gb=available_memory_gb,
+     )
+     if tp_rank == 0:
+         logger.info(
+@@ -199,6 +219,7 @@ def maybe_build_draft_sampler(
+         gamma=gamma,
+         max_bs=max_bs,
+         device=device,
++        tp_sync=tp_sync,
+         confidence_fn=confidence_fn,
+         out=out,
+         folded_sampling=folded_sampling,
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_planner.py b/python/sglang/srt/speculative/dspark_components/dspark_planner.py
+index 2d38ab0b80..2568759b40 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_planner.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_planner.py
+@@ -35,6 +35,7 @@ from sglang.srt.speculative.dspark_components.dspark_sps import (
+ from sglang.srt.speculative.dspark_components.dspark_sts import (
+     load_sts_calibration_from_path,
+ )
++from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
+ from sglang.srt.speculative.ragged_verify import (
+     RaggedVerifyLayout,
+     RaggedVerifyMode,
+@@ -78,6 +79,7 @@ class DSparkVerifyPlanner:
+         tp_rank: int,
+         server_args: ServerArgs,
+         verify_num_draft_tokens: int,
++        tp_sync: DsparkTpSync,
+     ) -> None:
+         self.draft_model = draft_model
+         self.gamma = gamma
+@@ -85,6 +87,7 @@ class DSparkVerifyPlanner:
+         self.device = device
+         self.server_args = server_args
+         self.verify_num_draft_tokens = verify_num_draft_tokens
++        self._tp_sync = tp_sync
+         self._align_verify_tokens_to_graph_tier = (
+             server_args.speculative_dspark_align_verify_tokens_to_graph_tier
+         )
+@@ -308,9 +311,12 @@ class DSparkVerifyPlanner:
+             self._maybe_gather_dp_verify_tier(batch=batch, local_tier_num_tokens=0)
+             return
+         resolved = future_map.resolve_confidence_cpu(batch)
+-        draft_input.verify_token_budget = self._budget_from_resolved(
++        local_budget = self._budget_from_resolved(
+             resolved=resolved, req_pool_indices_cpu=batch.req_pool_indices_cpu
+         )
++        draft_input.verify_token_budget = self._tp_sync.broadcast_optional_int(
++            local_budget
++        )
+         batch.spec_verify_tier_num_tokens = local_verify_tier_num_tokens(
+             bs=batch.batch_size(),
+             verify_token_budget=draft_input.verify_token_budget,
+@@ -377,17 +383,22 @@ class DSparkVerifyPlanner:
+         prefix_lens: torch.Tensor,
+         req_pool_indices: torch.Tensor,
+     ) -> Optional[int]:
+-        """Per-step verify-token budget: under overlap it was precomputed into
+-        the draft input by prepare_verify_budget; otherwise compute it now."""
++        """Resolve one shared budget before any layout-dependent branch."""
+         if not self.schedules_verify_budget or confidence is None:
+             return None
+         if not get_schedule().disable_overlap_schedule:
+             return draft_input.verify_token_budget
+-        return self.compute_budget_sync(
++
++        # Preserve per-rank planner state before selecting one shared decision.
++        local_budget = self.compute_budget_sync(
+             confidence=confidence,
+             prefix_lens=prefix_lens,
+             req_pool_indices=req_pool_indices,
+         )
++        draft_input.verify_token_budget = self._tp_sync.broadcast_optional_int(
++            local_budget
++        )
++        return draft_input.verify_token_budget
+ 
+     def confidence_budget_prepare(self):
+         if not self.schedules_verify_budget:
+@@ -589,6 +600,7 @@ class DSparkVerifyPlanner:
+             budget=budget,
+             cfg=self._schedule_cfg,
+         ).to(device=device, dtype=torch.int32)
++        self._tp_sync.sync(verify_lens)
+ 
+         if resolve_level() >= InvariantCheckLevel.WARN:
+             verify_lens_64 = verify_lens.to(torch.int64)
+@@ -608,12 +620,6 @@ class DSparkVerifyPlanner:
+                 verify_lens=verify_lens,
+             )
+ 
+-        broadcast_group, group_size = verify_lens_broadcast_group(
+-            tp_size=get_parallel().tp_size
+-        )
+-        if group_size > 1:
+-            broadcast_group.broadcast(verify_lens, src=0)
+-
+         return verify_lens
+ 
+     def _log_verify_lens_decision(
+@@ -766,12 +772,6 @@ def uniform_ragged_layout(
+     )
+ 
+ 
+-def verify_lens_broadcast_group(*, tp_size: int) -> tuple:
+-    if is_dp_attention_enabled():
+-        return get_parallel().attn_tp_group, get_parallel().attn_tp_size
+-    return get_tp_group(), tp_size
+-
+-
+ def verify_layout_grid(
+     *,
+     verify_lens_cpu: list[int],
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_tp.py b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
+new file mode 100644
+index 0000000000..36ec231ac1
+--- /dev/null
++++ b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
+@@ -0,0 +1,51 @@
++from __future__ import annotations
++
++from typing import Optional
++
++import torch
++
++_OPTIONAL_INT_NONE = -1
++_OPTIONAL_INT_INVALID = -2
++
++
++class DsparkTpSync:
++    def __init__(self, tp_group) -> None:
++        self._tp_group = tp_group
++        self._enabled = tp_group.world_size > 1
++        self._optional_int_buffer = (
++            torch.empty((1,), dtype=torch.int64) if self._enabled else None
++        )
++
++    def sync(self, values: torch.Tensor) -> torch.Tensor:
++        if not self._enabled:
++            return values
++        return self._tp_group.broadcast_capture_safe(values, src=0)
++
++    def broadcast_optional_int(self, value: Optional[int]) -> Optional[int]:
++        if not self._enabled:
++            if value is not None and value < 0:
++                raise RuntimeError(f"DSpark received invalid optional integer {value}.")
++            return value
++        if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
++            raise RuntimeError("DSpark CPU decisions cannot run in CUDA graph capture.")
++
++        packet = self._optional_int_buffer
++        assert packet is not None
++        if self._tp_group.rank_in_group == 0:
++            if value is None:
++                encoded = _OPTIONAL_INT_NONE
++            else:
++                encoded = value if value >= 0 else _OPTIONAL_INT_INVALID
++            packet.fill_(encoded)
++        torch.distributed.broadcast(
++            packet,
++            src=self._tp_group.ranks[0],
++            group=self._tp_group.cpu_group,
++        )
++        received = int(packet.item())
++        if received < _OPTIONAL_INT_NONE:
++            raise RuntimeError(
++                f"DSpark received invalid optional integer {received} from its "
++                "tensor-parallel source rank."
++            )
++        return None if received == _OPTIONAL_INT_NONE else received
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_verify.py b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
+index 281937848a..be99f2470a 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_verify.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
+@@ -40,6 +40,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
+     VerifyWindow,
+     apply_logits_adjustments_strided,
+ )
++from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
+ from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout
+ from sglang.srt.speculative.spec_utils import (
+     SIMULATE_ACC_METHOD,
+@@ -83,6 +84,7 @@ class TargetVerifyExecutor:
+         verify_num_draft_tokens: int,
+         model_runner,
+         kv_injector: TargetHiddenKvInjector,
++        tp_sync: DsparkTpSync,
+         verify_epilogue=None,
+         simulate_acc_len: float = 0.0,
+     ) -> None:
+@@ -91,6 +93,7 @@ class TargetVerifyExecutor:
+         self.verify_num_draft_tokens = verify_num_draft_tokens
+         self.model_runner = model_runner
+         self.kv_injector = kv_injector
++        self._tp_sync = tp_sync
+         self.verify_epilogue = verify_epilogue
+         self._verify_backend_self_adds_seq_lens_cache: Optional[bool] = None
+         self._simulate_acc_len = float(simulate_acc_len)
+@@ -135,6 +138,10 @@ class TargetVerifyExecutor:
+                 bs=bs, dtype=correct_len.dtype, device=correct_len.device
+             )
+ 
++        self._tp_sync.sync(correct_len)
++        self._tp_sync.sync(bonus)
++        self._tp_sync.sync(cap_trim_lens)
++
+         finalized = FinalizeAcceptLens.execute(
+             correct_len=correct_len,
+             cap_trim_lens=cap_trim_lens,
+@@ -481,12 +488,14 @@ class DsparkVerifyEpilogue:
+         max_bs: int,
+         verify_num_draft_tokens: int,
+         device,
++        tp_sync: DsparkTpSync,
+         commit_ctx: Optional[CommitInjectCtx] = None,
+     ) -> None:
+         self.max_bs = int(max_bs)
+         self.stride = int(verify_num_draft_tokens)
+         self.gamma = self.stride - 1
+         self.commit_ctx = commit_ctx
++        self._tp_sync = tp_sync
+         self.inject_gate_buf = torch.zeros((1,), dtype=torch.int32, device=device)
+         self.verify_lens_buf = torch.zeros(
+             (self.max_bs,), dtype=torch.int64, device=device
+@@ -631,6 +640,9 @@ class DsparkVerifyEpilogue:
+             verify_num_draft_tokens=self.stride,
+             cutoff_verify_lens=verify_lens,
+         )
++        self._tp_sync.sync(correct_len)
++        self._tp_sync.sync(bonus)
++        self._tp_sync.sync(cap_trim_lens)
+         finalized = finalize_accept_lens_triton(
+             correct_len=correct_len,
+             cap_trim_lens=cap_trim_lens,
+diff --git a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
+index 3a8bb71513..154dd79958 100644
+--- a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
++++ b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
+@@ -14,6 +14,7 @@ from sglang.srt.environ import envs
+ from sglang.srt.managers.schedule_batch import ScheduleBatch
+ from sglang.srt.managers.scheduler import GenerationBatchResult
+ from sglang.srt.managers.tp_worker import TpModelWorker
++from sglang.srt.model_executor.cuda_graph_config import Backend
+ from sglang.srt.model_executor.forward_batch_info import (
+     CaptureHiddenMode,
+     compute_position,
+@@ -53,6 +54,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
+     dp_global_verify_tier_num_tokens,
+     idle_ragged_layout,
+ )
++from sglang.srt.speculative.dspark_components.dspark_tp import DsparkTpSync
+ from sglang.srt.speculative.dspark_components.dspark_verify import (
+     CommitInjectCtx,
+     DsparkVerifyEpilogue,
+@@ -65,7 +67,7 @@ from sglang.srt.speculative.spec_utils import (
+     draft_tp_context,
+     prepare_mamba_track_for_verify,
+ )
+-from sglang.srt.utils import get_available_gpu_memory, is_cuda
++from sglang.srt.utils import get_available_gpu_memory, is_cuda, is_cuda_alike
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -97,7 +99,8 @@ class DSparkWorkerV2(BaseSpecWorker):
+         )
+         self._is_pd_prefill = server_args.disaggregation_mode == "prefill"
+         self._decode_graph_allowed = (
+-            not server_args.disable_cuda_graph and not self._is_pd_prefill
++            get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
++            and not self._is_pd_prefill
+         )
+         if (
+             server_args.enable_dp_attention
+@@ -153,6 +156,18 @@ class DSparkWorkerV2(BaseSpecWorker):
+         self.speculative_num_draft_tokens = self.verify_num_draft_tokens
+         self._mask_token_id = runtime_config.mask_token_id
+ 
++        parallel = get_parallel()
++        self._tp_sync = DsparkTpSync(
++            parallel.attn_tp_group
++            if server_args.enable_dp_attention
++            else parallel.tp_group
++        )
++        self._draft_graph_group = (
++            parallel.attn_tp_group
++            if self._draft_dp_context_enabled
++            else parallel.tp_group
++        )
++
+         if self.ps.tp_rank == 0:
+             logger.info(
+                 "Initialized DSpark draft runner. attention_backend=%s, model=%s, "
+@@ -192,6 +207,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+             tp_rank=self.ps.tp_rank,
+             server_args=self.server_args,
+             verify_num_draft_tokens=self.verify_num_draft_tokens,
++            tp_sync=self._tp_sync,
+         )
+         if (
+             server_args.enable_dp_attention
+@@ -220,6 +236,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+             gamma=self.gamma,
+             mask_token_id=self._mask_token_id,
+             draft_block_spec_info=self._draft_block_spec_info,
++            tp_sync=self._tp_sync,
+             dp_moe_sync=self._draft_is_moe and server_args.enable_dp_attention,
+         )
+         self._verify_epilogue = None
+@@ -232,6 +249,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+                 max_bs=max(server_args.cuda_graph_config.decode.bs),
+                 verify_num_draft_tokens=self.verify_num_draft_tokens,
+                 device=self.device,
++                tp_sync=self._tp_sync,
+                 commit_ctx=CommitInjectCtx(
+                     draft_model=self.draft_model,
+                     block_pos_offsets=self._block_pos_offsets,
+@@ -270,6 +288,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+             verify_num_draft_tokens=self.verify_num_draft_tokens,
+             model_runner=self.model_runner,
+             kv_injector=self._kv_injector,
++            tp_sync=self._tp_sync,
+             verify_epilogue=self._verify_epilogue,
+             simulate_acc_len=self._simulate_acc_len,
+         )
+@@ -339,8 +358,17 @@ class DSparkWorkerV2(BaseSpecWorker):
+ 
+     def init_cuda_graphs(self):
+         capture_decode_cuda_graph = self._decode_graph_allowed
+-        if is_cuda() and capture_decode_cuda_graph:
+-            available_mem = get_available_gpu_memory(self.device, self.gpu_id)
++        available_mem = None
++        if is_cuda_alike() and capture_decode_cuda_graph:
++            graph_group = self._draft_graph_group
++            available_mem = get_available_gpu_memory(
++                self.device,
++                self.gpu_id,
++                distributed=graph_group.world_size > 1,
++                cpu_group=(
++                    graph_group.cpu_group if graph_group.world_size > 1 else None
++                ),
++            )
+             if available_mem < 1.0:
+                 capture_decode_cuda_graph = False
+                 logger.warning(
+@@ -350,7 +378,9 @@ class DSparkWorkerV2(BaseSpecWorker):
+                 )
+         with self._draft_context():
+             if capture_decode_cuda_graph:
+-                self._draft_sampler = self._maybe_build_draft_sampler()
++                self._draft_sampler = self._maybe_build_draft_sampler(
++                    available_memory_gb=available_mem
++                )
+                 if self._draft_sampler is not None:
+                     self.draft_model_runner.capture_tail_hooks.append(
+                         make_draft_sampler_capture_hook(self._draft_sampler)
+@@ -360,13 +390,15 @@ class DSparkWorkerV2(BaseSpecWorker):
+                 capture_decode_cuda_graph=capture_decode_cuda_graph
+             )
+ 
+-    def _maybe_build_draft_sampler(self):
++    def _maybe_build_draft_sampler(self, *, available_memory_gb: Optional[float]):
+         return maybe_build_draft_sampler(
+             draft_model=self.draft_model,
+             gamma=self.gamma,
+             max_bs=max(get_exec().graph.cuda_graph_config.decode.bs),
+             device=self.device,
+             tp_rank=self.ps.tp_rank,
++            tp_sync=self._tp_sync,
++            available_memory_gb=available_memory_gb,
+             confidence_fn=(
+                 self._verify_planner.compute_confidence_tensor
+                 if self._verify_planner.carries_confidence
+@@ -431,6 +463,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+         )
+         logits_output = batch_output.logits_output
+         next_token_ids = batch_output.next_token_ids
++        self._tp_sync.sync(next_token_ids)
+         batch_output.new_seq_lens = batch.seq_lens
+         if on_publish is not None:
+             on_publish(batch_output.new_seq_lens)
+diff --git a/python/sglang/srt/speculative/spec_utils.py b/python/sglang/srt/speculative/spec_utils.py
+index 19a35c66b4..287efd9656 100644
+--- a/python/sglang/srt/speculative/spec_utils.py
++++ b/python/sglang/srt/speculative/spec_utils.py
+@@ -1037,6 +1037,17 @@ def spec_prepare_for_decode(batch: ScheduleBatch) -> None:
+             max_speculative_num_draft_tokens(),
+         )
+     if batch.spec_algorithm.is_dflash_family():
++        # Mirror eagle_prepare_for_decode: evict out-of-window SWA KV and
++        # advance decode_batch_idx (the eviction gate requires >= 1). Without
++        # this, hybrid-SWA models retain SWA KV for every generated token and
++        # a single request exhausts the SWA pool after
++        # swa_full_tokens_ratio * max_total_num_tokens generated tokens, at
++        # which point the scheduler retracts it. Pool sizing already assumes
++        # this eviction runs (pool_configurator: trailing_tokens =
++        # window + eviction_interval * draft_tokens + page_size).
++        batch.maybe_evict_swa()
++        for r in batch.reqs:
++            r.decode_batch_idx += 1
+         batch.spec_info.prepare_for_decode(batch)
+     else:
+         from sglang.srt.speculative.eagle_utils import eagle_prepare_for_decode
+diff --git a/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
+new file mode 100644
+index 0000000000..5aee3f4dcc
+--- /dev/null
++++ b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
+@@ -0,0 +1,145 @@
++from __future__ import annotations
++
++import pytest
++import torch
++
++from sglang.kernels.ops.attention.dsv4 import silu_and_mul_contig_post_quant
++from sglang.kernels.ops.quantization.fp8_kernel import (
++    create_per_token_group_quant_fp8_output_scale,
++    sglang_per_token_group_quant_fp8,
++)
++from sglang.test.ci.ci_register import register_cuda_ci
++
++register_cuda_ci(est_time=30, stage="base-b-kernel-unit", runner_config="1-gpu-large")
++register_cuda_ci(est_time=30, suite="nightly-kernel-1-gpu", nightly=True)
++
++GROUP_SIZE = 128
++
++
++def _reference(x: torch.Tensor, swiglu_limit: float | None, ue8m0: bool):
++    n = x.shape[1]
++    gate, up = x[:, : n // 2].clone(), x[:, n // 2 :].clone()
++    if swiglu_limit is not None:
++        gate.clamp_(max=swiglu_limit)
++        up.clamp_(min=-swiglu_limit, max=swiglu_limit)
++    act = (torch.nn.functional.silu(gate.float()) * up.float()).to(torch.bfloat16)
++    return sglang_per_token_group_quant_fp8(
++        act,
++        GROUP_SIZE,
++        column_major_scales=ue8m0,
++        scale_tma_aligned=ue8m0,
++        scale_ue8m0=ue8m0,
++    )
++
++
++@pytest.mark.parametrize("ue8m0", [False, True])
++@pytest.mark.parametrize("swiglu_limit", [None, 7.0])
++@pytest.mark.parametrize("m", [128, 512])
++def test_matches_unfused_reference(m: int, swiglu_limit: float | None, ue8m0: bool):
++    torch.manual_seed(5)
++    n = 2048
++    x = torch.randn(m, n, device="cuda", dtype=torch.bfloat16) * 3
++
++    out = torch.empty(m, n // 2, device="cuda", dtype=torch.float8_e4m3fn)
++    out_scale = create_per_token_group_quant_fp8_output_scale(
++        x_shape=(m, n // 2),
++        device=x.device,
++        group_size=GROUP_SIZE,
++        column_major_scales=ue8m0,
++        scale_tma_aligned=ue8m0,
++        scale_ue8m0=ue8m0,
++    )
++    silu_and_mul_contig_post_quant(
++        input=x,
++        output=out,
++        output_scale=out_scale,
++        quant_group_size=GROUP_SIZE,
++        scale_ue8m0=ue8m0,
++        transposed=ue8m0,
++        swiglu_limit=swiglu_limit,
++        swizzle=False,
++    )
++
++    ref_q, ref_s = _reference(x, swiglu_limit, ue8m0)
++    # fp8 values may differ where the rounding of the group scale differs;
++    # require near-total byte agreement rather than exact.
++    byte_match = (
++        (out.view(torch.uint8) == ref_q.view(torch.uint8)).float().mean().item()
++    )
++    assert byte_match > 0.95, f"fp8 byte match {byte_match:.4f}"
++    if ue8m0:
++        # Packed UE8M0 exponents are directly comparable.
++        scale_match = (
++            (
++                out_scale.contiguous().view(torch.uint8)
++                == ref_s.contiguous().view(torch.uint8)
++            )
++            .float()
++            .mean()
++            .item()
++        )
++        assert scale_match > 0.95, f"scale byte match {scale_match:.4f}"
++    else:
++        # fp32 scale storage conventions differ between the two kernels, and
++        # clamp-boundary values may round differently; require the fused
++        # kernel to be as accurate as the unfused path against the float
++        # reference rather than bitwise-equal to it.
++        def dequant(q, s):
++            return q.float() * s.float().repeat_interleave(GROUP_SIZE, dim=1)
++
++        gate, up = x[:, : n // 2].clone(), x[:, n // 2 :].clone()
++        if swiglu_limit is not None:
++            gate.clamp_(max=swiglu_limit)
++            up.clamp_(min=-swiglu_limit, max=swiglu_limit)
++        exact = torch.nn.functional.silu(gate.float()) * up.float()
++        fused_err = (dequant(out, out_scale) - exact).abs().max().item()
++        unfused_err = (dequant(ref_q, ref_s) - exact).abs().max().item()
++        assert (
++            fused_err < unfused_err * 1.5 + 1e-3
++        ), f"fused dequant err {fused_err:.4f} vs unfused {unfused_err:.4f}"
++
++
++def test_swizzled_layout_differs_from_standard():
++    """The swizzled output layout is NOT what the SM120 DeepGEMM contiguous
++    grouped GEMM consumes; feeding it there produced garbage (GSM8K 1.00 ->
++    0.40). Pin the standard layout as the contract."""
++    torch.manual_seed(5)
++    m, n = 512, 2048
++    x = torch.randn(m, n, device="cuda", dtype=torch.bfloat16) * 3
++
++    outs = {}
++    for swizzle in (False, True):
++        out = torch.empty(m, n // 2, device="cuda", dtype=torch.float8_e4m3fn)
++        out_scale = create_per_token_group_quant_fp8_output_scale(
++            x_shape=(m, n // 2),
++            device=x.device,
++            group_size=GROUP_SIZE,
++            column_major_scales=True,
++            scale_tma_aligned=True,
++            scale_ue8m0=True,
++        )
++        silu_and_mul_contig_post_quant(
++            input=x,
++            output=out,
++            output_scale=out_scale,
++            quant_group_size=GROUP_SIZE,
++            scale_ue8m0=True,
++            transposed=True,
++            swiglu_limit=7.0,
++            swizzle=swizzle,
++        )
++        outs[swizzle] = out
++
++    ref_q, _ = _reference(x, 7.0, True)
++    std_match = (
++        (outs[False].view(torch.uint8) == ref_q.view(torch.uint8)).float().mean().item()
++    )
++    swz_match = (
++        (outs[True].view(torch.uint8) == ref_q.view(torch.uint8)).float().mean().item()
++    )
++    assert std_match > 0.95, f"standard layout must match reference: {std_match:.4f}"
++    assert swz_match < 0.5, (
++        "swizzled layout unexpectedly matches the standard reference; "
++        f"({swz_match:.4f}) — if the kernel changed, revisit use_swizzle in "
++        "DeepGemmRunnerCore"
++    )
+diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+index 63330b441d..53a7af48ce 100644
+--- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
++++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
+@@ -1156,6 +1156,39 @@ class ServingChatTestCase(unittest.TestCase):
+ 
+                 self.chat._process_messages(req, is_multimodal=False)
+ 
++    def test_dsv4_tool_injection_excludes_unset_defaults(self):
++        """DSV4 receives only fields set in the request tool schema."""
++        from sglang.srt.entrypoints.openai import encoding_dsv4
++
++        self.template_manager.chat_template_name = None
++        self.template_manager.jinja_template_content_format = "string"
++        self.chat.chat_encoding_spec = "dsv4"
++        self.chat._dsv4_reasoning_effort_profile = "preview"
++        tool = {
++            "type": "function",
++            "function": {
++                "name": "get_weather",
++                "description": "Get the weather.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"city": {"type": "string"}},
++                },
++            },
++        }
++        req = ChatCompletionRequest(
++            model="x",
++            messages=[{"role": "user", "content": "What is the weather?"}],
++            tools=[tool],
++        )
++
++        with patch.object(
++            encoding_dsv4, "encode_messages", return_value="prompt"
++        ) as mock_encode_messages:
++            self.chat._process_messages(req, is_multimodal=False)
++
++        injected_tools = mock_encode_messages.call_args.args[0][0]["tools"]
++        self.assertEqual(injected_tools, [tool])
++
+     def test_stop_str_isolation_between_requests(self):
+         """Test that stop strings from one request don't affect subsequent requests.
+ 
+diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
+new file mode 100644
+index 0000000000..7ef29c2ab4
+--- /dev/null
++++ b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
+@@ -0,0 +1,138 @@
++"""Tests for DeepGEMM warmup memory-budget selection."""
++
++import unittest
++from contextlib import ExitStack
++from typing import Optional
++from unittest.mock import MagicMock, call, patch
++
++from sglang.srt.layers.deep_gemm_wrapper import compile_utils
++from sglang.srt.layers.deep_gemm_wrapper.compile_utils import (
++    DeepGemmKernelType,
++    _BaseWarmupExecutor,
++    _compile_deep_gemm_one_type_all,
++    _select_max_m_within_budget,
++)
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=2, suite="base-a-test-cpu")
++
++_M_LIST = list(range(1, 16 * 1024 + 1))
++_KERNEL_TYPE = DeepGemmKernelType.GEMM_NT_F8F8BF16
++
++
++def _select(memory_budget: float) -> Optional[int]:
++    return _select_max_m_within_budget(
++        _KERNEL_TYPE,
++        m_list=_M_LIST,
++        n=4096,
++        k=7168,
++        num_groups=1,
++        memory_budget=memory_budget,
++    )
++
++
++class TestSelectMaxMWithinBudget(CustomTestCase):
++    def _patch_memory_requirement(self, fn):
++        return patch.object(
++            _BaseWarmupExecutor, "get_memory_requirement", staticmethod(fn)
++        )
++
++    def test_original_max_m_fits(self):
++        with self._patch_memory_requirement(lambda *a, **kw: 1.0):
++            self.assertEqual(_select(memory_budget=8.0), max(_M_LIST))
++
++    def test_reduces_below_4096(self):
++        with self._patch_memory_requirement(lambda *a, max_m, **kw: max_m / 1024):
++            self.assertEqual(_select(memory_budget=2.5), 2048)
++
++    def test_returns_none_when_min_m_does_not_fit(self):
++        with self._patch_memory_requirement(lambda *a, **kw: 100.0):
++            self.assertIsNone(_select(memory_budget=8.0))
++
++
++class TestCompileDeepGemmOneTypeAll(CustomTestCase):
++    """Covers how the caller reacts to the max_m selection outcome."""
++
++    def _patch_common(self, stack, available_memory: float, memory_requirement):
++        stack.enter_context(
++            patch.object(
++                _BaseWarmupExecutor,
++                "get_memory_requirement",
++                staticmethod(memory_requirement),
++            )
++        )
++        saved_context = object()
++        stack.enter_context(
++            patch.object(
++                compile_utils,
++                "disable_symmetric_memory_context",
++                return_value=saved_context,
++            )
++        )
++        restore = stack.enter_context(
++            patch.object(compile_utils, "restore_symmetric_memory_context")
++        )
++        stack.enter_context(
++            patch.object(
++                compile_utils, "get_available_gpu_memory", return_value=available_memory
++            )
++        )
++        return saved_context, restore
++
++    def test_skips_warmup_when_min_m_does_not_fit(self):
++        with ExitStack() as stack:
++            saved_context, restore = self._patch_common(
++                stack, available_memory=1.0, memory_requirement=lambda *a, **kw: 100.0
++            )
++            create = stack.enter_context(
++                patch.object(_BaseWarmupExecutor, "create", MagicMock())
++            )
++            with self.assertLogs(compile_utils.logger, level="WARNING") as logs:
++                _compile_deep_gemm_one_type_all(
++                    kernel_type=_KERNEL_TYPE,
++                    n=4096,
++                    k=7168,
++                    num_groups=1,
++                    m_list=[1024, 2048, 4096],
++                )
++
++        create.assert_not_called()
++        self.assertIn("skipping warmup", "\n".join(logs.output))
++        restore.assert_called_once_with(saved_context)
++
++    def test_warms_up_reduced_m_list(self):
++        with ExitStack() as stack:
++            saved_context, restore = self._patch_common(
++                stack,
++                available_memory=2.5,
++                memory_requirement=lambda *a, max_m, **kw: max_m / 1024,
++            )
++            executor = MagicMock()
++            create = stack.enter_context(
++                patch.object(_BaseWarmupExecutor, "create", MagicMock())
++            )
++            create.return_value = executor
++            stack.enter_context(
++                patch.object(compile_utils, "deep_gemm", MagicMock(), create=True)
++            )
++            stack.enter_context(patch("torch.cuda.current_stream"))
++            stack.enter_context(patch("torch.cuda.empty_cache"))
++
++            _compile_deep_gemm_one_type_all(
++                kernel_type=_KERNEL_TYPE,
++                n=4096,
++                k=7168,
++                num_groups=1,
++                m_list=[1024, 2048, 4096],
++            )
++
++        create.assert_called_once_with(
++            _KERNEL_TYPE, max_m=2048, n=4096, k=7168, num_groups=1
++        )
++        self.assertEqual(executor.execute.call_args_list, [call(m=1024), call(m=2048)])
++        restore.assert_called_once_with(saved_context)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
+index 90a52cea5d..4a63229219 100644
+--- a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
++++ b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
+@@ -56,6 +56,9 @@ _OWNER_SITES = {
+     ("mem_cache/allocation.py", "alloc_for_extend", "evict"): 1,
+     ("mem_cache/allocation.py", "alloc_for_extend", "kv_allocated_len"): 1,
+     ("mem_cache/allocation.py", "alloc_for_decode", "evict"): 1,
++    # spec: the dflash-family branch mirrors eagle_prepare_for_decode.
++    ("speculative/spec_utils.py", "spec_prepare_for_decode", "decode_batch_idx"): 1,
++    ("speculative/spec_utils.py", "spec_prepare_for_decode", "evict"): 1,
+     ("mem_cache/allocation.py", "alloc_for_decode", "kv_allocated_len"): 1,
+     # spec v2: no pre-claim; resolve commits the full accepted run uniformly.
+     # kv_allocated_len for spec v2 draft decode (eagle + dflash) is settled
+diff --git a/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
+new file mode 100644
+index 0000000000..5b792acc56
+--- /dev/null
++++ b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
+@@ -0,0 +1,82 @@
++"""spec_prepare_for_decode must run SWA eviction on the dflash-family path.
++
++The dflash-family branch (DFLASH, DSPARK) historically skipped both
++``maybe_evict_swa`` and the ``decode_batch_idx`` tick that
++``eagle_prepare_for_decode`` performs. On hybrid-SWA models that retained
++SWA KV for every generated token, so a single request exhausted the SWA pool
++after ``swa_full_tokens_ratio * max_total_num_tokens`` generated tokens and
++was retracted by the scheduler. Pool sizing assumes the eviction runs
++(``pool_configurator``: ``trailing_tokens = sliding_window +
++eviction_interval * draft_tokens + page_size``).
++"""
++
++import unittest
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=1, suite="base-a-test-cpu")
++
++
++def _make_batch(spec_is_dflash_family: bool):
++    batch = MagicMock()
++    batch.spec_algorithm.is_dflash_family.return_value = spec_is_dflash_family
++    req = SimpleNamespace(decode_batch_idx=0)
++    batch.reqs = [req]
++    return batch, req
++
++
++class TestSpecPrepareSwaEviction(CustomTestCase):
++    def _run(self, batch):
++        from sglang.srt.speculative import spec_utils
++
++        with patch.object(
++            spec_utils, "mamba_extra_buffer_lazy_enabled", return_value=False
++        ):
++            spec_utils.spec_prepare_for_decode(batch)
++
++    def test_dflash_family_evicts_and_ticks(self):
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        self._run(batch)
++        batch.maybe_evict_swa.assert_called_once_with()
++        self.assertEqual(req.decode_batch_idx, 1)
++        batch.spec_info.prepare_for_decode.assert_called_once_with(batch)
++
++    def test_tick_advances_every_iteration(self):
++        """decode_batch_idx is a clock, not a flag: it must keep advancing so
++        the SWA leaf-lock release gate (decode_batch_idx >= sliding_window_size)
++        can fire."""
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        self._run(batch)
++        self._run(batch)
++        self.assertEqual(req.decode_batch_idx, 2)
++        self.assertEqual(batch.maybe_evict_swa.call_count, 2)
++
++    def test_dflash_family_evicts_before_tick(self):
++        """The overlap-scheduler gate (decode_batch_idx >= 1) must see the
++        pre-tick value, exactly as in eagle_prepare_for_decode."""
++        batch, req = _make_batch(spec_is_dflash_family=True)
++        seen_idx = []
++        batch.maybe_evict_swa.side_effect = lambda: seen_idx.append(
++            req.decode_batch_idx
++        )
++        self._run(batch)
++        self.assertEqual(seen_idx, [0])
++        self.assertEqual(req.decode_batch_idx, 1)
++
++    def test_eagle_path_unchanged(self):
++        batch, req = _make_batch(spec_is_dflash_family=False)
++        with patch(
++            "sglang.srt.speculative.eagle_utils.eagle_prepare_for_decode"
++        ) as eagle_prep:
++            self._run(batch)
++        eagle_prep.assert_called_once_with(batch)
++        # The dflash-branch tick must not run on the eagle path.
++        self.assertEqual(req.decode_batch_idx, 0)
++        batch.spec_info.prepare_for_decode.assert_not_called()
++
++
++if __name__ == "__main__":
++    unittest.main()

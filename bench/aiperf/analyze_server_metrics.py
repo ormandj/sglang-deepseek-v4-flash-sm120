@@ -86,13 +86,31 @@ def _metric_samples(
     required_labels: dict[str, str] | None = None,
     allowed_labels: dict[str, set[str]] | None = None,
 ) -> list[float]:
+    return [
+        value
+        for _, value in _labeled_metric_samples(
+            record,
+            names,
+            required_labels=required_labels,
+            allowed_labels=allowed_labels,
+        )
+    ]
+
+
+def _labeled_metric_samples(
+    record: dict[str, Any],
+    names: Sequence[str],
+    *,
+    required_labels: dict[str, str] | None = None,
+    allowed_labels: dict[str, set[str]] | None = None,
+) -> list[tuple[dict[str, str], float]]:
     samples: list[dict[str, Any]] = []
     for name in names:
         candidate = record["metrics"].get(name)
         if candidate:
             samples = candidate
             break
-    values: list[float] = []
+    values: list[tuple[dict[str, str], float]] = []
     for sample in samples:
         labels = {
             str(key): str(value) for key, value in sample.get("labels", {}).items()
@@ -110,8 +128,156 @@ def _metric_samples(
         except (KeyError, TypeError, ValueError):
             continue
         if math.isfinite(value):
-            values.append(value)
+            values.append((labels, value))
     return values
+
+
+def _uses_distributed_request_ownership(
+    records: Sequence[dict[str, Any]],
+) -> bool:
+    dp_ranks: set[str] = set()
+    for record in records:
+        for labels, _ in _labeled_metric_samples(
+            record, ("sglang:num_running_reqs",)
+        ):
+            if "dp_rank" in labels:
+                dp_ranks.add(labels["dp_rank"])
+    return len(dp_ranks) > 1
+
+
+def _rank_metric_values(
+    record: dict[str, Any],
+    names: Sequence[str],
+    *,
+    distributed_request_ownership: bool,
+    required_labels: dict[str, str] | None = None,
+    allowed_labels: dict[str, set[str]] | None = None,
+) -> list[float]:
+    if not distributed_request_ownership:
+        labels = {**(required_labels or {}), "tp_rank": "0"}
+        return _metric_samples(
+            record,
+            names,
+            required_labels=labels,
+            allowed_labels=allowed_labels,
+        )
+
+    samples = _labeled_metric_samples(
+        record,
+        names,
+        required_labels=required_labels,
+        allowed_labels=allowed_labels,
+    )
+    by_series: dict[tuple[tuple[str, str], ...], list[float]] = {}
+    for labels, value in samples:
+        if "dp_rank" not in labels:
+            continue
+        series_key = tuple(
+            sorted(
+                (key, value)
+                for key, value in labels.items()
+                if key not in {"tp_rank", "pp_rank", "moe_ep_rank"}
+            )
+        )
+        by_series.setdefault(series_key, []).append(value)
+    # A logical series can be exported by multiple model-parallel workers for
+    # one DP rank. Those samples are replicas. Distinct modes remain distinct
+    # series so callers can intentionally sum them.
+    return [max(values) for values in by_series.values()]
+
+
+def _rank_series(
+    records: Iterable[dict[str, Any]],
+    names: Sequence[str],
+    *,
+    distributed_request_ownership: bool,
+    required_labels: dict[str, str] | None = None,
+    allowed_labels: dict[str, set[str]] | None = None,
+    reduction: str,
+) -> list[Point]:
+    points: list[Point] = []
+    for record in records:
+        values = _rank_metric_values(
+            record,
+            names,
+            distributed_request_ownership=distributed_request_ownership,
+            required_labels=required_labels,
+            allowed_labels=allowed_labels,
+        )
+        if not values:
+            continue
+        if reduction == "sum":
+            value = sum(values)
+        elif reduction == "max":
+            value = max(values)
+        else:
+            raise ValueError(f"unknown reduction: {reduction}")
+        points.append(Point(int(record["timestamp_ns"]), value))
+    return points
+
+
+def _active_context_series(
+    records: Iterable[dict[str, Any]],
+    *,
+    distributed_request_ownership: bool,
+) -> list[Point]:
+    if not distributed_request_ownership:
+        return _rank_series(
+            records,
+            ("sglang:decode_sum_seq_lens",),
+            distributed_request_ownership=False,
+            reduction="sum",
+        )
+
+    points: list[Point] = []
+    for record in records:
+        running_samples = _labeled_metric_samples(
+            record, ("sglang:num_running_reqs",)
+        )
+        context_samples = _labeled_metric_samples(
+            record, ("sglang:decode_sum_seq_lens",)
+        )
+        running_by_rank: dict[str, float] = {}
+        context_by_rank: dict[str, float] = {}
+        for labels, value in running_samples:
+            if "dp_rank" in labels:
+                running_by_rank[labels["dp_rank"]] = max(
+                    value, running_by_rank.get(labels["dp_rank"], value)
+                )
+        for labels, value in context_samples:
+            if "dp_rank" in labels:
+                context_by_rank[labels["dp_rank"]] = max(
+                    value, context_by_rank.get(labels["dp_rank"], value)
+                )
+        active_ranks = [rank for rank, value in running_by_rank.items() if value > 0]
+        if not active_ranks or any(rank not in context_by_rank for rank in active_ranks):
+            continue
+        points.append(
+            Point(
+                int(record["timestamp_ns"]),
+                sum(context_by_rank[rank] for rank in active_ranks),
+            )
+        )
+    return points
+
+
+def _active_rank_count_series(
+    records: Iterable[dict[str, Any]],
+    *,
+    distributed_request_ownership: bool,
+) -> list[Point]:
+    points: list[Point] = []
+    for record in records:
+        values = _rank_metric_values(
+            record,
+            ("sglang:num_running_reqs",),
+            distributed_request_ownership=distributed_request_ownership,
+        )
+        if values:
+            points.append(
+                Point(int(record["timestamp_ns"]), sum(value > 0 for value in values))
+            )
+    return points
 
 
 def _series(
@@ -142,15 +308,17 @@ def _series(
     return points
 
 
-def _series_or_zero_when_label_never_exists(
+def _rank_series_or_zero_when_label_never_exists(
     records: Sequence[dict[str, Any]],
     names: Sequence[str],
     *,
+    distributed_request_ownership: bool,
     required_labels: dict[str, str],
 ) -> tuple[list[Point], bool]:
-    points = _series(
+    points = _rank_series(
         records,
         names,
+        distributed_request_ownership=distributed_request_ownership,
         required_labels=required_labels,
         reduction="sum",
     )
@@ -237,11 +405,18 @@ def _summarize_gauge(points: Sequence[Point]) -> dict[str, float | int]:
 
 
 def _optional_gauge(
-    records: Sequence[dict[str, Any]], names: Sequence[str]
+    records: Sequence[dict[str, Any]],
+    names: Sequence[str],
+    *,
+    distributed_request_ownership: bool,
+    reduction: str,
 ) -> dict[str, float | int] | None:
-    points = _series(records, names, required_labels={"tp_rank": "0"}, reduction="max")
-    if not points:
-        points = _series(records, names, reduction="max")
+    points = _rank_series(
+        records,
+        names,
+        distributed_request_ownership=distributed_request_ownership,
+        reduction=reduction,
+    )
     return _summarize_gauge(points) if points else None
 
 
@@ -274,25 +449,28 @@ def analyze(
         for record in _load_records(jsonl_path)
         if phase_start_ns <= int(record["timestamp_ns"]) <= phase_end_ns
     ]
+    distributed_request_ownership = _uses_distributed_request_ownership(
+        all_phase_records
+    )
     context_window = average_context_lower is not None
     if context_window:
         matching_indexes: list[int] = []
         for index, record in enumerate(all_phase_records):
-            running_values = _metric_samples(
+            running_values = _rank_metric_values(
                 record,
                 ("sglang:num_running_reqs",),
-                required_labels={"tp_rank": "0"},
+                distributed_request_ownership=distributed_request_ownership,
             )
-            context_values = _metric_samples(
-                record,
-                ("sglang:decode_sum_seq_lens",),
-                required_labels={"tp_rank": "0"},
+            context_points = _active_context_series(
+                (record,),
+                distributed_request_ownership=distributed_request_ownership,
             )
-            if not running_values or not context_values:
+            if not running_values or not context_points:
                 continue
-            average_context = sum(context_values) / target_concurrency
+            running = sum(running_values)
+            average_context = context_points[0].value / target_concurrency
             if (
-                max(running_values) == target_concurrency
+                running == target_concurrency
                 and average_context_lower <= average_context <= average_context_upper
             ):
                 matching_indexes.append(index)
@@ -309,11 +487,11 @@ def analyze(
             for record in all_phase_records
             if int(record["timestamp_ns"]) >= window_start_ns
         ]
-    running_phase = _series(
+    running_phase = _rank_series(
         phase_records,
         ("sglang:num_running_reqs",),
-        required_labels={"tp_rank": "0"},
-        reduction="max",
+        distributed_request_ownership=distributed_request_ownership,
+        reduction="sum",
     )
     if not running_phase:
         raise AnalysisError("running-request gauge has no samples after settle period")
@@ -366,50 +544,51 @@ def analyze(
             f"analysis window has {len(records)} scrapes; need {minimum_samples}"
         )
 
-    decode_realtime = _series(
+    decode_realtime = _rank_series(
         records,
         ("sglang:realtime_tokens", "sglang:realtime_tokens_total"),
-        required_labels={"mode": "decode", "tp_rank": "0"},
+        distributed_request_ownership=distributed_request_ownership,
+        required_labels={"mode": "decode"},
         reduction="sum",
     )
-    decode_forward_passes = _series(
+    decode_forward_passes = _rank_series(
         records,
         ("sglang:cuda_graph_passes", "sglang:cuda_graph_passes_total"),
-        required_labels={"tp_rank": "0"},
+        distributed_request_ownership=distributed_request_ownership,
         allowed_labels={"mode": {"decode_cuda_graph", "decode_none"}},
         reduction="sum",
     )
     prefill_compute, prefill_compute_series_observed = (
-        _series_or_zero_when_label_never_exists(
+        _rank_series_or_zero_when_label_never_exists(
             records,
             ("sglang:realtime_tokens", "sglang:realtime_tokens_total"),
-            required_labels={"mode": "prefill_compute", "tp_rank": "0"},
+            distributed_request_ownership=distributed_request_ownership,
+            required_labels={"mode": "prefill_compute"},
         )
     )
     prefill_cache, prefill_cache_series_observed = (
-        _series_or_zero_when_label_never_exists(
+        _rank_series_or_zero_when_label_never_exists(
             records,
             ("sglang:realtime_tokens", "sglang:realtime_tokens_total"),
-            required_labels={"mode": "prefill_cache", "tp_rank": "0"},
+            distributed_request_ownership=distributed_request_ownership,
+            required_labels={"mode": "prefill_cache"},
         )
     )
-    running = _series(
+    running = _rank_series(
         records,
         ("sglang:num_running_reqs",),
-        required_labels={"tp_rank": "0"},
-        reduction="max",
+        distributed_request_ownership=distributed_request_ownership,
+        reduction="sum",
     )
-    queue = _series(
+    queue = _rank_series(
         records,
         ("sglang:num_queue_reqs",),
-        required_labels={"tp_rank": "0"},
-        reduction="max",
-    )
-    average_context = _series(
-        records,
-        ("sglang:decode_sum_seq_lens",),
-        required_labels={"tp_rank": "0"},
+        distributed_request_ownership=distributed_request_ownership,
         reduction="sum",
+    )
+    average_context = _active_context_series(
+        records,
+        distributed_request_ownership=distributed_request_ownership,
     )
     average_context = [
         Point(point.timestamp_ns, point.value / target_concurrency)
@@ -440,6 +619,12 @@ def analyze(
     running_summary = _summarize_gauge(running)
     queue_summary = _summarize_gauge(queue)
     average_context_summary = _summarize_gauge(average_context)
+    active_rank_summary = _summarize_gauge(
+        _active_rank_count_series(
+            records,
+            distributed_request_ownership=distributed_request_ownership,
+        )
+    )
     exact_samples = sum(point.value == target_concurrency for point in running)
     exact_fraction = exact_samples / len(running)
 
@@ -507,7 +692,11 @@ def analyze(
         "average_context_length": average_context_summary,
         "decode": {
             "target_concurrency": target_concurrency,
-            "counter_family": "sglang:realtime_tokens{mode=decode,tp_rank=0}",
+            "counter_family": (
+                "sum by dp_rank(sglang:realtime_tokens{mode=decode})"
+                if distributed_request_ownership
+                else "sglang:realtime_tokens{mode=decode,tp_rank=0}"
+            ),
             "tokens_per_second_ols": decode_slope,
             "tokens_per_second_delta": _delta_rate(decode_realtime),
             "counter_delta": decode_counter_delta,
@@ -515,15 +704,23 @@ def analyze(
         },
         "engine_work": {
             "counter_family": (
-                "sglang:cuda_graph_passes{mode=decode_cuda_graph|decode_none,tp_rank=0}"
+                "sum by dp_rank(sglang:cuda_graph_passes"
+                "{mode=decode_cuda_graph|decode_none})"
+                if distributed_request_ownership
+                else "sglang:cuda_graph_passes"
+                "{mode=decode_cuda_graph|decode_none,tp_rank=0}"
             ),
             "forward_passes_per_second_ols": forward_slope,
             "forward_passes_per_second_delta": _delta_rate(decode_forward_passes),
             "counter_delta": forward_counter_delta,
             "ols_r_squared": forward_r_squared,
             "useful_tokens_per_forward_per_request": (
-                decode_counter_delta / forward_counter_delta / target_concurrency
+                decode_counter_delta
+                / forward_counter_delta
+                * active_rank_summary["median"]
+                / target_concurrency
             ),
+            "active_request_ranks": active_rank_summary,
         },
         "prefill_control": {
             "compute": {
@@ -545,11 +742,22 @@ def analyze(
         "queued_requests": queue_summary,
         "server_cross_checks": {
             "generation_throughput": _optional_gauge(
-                records, ("sglang:gen_throughput",)
+                records,
+                ("sglang:gen_throughput",),
+                distributed_request_ownership=distributed_request_ownership,
+                reduction="sum",
             ),
-            "spec_accept_rate": _optional_gauge(records, ("sglang:spec_accept_rate",)),
+            "spec_accept_rate": _optional_gauge(
+                records,
+                ("sglang:spec_accept_rate",),
+                distributed_request_ownership=distributed_request_ownership,
+                reduction="max",
+            ),
             "spec_accept_length": _optional_gauge(
-                records, ("sglang:spec_accept_length",)
+                records,
+                ("sglang:spec_accept_length",),
+                distributed_request_ownership=distributed_request_ownership,
+                reduction="max",
             ),
         },
         "validation": validation,

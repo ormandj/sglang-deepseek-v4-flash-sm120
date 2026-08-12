@@ -151,21 +151,86 @@ def _counter_stats(
     )
 
 
+def _sglang_counter_stats(
+    document: dict[str, Any],
+    names: Sequence[str],
+    *,
+    mode: str,
+    absent_mode_is_zero: bool = False,
+) -> tuple[str, float, float]:
+    try:
+        metrics = document["metrics"]
+    except (KeyError, TypeError) as exc:
+        raise AnalysisError("server summary has no metrics object") from exc
+
+    present_family: str | None = None
+    for name in names:
+        metric = metrics.get(name)
+        if not isinstance(metric, dict):
+            continue
+        if present_family is None:
+            present_family = name
+        matches: list[tuple[dict[str, str], float, float]] = []
+        for series in metric.get("series", []):
+            labels = {str(k): str(v) for k, v in series.get("labels", {}).items()}
+            if labels.get("mode") != mode:
+                continue
+            try:
+                total = float(series["stats"]["total"])
+                rate = float(series["stats"]["rate"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AnalysisError(f"server counter {name} has invalid stats") from exc
+            if not math.isfinite(total) or not math.isfinite(rate):
+                raise AnalysisError(f"server counter {name} is not finite")
+            matches.append((labels, total, rate))
+
+        if not matches:
+            continue
+        if not any("dp_rank" in labels for labels, _, _ in matches):
+            return _counter_stats(
+                document,
+                (name,),
+                required_labels={"mode": mode, "tp_rank": "0"},
+            )
+
+        by_owner: dict[tuple[tuple[str, str], ...], tuple[float, float]] = {}
+        for labels, total, rate in matches:
+            if "dp_rank" not in labels:
+                continue
+            owner_key = tuple(
+                sorted(
+                    (key, value)
+                    for key, value in labels.items()
+                    if key not in {"tp_rank", "pp_rank", "moe_ep_rank"}
+                )
+            )
+            previous = by_owner.get(owner_key)
+            if previous is None or total > previous[0]:
+                by_owner[owner_key] = (total, rate)
+        if by_owner:
+            return (
+                name,
+                sum(total for total, _ in by_owner.values()),
+                sum(rate for _, rate in by_owner.values()),
+            )
+
+    if absent_mode_is_zero and present_family is not None:
+        return present_family, 0.0, 0.0
+    raise AnalysisError(f"server summary has no counter {names[0]} for mode {mode}")
+
+
 def _server_counters(
     document: dict[str, Any], engine: str
 ) -> tuple[tuple[str, float, float], tuple[str, float, float]]:
     if engine == "sglang":
         family = ("sglang:realtime_tokens", "sglang:realtime_tokens_total")
         return (
-            _counter_stats(
+            _sglang_counter_stats(document, family, mode="prefill_compute"),
+            _sglang_counter_stats(
                 document,
                 family,
-                required_labels={"mode": "prefill_compute", "tp_rank": "0"},
-            ),
-            _counter_stats(
-                document,
-                family,
-                required_labels={"mode": "prefill_cache", "tp_rank": "0"},
+                mode="prefill_cache",
+                absent_mode_is_zero=True,
             ),
         )
     if engine == "vllm":

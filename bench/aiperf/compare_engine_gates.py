@@ -134,29 +134,16 @@ def compare(
             candidate_prefill[cell].get("prompt_tokens_per_second"),
             f"candidate {cell} prefill rate",
         )
-        base_ttft = _positive(
-            baseline_prefill[cell].get("median_ttft_ms"),
-            f"baseline {cell} TTFT",
-        )
-        candidate_ttft = _positive(
-            candidate_prefill[cell].get("median_ttft_ms"),
-            f"candidate {cell} TTFT",
-        )
         prefill[cell] = {
             "prompt_tokens_per_second": {
                 "baseline": base_rate,
                 "candidate": candidate_rate,
                 "change_percent": 100 * (candidate_rate / base_rate - 1),
-            },
-            "median_ttft_ms": {
-                "baseline": base_ttft,
-                "candidate": candidate_ttft,
-                "change_percent": 100 * (candidate_ttft / base_ttft - 1),
-            },
+            }
         }
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "mode": baseline["mode"],
         "baseline_engine": baseline.get("engine"),
         "candidate_engine": candidate.get("engine"),

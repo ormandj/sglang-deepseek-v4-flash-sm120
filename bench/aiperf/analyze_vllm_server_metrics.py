@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -121,14 +122,59 @@ def _histogram_count_series(
     return points
 
 
-def _optional_counter_delta(
+def _required_speculative_counter_series(
     records: Sequence[dict[str, Any]], names: Sequence[str]
-) -> float | None:
+) -> list[Point]:
     points = _counter_series(records, names)
-    if len(points) < 2:
-        return None
+    if len(points) != len(records):
+        raise AnalysisError(
+            f"{names[0]} has {len(points)} samples; need {len(records)}"
+        )
     _require_monotonic(points, names[0])
-    return points[-1].value - points[0].value
+    return points
+
+
+def _counter_ratio_distribution(
+    numerator: Sequence[Point],
+    denominator: Sequence[Point],
+    *,
+    additive: float = 0.0,
+) -> dict[str, float | int]:
+    if len(numerator) != len(denominator):
+        raise AnalysisError("speculative counter series are not aligned")
+    values: list[float] = []
+    for left_index in range(len(numerator) - 1):
+        numerator_left = numerator[left_index]
+        numerator_right = numerator[left_index + 1]
+        denominator_left = denominator[left_index]
+        denominator_right = denominator[left_index + 1]
+        if (
+            numerator_left.timestamp_ns != denominator_left.timestamp_ns
+            or numerator_right.timestamp_ns != denominator_right.timestamp_ns
+        ):
+            raise AnalysisError("speculative counter timestamps are not aligned")
+        numerator_delta = numerator_right.value - numerator_left.value
+        denominator_delta = denominator_right.value - denominator_left.value
+        if denominator_delta <= 0:
+            continue
+        value = additive + numerator_delta / denominator_delta
+        if not math.isfinite(value) or value < additive:
+            raise AnalysisError("invalid speculative counter ratio")
+        values.append(value)
+    if not values:
+        raise AnalysisError("speculative counters have no positive scrape interval")
+
+    numerator_delta = numerator[-1].value - numerator[0].value
+    denominator_delta = denominator[-1].value - denominator[0].value
+    overall = additive + numerator_delta / denominator_delta
+    return {
+        "mean": statistics.fmean(values),
+        "median": statistics.median(values),
+        "min": min(values),
+        "max": max(values),
+        "overall": overall,
+        "intervals": len(values),
+    }
 
 
 def analyze(
@@ -335,37 +381,41 @@ def analyze(
         failures.append("average decode context left the requested window")
     validation["valid"] = not failures
 
-    drafts_delta = _optional_counter_delta(
+    drafts = _required_speculative_counter_series(
         records,
         ("vllm:spec_decode_num_drafts", "vllm:spec_decode_num_drafts_total"),
     )
-    accepted_delta = _optional_counter_delta(
+    accepted = _required_speculative_counter_series(
         records,
         (
             "vllm:spec_decode_num_accepted_tokens",
             "vllm:spec_decode_num_accepted_tokens_total",
         ),
     )
-    draft_tokens_delta = _optional_counter_delta(
+    draft_tokens = _required_speculative_counter_series(
         records,
         (
             "vllm:spec_decode_num_draft_tokens",
             "vllm:spec_decode_num_draft_tokens_total",
         ),
     )
-    mean_acceptance_length = (
-        1.0 + accepted_delta / drafts_delta
-        if drafts_delta and accepted_delta is not None
-        else None
+    drafts_delta = drafts[-1].value - drafts[0].value
+    accepted_delta = accepted[-1].value - accepted[0].value
+    draft_tokens_delta = draft_tokens[-1].value - draft_tokens[0].value
+    acceptance_length = _counter_ratio_distribution(
+        accepted,
+        drafts,
+        additive=1.0,
     )
-    draft_acceptance_rate = (
-        accepted_delta / draft_tokens_delta
-        if draft_tokens_delta and accepted_delta is not None
-        else None
+    acceptance_rate = _counter_ratio_distribution(
+        accepted,
+        draft_tokens,
     )
+    if acceptance_rate["max"] > 1.0:
+        raise AnalysisError("vLLM speculative acceptance rate exceeds 1")
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "engine": "vllm",
         "source": {"summary": str(summary_path), "jsonl": str(jsonl_path)},
         "phase": {"start_ns": phase_start_ns, "end_ns": phase_end_ns},
@@ -425,8 +475,8 @@ def analyze(
             "spec_num_drafts_delta": drafts_delta,
             "spec_accepted_tokens_delta": accepted_delta,
             "spec_draft_tokens_delta": draft_tokens_delta,
-            "spec_accept_rate": draft_acceptance_rate,
-            "spec_accept_length": mean_acceptance_length,
+            "spec_accept_rate": acceptance_rate,
+            "spec_accept_length": acceptance_length,
         },
         "validation": validation,
         "failures": failures,

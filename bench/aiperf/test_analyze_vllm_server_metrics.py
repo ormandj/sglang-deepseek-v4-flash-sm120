@@ -91,8 +91,13 @@ def test_vllm_engine_step_rate_uses_equal_context_window(tmp_path: Path) -> None
     assert result["engine_work"][
         "useful_tokens_per_forward_per_request"
     ] == pytest.approx(5)
-    assert result["server_cross_checks"]["spec_accept_length"] == pytest.approx(5)
-    assert result["server_cross_checks"]["spec_accept_rate"] == pytest.approx(0.8)
+    acceptance_length = result["server_cross_checks"]["spec_accept_length"]
+    acceptance_rate = result["server_cross_checks"]["spec_accept_rate"]
+    for statistic in ("mean", "median", "min", "max", "overall"):
+        assert acceptance_length[statistic] == pytest.approx(5)
+        assert acceptance_rate[statistic] == pytest.approx(0.8)
+    assert acceptance_length["intervals"] > 0
+    assert acceptance_rate["intervals"] > 0
 
 
 def test_vllm_prefill_inside_decode_window_is_invalid(tmp_path: Path) -> None:

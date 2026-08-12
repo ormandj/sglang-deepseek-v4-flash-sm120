@@ -6,7 +6,7 @@ if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
   exit 2
 fi
 if [ "$#" -ne 3 ]; then
-  echo "usage: $0 CAMPAIGN_ID BUILD_ID quick|decode-supplement|qualification|publication" >&2
+  echo "usage: $0 CAMPAIGN_ID BUILD_ID quick|prefill-quick|decode-supplement|qualification|publication" >&2
   exit 2
 fi
 
@@ -19,8 +19,8 @@ for value in "$campaign" "$build_id"; do
   esac
 done
 case "$mode" in
-  quick|decode-supplement|qualification|publication) ;;
-  *) echo "error: mode must be quick, decode-supplement, qualification, or publication" >&2; exit 2 ;;
+  quick|prefill-quick|decode-supplement|qualification|publication) ;;
+  *) echo "error: mode must be quick, prefill-quick, decode-supplement, qualification, or publication" >&2; exit 2 ;;
 esac
 
 : "${BENCH_IMAGE_REF:?BENCH_IMAGE_REF must identify the immutable image}"
@@ -28,6 +28,14 @@ esac
 : "${BENCH_PROJECT_REVISION:?BENCH_PROJECT_REVISION must be set}"
 : "${AIPERF_REVISION:?AIPERF_REVISION must be set}"
 : "${BENCH_MODEL_REVISION:?BENCH_MODEL_REVISION must be set}"
+bench_dp_size=${BENCH_DP_SIZE:-1}
+case "$bench_dp_size" in
+  *[!0-9]*|'') echo "error: BENCH_DP_SIZE must be a positive integer" >&2; exit 2 ;;
+esac
+if [ "$bench_dp_size" -lt 1 ]; then
+  echo "error: BENCH_DP_SIZE must be a positive integer" >&2
+  exit 2
+fi
 
 export MODEL_NAME=${MODEL_NAME:-deepseek-v4-flash}
 export TOKENIZER_PATH=${TOKENIZER_PATH:-/models/deepseek-ai/DeepSeek-V4-Flash-0731}
@@ -48,7 +56,7 @@ export BENCH_API_KEY=${BENCH_API_KEY:-${VLLM_API_KEY:-}}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 config_dir="$script_dir/configs"
 lock="$script_dir/aiperf.lock.json"
-aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-03c9c6dd/venv/bin/python}
+aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-6ed4823d/venv/bin/python}
 uv_bin=${AIPERF_UV_BIN:-/models/.bench-tools/uv-0.12.3-linux-x86_64/uv}
 campaign_root=${AIPERF_CAMPAIGN_ROOT:-/models/bench/results/aiperf-greenfield/engine-gates}
 gate_root="$campaign_root/$campaign/$build_id-$mode"
@@ -70,6 +78,9 @@ run_warmup() {
   export AIPERF_ARTIFACT_ROOT="$gate_root/warmup"
   export WARMUP_ISL="$input_length"
   export WARMUP_OSL="$output_length"
+  if [ "$concurrency" -lt "$bench_dp_size" ]; then
+    concurrency=$bench_dp_size
+  fi
   export WARMUP_CONCURRENCY="$concurrency"
   export WARMUP_REQUESTS="$concurrency"
   export WARMUP_TEMPERATURE=0.0
@@ -83,8 +94,6 @@ run_decode() {
   concurrency=$1
   repetitions=$2
   output_length=$3
-  lower_context=$4
-  upper_context=$5
   repetition=1
   while [ "$repetition" -le "$repetitions" ]; do
     seed=$((2026081200 + repetition))
@@ -93,7 +102,7 @@ run_decode() {
     export SAMPLING_SEED="$seed"
     export AIPERF_ARTIFACT_ROOT="$gate_root/decode/c$concurrency"
     export DECODE_CONCURRENCY="$concurrency"
-    export DECODE_ISL=256
+    export DECODE_ISL=16384
     export DECODE_OSL="$output_length"
     "$script_dir/run-in-pod.sh" "$config_dir/decode-engine.yaml" "$run_id"
     cell="$gate_root/decode/c$concurrency/$run_id"
@@ -103,9 +112,10 @@ run_decode() {
         --summary "$cell/server_metrics_export.json" \
         --jsonl "$cell/server_metrics_export.jsonl" \
         --target-concurrency "$concurrency" \
-        --average-context-lower "$lower_context" \
-        --average-context-upper "$upper_context" \
-        --minimum-window-seconds 10 \
+        --average-context-lower 17408 \
+        --average-context-upper 20480 \
+        --minimum-window-seconds 7 \
+        --minimum-samples 20 \
         --output "$cell/decode-analysis.json"
     else
       "$uv_bin" run --no-project --python "$aiperf_python" \
@@ -113,9 +123,10 @@ run_decode() {
         --summary "$cell/server_metrics_export.json" \
         --jsonl "$cell/server_metrics_export.jsonl" \
         --target-concurrency "$concurrency" \
-        --average-context-lower "$lower_context" \
-        --average-context-upper "$upper_context" \
-        --minimum-window-seconds 10 \
+        --average-context-lower 17408 \
+        --average-context-upper 20480 \
+        --minimum-window-seconds 7 \
+        --minimum-samples 20 \
         --output "$cell/decode-analysis.json"
     fi
     repetition=$((repetition + 1))
@@ -156,32 +167,32 @@ run_prefill() {
 
 case "$mode" in
   quick)
-    if [ "$bench_engine" = vllm ]; then
-      decode_shapes='1:3:12288:2048:8192 8:2:6144:1280:4352'
-    else
-      decode_shapes='1:3:12288:2048:8192 8:2:6144:1280:4352 32:1:3072:768:2304'
-    fi
-    prefill_shapes='8k-c1:8192:1:8 64k-c1:65536:1:3 128k-c1:130816:1:2'
+    decode_shapes='1:3:4096 4:3:4096 8:3:4096'
+    prefill_shapes='8k-c1:8192:1:3 32k-c1:32768:1:3 64k-c1:65536:1:3 128k-c1:130816:1:3'
+    ;;
+  prefill-quick)
+    decode_shapes=''
+    prefill_shapes='8k-c1:8192:1:3 32k-c1:32768:1:3 64k-c1:65536:1:3 128k-c1:130816:1:3'
     ;;
   decode-supplement)
-    decode_shapes='2:6:10240:2048:7168 4:4:8192:1536:5632 16:2:4096:1024:3072'
+    decode_shapes='2:3:4096 16:3:4096'
     prefill_shapes=''
     ;;
   qualification)
     if [ "$bench_engine" = vllm ]; then
-      decode_shapes='1:8:12288:2048:8192 2:6:10240:2048:7168 4:4:8192:1536:5632 8:3:6144:1280:4352 16:2:4096:1024:3072'
+      decode_shapes='1:5:4096 2:5:4096 4:5:4096 8:5:4096 16:3:4096'
     else
-      decode_shapes='1:8:12288:2048:8192 2:6:10240:2048:7168 4:4:8192:1536:5632 8:3:6144:1280:4352 16:2:4096:1024:3072 32:2:3072:768:2304'
+      decode_shapes='1:5:4096 2:5:4096 4:5:4096 8:5:4096 16:3:4096 32:3:4096'
     fi
-    prefill_shapes='8k-c1:8192:1:20 8k-c2:8192:2:20 8k-c4:8192:4:20 64k-c1:65536:1:5 128k-c1:130816:1:3'
+    prefill_shapes='8k-c1:8192:1:5 32k-c1:32768:1:5 64k-c1:65536:1:5 128k-c1:130816:1:5'
     ;;
   publication)
     if [ "$bench_engine" = vllm ]; then
-      decode_shapes='1:5:12288:2048:8192 2:5:10240:2048:7168 4:5:8192:1536:5632 8:5:6144:1280:4352 16:5:4096:1024:3072'
+      decode_shapes='1:5:4096 2:5:4096 4:5:4096 8:5:4096 16:5:4096'
     else
-      decode_shapes='1:5:12288:2048:8192 2:5:10240:2048:7168 4:5:8192:1536:5632 8:5:6144:1280:4352 16:5:4096:1024:3072 32:5:3072:768:2304'
+      decode_shapes='1:5:4096 2:5:4096 4:5:4096 8:5:4096 16:5:4096 32:5:4096'
     fi
-    prefill_shapes='8k-c1:8192:1:5 64k-c1:65536:1:5 128k-c1:130816:1:5'
+    prefill_shapes='8k-c1:8192:1:5 32k-c1:32768:1:5 64k-c1:65536:1:5 128k-c1:130816:1:5'
     ;;
 esac
 
@@ -190,7 +201,7 @@ for shape in $decode_shapes; do
   IFS=:
   set -- $shape
   IFS=$old_ifs
-  run_warmup "decode-c$1" 256 512 "$1"
+  run_warmup "decode-c$1" 16384 256 "$1"
 done
 for shape in $prefill_shapes; do
   old_ifs=$IFS
@@ -205,7 +216,7 @@ for shape in $decode_shapes; do
   IFS=:
   set -- $shape
   IFS=$old_ifs
-  run_decode "$1" "$2" "$3" "$4" "$5"
+  run_decode "$1" "$2" "$3"
 done
 for shape in $prefill_shapes; do
   old_ifs=$IFS

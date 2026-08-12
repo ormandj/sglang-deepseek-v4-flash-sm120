@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/03c9c6ddc5e6227782e53ded177f1227d332af48/src/aiperf/config/schema/aiperf-config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23/src/aiperf/config/schema/aiperf-config.schema.json
 schemaVersion: "2.0"
 
 randomSeed: ${AIPERF_RANDOM_SEED:2026081201}
@@ -20,7 +20,7 @@ benchmark:
       top_p: 1.0
       seed: ${SAMPLING_SEED:2026081201}
       ignore_eos: true
-      min_tokens: ${DECODE_OSL:12288}
+      min_tokens: ${DECODE_OSL:4096}
 
   tokenizer:
     name: ${TOKENIZER_PATH:/models/deepseek-ai/DeepSeek-V4-Flash-0731}
@@ -33,8 +33,8 @@ benchmark:
     sampling: sequential
     prompts:
       corpus: coding
-      isl: ${DECODE_ISL:256}
-      osl: ${DECODE_OSL:12288}
+      isl: ${DECODE_ISL:16384}
+      osl: ${DECODE_OSL:4096}
 
   phases:
     - name: profiling
@@ -49,7 +49,7 @@ benchmark:
     statsInterval: 0
 
   gpuTelemetry:
-    enabled: false
+    enabled: ${GPU_TELEMETRY_ENABLED:true}
 
   serverMetrics:
     enabled: true

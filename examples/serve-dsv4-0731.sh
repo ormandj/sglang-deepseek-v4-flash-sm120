@@ -8,7 +8,7 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.1.0-rc.3}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
@@ -40,6 +40,8 @@ cache_dir=$(cd "$CACHE_DIR" && pwd)
 
 # The in-container model path is fixed so the compiled-kernel cache in
 # CACHE_DIR stays valid regardless of where the snapshot lives on the host.
+# The FP4 indexer flag below requires #29927's DeepGEMM paged-MQA path, so the
+# two indexer selectors explicitly opt out of the upstream SM120 fallbacks.
 container_model_path=/models/deepseek-ai/DeepSeek-V4-Flash-0731
 
 exec docker run --rm \
@@ -54,13 +56,11 @@ exec docker run --rm \
   --env CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
   --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
-  --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
-  --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
-  --env SGLANG_OPT_USE_FLASHINFER_MHC=1 \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
+  --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
+  --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   "$IMAGE" \
   serve \
   --model-path "$container_model_path" \
@@ -73,6 +73,7 @@ exec docker run --rm \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
+  --disable-custom-all-reduce \
   --fp8-gemm-backend auto \
   --enable-deepseek-v4-fp4-indexer \
   --speculative-algorithm DSPARK \

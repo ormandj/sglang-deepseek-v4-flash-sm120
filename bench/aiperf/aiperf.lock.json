@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/ai-dynamo/aiperf.git",
-  "commit": "03c9c6ddc5e6227782e53ded177f1227d332af48",
+  "commit": "6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23",
   "version": "0.12.0",
   "uv": {
     "version": "0.12.3",

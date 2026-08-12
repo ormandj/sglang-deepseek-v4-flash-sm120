@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "engine": "sglang",
+  "image_tag": "v0.2.0-rc.0",
+  "benchmark": "gsm8k",
+  "questions": 1319,
+  "correct": 1258,
+  "accuracy": 0.953752843063,
+  "request_errors": 0
+}

@@ -2,15 +2,15 @@
   "schema": 1,
   "release": {
     "manifest": "release.json",
-    "version": "0.1.0",
-    "candidate": 3,
-    "candidate_tag": "v0.1.0-rc.3",
-    "stable_tag": "v0.1.0",
-    "cache_schema": "v2"
+    "version": "0.2.0",
+    "candidate": 0,
+    "candidate_tag": "v0.2.0-rc.0",
+    "stable_tag": "v0.2.0",
+    "cache_schema": "v10"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.1.0-rc.3",
+    "tag": "v0.2.0-rc.0",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -20,204 +20,196 @@
   },
   "hardware": {
     "compute_capability": "sm_120",
-    "validated_on": "2x NVIDIA RTX PRO 6000 Blackwell, TP=2"
+    "qualification_targets": [
+      "2x NVIDIA RTX PRO 6000 Blackwell, TP=2",
+      "4x NVIDIA RTX PRO 6000 Blackwell, TP=4"
+    ]
   },
   "pins": [
     {
       "arg": "DSV4_0731_RELEASE_VERSION",
-      "value": "0.1.0",
-      "description": "Stable SemVer target. Candidate and stable tags are derived by release.json."
+      "value": "0.2.0",
+      "description": "Stable SemVer target for the clean reimage line."
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
-      "value": "3",
-      "description": "Release-candidate ordinal for the 0.1.0 release line."
+      "value": "0",
+      "description": "Initial release candidate for the 0.2.0 line."
     },
     {
       "arg": "DSV4_0731_CACHE_SCHEMA",
-      "value": "v2",
-      "description": "Runtime compilation-cache compatibility namespace, versioned independently from the image."
+      "value": "v10",
+      "description": "Fresh runtime compilation-cache namespace for the reimage."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE",
-      "value": "lmsysorg/sglang:nightly-dev-cu13-20260810-7c90840b@sha256:ed089abad79f36c2129fa2191e3be00efb4cd0950a9a615fc0e1b057c551a1fa",
-      "description": "Official CUDA 13 / Torch 2.13 SGLang nightly base image, pinned by digest."
+      "value": "lmsysorg/sglang:nightly-dev-cu13-20260812-c7c03ec5@sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050",
+      "description": "Official CUDA 13 / Torch 2.13 nightly base, pinned by manifest digest."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE_HEAD",
-      "value": "7c90840badf1e890691944979d45a3bb09808775",
-      "description": "SGLang source commit recorded by the base image's editable package and checkout."
+      "value": "c7c03ec53b1e664c2d415db4f02e43f86661f31d",
+      "description": "SGLang source commit represented by the official nightly base."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "5a8e360e705fc7b8046f6b060ba4fc557ff606c7",
-      "description": "SGLang main commit checked out in the image."
+      "value": "dc5f6c488317645d96dc630b1f410e4dfb6f9667",
+      "description": "Fresh SGLang main commit checked out before applying the release patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "310b512ccf51280b51f9c73a64766b0b1d6b49d9",
-      "description": "Tree of the SGLang main commit, before the patch."
+      "value": "d117eca486f68ecbdf7d6168a47cfab7e2c8110b",
+      "description": "Tree of the pinned SGLang main commit."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "70fa46c3f950ff80c3bb3b9160a69ff531935dc5",
-      "description": "Final SGLang tree in the image, after the single source patch."
+      "value": "8c336f4426844b2028938f7c542c0a403d37b804",
+      "description": "Final audited SGLang tree after the release patch."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_INTEGRATION_HEAD",
+      "value": "f5356c7daec4565c2a0a06f9499b775545937db3",
+      "description": "Head of the linear local integration branch from which the patch was generated."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR29927_HEAD",
-      "value": "21a5bc8e4e05909a7c946d3467561a8e024a108a",
-      "description": "SGLang PR #29927 head included in the source patch."
+      "value": "e5ea881c5dd487acef17d58ba1a9d2b7ecfeee91",
+      "description": "SGLang PR #29927 source head: SM120 DeepSeek-V4 support."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR33614_HEAD",
       "value": "fca0998feda2bfc2a735286d34d354b979850d72",
-      "description": "Current SGLang PR #33614 head: synchronize DSpark sampling, verify-budget, and graph-capture decisions across TP ranks."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR32194_HEAD",
-      "value": "f8fac3913dbfbbc9048692d79de3587d226fa421",
-      "description": "SGLang PR #32194 head included in the source patch."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR30700_HEAD",
-      "value": "aead319d06c7a2ab2a21e575000fcdaea7c17675",
-      "description": "SGLang PR #30700 head included in the source patch."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR32330_HEAD",
-      "value": "f330c748ade470e806347f24dffae4eec38eb878",
-      "description": "SGLang PR #32330 rebased local head included in the source patch, adding the mnnvl preflight multicast-granularity fix."
+      "description": "SGLang PR #33614 source head: DSpark TP state synchronization."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR32686_HEAD",
       "value": "15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b",
-      "description": "SGLang PR #32686 head included in the source patch."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR32815_HEAD",
-      "value": "1dbf09f6e0157279f5350357d0309397f0257025",
-      "description": "SGLang PR #32815 head included in the source patch."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR33518_HEAD",
-      "value": "c3249eb94c8acca935a9978656ab57fd054657c0",
-      "description": "Current SGLang PR #33518 head (sglext_spec: per-request speculative statistics on the OpenAI endpoints)."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR33518_CHANGE",
-      "value": "1c3f7b70acf4a8fac5154a4581915ce3e8f587f6",
-      "description": "The unique #33518 implementation commit replayed from its current head; the head also contains an upstream-main merge."
+      "description": "SGLang PR #32686 source head: bounded DeepGEMM warmup allocation."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR33568_HEAD",
       "value": "cab45a29997f8898e076e9253741a5119a401db0",
-      "description": "SGLang PR #33568: match DSV4/DSV32 tool prompts to the reference encoding."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR33732_HEAD",
-      "value": "d5c25357153db62b15770ea5c82a5d5c81b482cb",
-      "description": "SGLang PR #33732: preserve an explicitly selected SM120 DSV4 indexer backend."
+      "description": "SGLang PR #33568 source head: reference-compatible tool encoding."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR33805_HEAD",
       "value": "26a2a3981798b8deb97d053d163fa3c48668e03f",
-      "description": "SGLang PR #33805: run SWA eviction on the DFLASH/DSPARK speculative path."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PR34139_HEAD",
-      "value": "16797c8c75a2f87cfd61ad7c4f029cc0f30e9a8a",
-      "description": "SGLang PR #34139: keep DSpark draft shared experts separate after fusion decisions became runner-local."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_SM120_DEEPGEMM_HEAD",
-      "value": "d4dc7502cd4469c37e935d4fbce946b8a2331212",
-      "description": "Local fix: enable the SM120 DeepGEMM capability when the required grouped FP4 symbol is installed."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PREFILL_WORKSPACE_HEAD",
-      "value": "73d125d0432c80354380b77d729d2d686cda38c8",
-      "description": "Local fix: size the FlashInfer all-reduce workspace for the largest configured prefill forward."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_SM120_ALLREDUCE_GATE_HEAD",
-      "value": "861b99ca17a021361963c6a3f43a65999252e41e",
-      "description": "Local fix: admit SM120 through the all-reduce execution gate for the backend enabled by PR #32330."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_ALLREDUCE_TOKEN_CAP_HEAD",
-      "value": "f99f4a0bbc34ca250071a51d1159e76c1a5d2d88",
-      "description": "Local fix: bound the allreduce-only kAllReduce path by the same token cap as the fused path, so prefill-sized all-reduces use NCCL."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_PCIE_IPC_CONSUMER_HEAD",
-      "value": "790a72c26435eb6beec8445fa9fab408efa04754",
-      "description": "Current-main replay of the local SGLang consumer for FlashInfer PR #4393."
-    },
-    {
-      "arg": "DSV4_0731_SGLANG_FLASHINFER_MHC_GATE_HEAD",
-      "value": "eb9004a0115acbee4109626ea8945ec0498de887",
-      "description": "Local performance fix: on SM120, use FlashInfer mHC only at the validated 1024-token prefill threshold so decode retains the faster small-M path."
+      "description": "SGLang PR #33805 source head: DFLASH/DSPARK SWA eviction."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
-      "value": "4fbac49f30e1f40a0dcddd90512b8c56d68037f7",
-      "description": "FlashInfer main commit the Python wheel is built from."
+      "value": "065971254bca6ad0509d775e5806de53b64ac7b9",
+      "description": "Fresh FlashInfer main commit used for the source wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_TREE",
-      "value": "13df06efa4a91047660249113a3e4f7147edb0c6",
-      "description": "Tree of the FlashInfer main commit, before the patch."
+      "value": "5d0f69e41f414efba115dcd13c03cbd46e40d640",
+      "description": "Tree of the pinned FlashInfer main commit."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_EFFECTIVE_TREE",
-      "value": "616094d4a8b4a2bc94f3d43a832312c335924696",
-      "description": "FlashInfer tree after the single source patch, as built into the wheel."
+      "value": "09b10c6dc66ca0c96c62a13dfa5ea3b63f1018e4",
+      "description": "Final audited FlashInfer tree after the release patch."
     },
     {
-      "arg": "DSV4_0731_FLASHINFER_PR4308_HEAD",
-      "value": "4ec7f230447320c9f32585d16596cdda8133029f",
-      "description": "FlashInfer PR #4308 head included in the source patch."
+      "arg": "DSV4_0731_FLASHINFER_INTEGRATION_HEAD",
+      "value": "44f0789e872d6f3abea652dc3fb435b6e37a0001",
+      "description": "Head of the linear local FlashInfer integration branch."
     },
     {
-      "arg": "DSV4_0731_FLASHINFER_PR4393_HEAD",
-      "value": "6573c6520eae1e2ff205d64a86dd58d3fa028c81",
-      "description": "FlashInfer PR #4393 (pcie_ipc all-reduce for intra-node PCIe machines)."
+      "arg": "DSV4_0731_FLASHINFER_PR3930_HEAD",
+      "value": "e855cc25993d11d4707678d68fbde108d0578bef",
+      "description": "FlashInfer PR #3930 source head: reject look-alike CUDA-runtime mappings."
+    },
+    {
+      "arg": "DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD",
+      "value": "28be41230a979ffdfd423706d1a4c7e82c6988eb",
+      "description": "Source commit for the exact CUDA-runtime filename matcher and collision tests."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_VERSION",
-      "value": "0.6.18.dev20260810",
-      "description": "FlashInfer version of both the built Python wheel and the cubin wheel."
+      "value": "0.6.18.dev20260811",
+      "description": "Package version shared by the source-built Python wheel and latest available matching cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_URL",
-      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260810/flashinfer_cubin-0.6.18.dev20260810-py3-none-any.whl",
-      "description": "Prebuilt cubin wheel matching the FlashInfer version."
+      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260811/flashinfer_cubin-0.6.18.dev20260811-py3-none-any.whl",
+      "description": "Latest available FlashInfer 0.6.18 nightly cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_SHA256",
-      "value": "df0d5d5ebed57fb407f58a655045887700bc33984175a83f138d794ce67d7bf3",
-      "description": "SHA256 of the cubin wheel, enforced by the installer."
+      "value": "300bc87236f646be7e46d3a382e5d74961d5685598ea4015954f76a3baf5b873",
+      "description": "SHA256 of the pinned cubin wheel."
     }
   ],
+  "integration": {
+    "sglang": {
+      "base": "dc5f6c488317645d96dc630b1f410e4dfb6f9667",
+      "head": "b90ed01b2ea65e8bc084a0063c98eb2c868a2f53",
+      "commits": [
+        {
+          "source": "sgl-project/sglang#29927",
+          "source_head": "e5ea881c5dd487acef17d58ba1a9d2b7ecfeee91",
+          "integration_commit": "1e944c142ebf5c6224739a75e691d9c96164e78d"
+        },
+        {
+          "source": "sgl-project/sglang#33614",
+          "source_head": "fca0998feda2bfc2a735286d34d354b979850d72",
+          "integration_commit": "0c864dd0d946cf8907ba86a415be07d12489438e"
+        },
+        {
+          "source": "sgl-project/sglang#32686",
+          "source_head": "15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b",
+          "integration_commit": "f3f62bfdc78c96c12cc29e478a72e4fa349e46b5"
+        },
+        {
+          "source": "sgl-project/sglang#33568",
+          "source_head": "cab45a29997f8898e076e9253741a5119a401db0",
+          "integration_commit": "ed10f4fb13f0e21e32a54c0df433d942ff065c8e"
+        },
+        {
+          "source": "sgl-project/sglang#33805",
+          "source_head": "26a2a3981798b8deb97d053d163fa3c48668e03f",
+          "integration_commit": "b90ed01b2ea65e8bc084a0063c98eb2c868a2f53"
+        }
+      ]
+    },
+    "flashinfer": {
+      "base": "065971254bca6ad0509d775e5806de53b64ac7b9",
+      "head": "44f0789e872d6f3abea652dc3fb435b6e37a0001",
+      "commits": [
+        {
+          "source": "flashinfer-ai/flashinfer#3930",
+          "source_head": "e855cc25993d11d4707678d68fbde108d0578bef",
+          "integration_commit": "f49b0f17645ec08e6e5e9e009eae325eca19a54e"
+        },
+        {
+          "source": "local exact-name follow-up",
+          "source_head": "28be41230a979ffdfd423706d1a4c7e82c6988eb",
+          "integration_commit": "44f0789e872d6f3abea652dc3fb435b6e37a0001"
+        }
+      ]
+    }
+  },
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.1.0-rc.3.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.2.0-rc.0.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "3acb429a85b4f03576e6f55bedc0f2ead23cf784961a6853448776f38cfa11a8",
-      "description": "Open SGLang PRs #29927, #33614, #32194, #30700, #32330, #32686, #32815, #33518, #33568, #33732, #33805 and #34139 plus the remaining local all-reduce and FlashInfer-mHC dispatch fixes. Merged #33616 and #34189 are supplied by main; #34189 replaces the former #32183 carry."
+      "sha256": "f1f48f1f7ddd99eef817dc8b3583fdb37f8d71206810b60065ebe834b2cba3f1",
+      "description": "Required current-head SM120 model support and correctness carries only: SGLang #29927, #33614, #32686, #33568, and #33805, with #33805's focused test adapted to current runtime-context access."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.1.0-rc.3.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.2.0-rc.0.patch",
       "repository": "flashinfer",
       "order": 1,
-      "sha256": "8cca9f65d848932eb2e9134c6f79e59c890dafc2a12693c2b84277382bed74aa",
-      "description": "Open FlashInfer PRs #4308 and #4393. Merged #4315, #4329 and #4380 are supplied by main and are not carried; #4380 replaced the former #4309 carry."
+      "sha256": "ec556b35a5e474e05d2b524853f98b27e8b9e6c27c5ff84d189936bbcec778bd",
+      "description": "FlashInfer #3930 plus the exact CUDA-runtime filename matcher and focused collision/load-order tests."
     }
   ],
   "verification": {
     "sglang_repository": "https://github.com/sgl-project/sglang.git",
     "flashinfer_repository": "https://github.com/flashinfer-ai/flashinfer.git",
-    "note": "Applying the SGLang patch to DSV4_0731_SGLANG_MAIN_HEAD yields DSV4_0731_SGLANG_EFFECTIVE_TREE. Applying the FlashInfer patch to DSV4_0731_FLASHINFER_MAIN_HEAD yields DSV4_0731_FLASHINFER_EFFECTIVE_TREE."
+    "note": "Each patch is generated from the recorded linear integration branch. Applying it to the pinned main commit reproduces the recorded effective tree."
   }
 }

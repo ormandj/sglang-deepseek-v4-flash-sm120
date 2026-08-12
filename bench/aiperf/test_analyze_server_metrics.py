@@ -130,6 +130,78 @@ def _omit_cache_series(jsonl: Path) -> None:
     jsonl.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
 
 
+def _move_requests_to_second_dp_rank(jsonl: Path) -> None:
+    rewritten = []
+    for line in jsonl.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        metrics = record["metrics"]
+        metrics["sglang:num_running_reqs"] = [
+            {
+                "labels": {"dp_rank": "0", "tp_rank": "0"},
+                "value": 0,
+            },
+            {
+                "labels": {"dp_rank": "1", "tp_rank": "1"},
+                "value": 4,
+            },
+        ]
+        metrics["sglang:num_queue_reqs"] = [
+            {
+                "labels": {"dp_rank": "0", "tp_rank": "0"},
+                "value": 0,
+            },
+            {
+                "labels": {"dp_rank": "1", "tp_rank": "1"},
+                "value": 0,
+            },
+        ]
+        active_context = metrics["sglang:decode_sum_seq_lens"][0]["value"]
+        metrics["sglang:decode_sum_seq_lens"] = [
+            {
+                "labels": {"dp_rank": "0", "tp_rank": "0"},
+                "value": 123_456,
+            },
+            {
+                "labels": {"dp_rank": "1", "tp_rank": "1"},
+                "value": active_context,
+            },
+        ]
+        for family in ("sglang:realtime_tokens", "sglang:cuda_graph_passes"):
+            metrics[family] = [
+                sample
+                for sample in metrics[family]
+                if sample["labels"]["tp_rank"] == "0"
+            ]
+            for sample in metrics[family]:
+                sample["labels"]["dp_rank"] = "1"
+                sample["labels"]["tp_rank"] = "1"
+        metrics["sglang:realtime_tokens"].extend(
+            [
+                {
+                    "labels": {
+                        "dp_rank": "0",
+                        "tp_rank": "0",
+                        "mode": mode,
+                    },
+                    "value": 7,
+                }
+                for mode in ("decode", "prefill_compute", "prefill_cache")
+            ]
+        )
+        metrics["sglang:cuda_graph_passes"].append(
+            {
+                "labels": {
+                    "dp_rank": "0",
+                    "tp_rank": "0",
+                    "mode": "decode_cuda_graph",
+                },
+                "value": 7,
+            }
+        )
+        rewritten.append(json.dumps(record))
+    jsonl.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+
 def _analyze(summary: Path, jsonl: Path):
     return MODULE.analyze(
         summary,
@@ -202,3 +274,29 @@ def test_context_window_compares_equal_sequence_shapes(tmp_path: Path) -> None:
     assert result["plateau"]["end_reason"] == "average_context_window"
     assert result["average_context_length"]["min"] == 2000
     assert result["average_context_length"]["max"] == 5000
+
+
+def test_context_window_follows_active_dp_rank(tmp_path: Path) -> None:
+    summary, jsonl = _write_capture(tmp_path)
+    _move_requests_to_second_dp_rank(jsonl)
+    result = MODULE.analyze(
+        summary,
+        jsonl,
+        target_concurrency=4,
+        settle_seconds=10,
+        tail_seconds=5,
+        minimum_window_seconds=20,
+        minimum_samples=20,
+        minimum_exact_occupancy=0.98,
+        average_context_lower=2000,
+        average_context_upper=5000,
+    )
+    assert result["validation"]["valid"] is True
+    assert result["decode"]["tokens_per_second_ols"] == pytest.approx(400)
+    assert result["engine_work"]["forward_passes_per_second_ols"] == pytest.approx(20)
+    assert result["engine_work"][
+        "useful_tokens_per_forward_per_request"
+    ] == pytest.approx(5)
+    assert result["average_context_length"]["min"] == 2000
+    assert result["average_context_length"]["max"] == 5000
+    assert result["engine_work"]["active_request_ranks"]["median"] == 1

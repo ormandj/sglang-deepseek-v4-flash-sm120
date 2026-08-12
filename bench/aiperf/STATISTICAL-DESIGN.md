@@ -1,138 +1,121 @@
-# Engine-gate measurement design
+# Engine measurement design
 
-## Decision question
+## Decision target
 
-The routine question is whether an engine, kernel, dependency, or server
-configuration change altered decode execution or cold-prefill performance on
-the fixed SM120 deployment.
+The routine decision is whether a source, dependency, kernel, or server change
+improves DeepSeek-V4-Flash-0731 engine performance on the fixed SM120 system
+without a meaningful regression in the user-facing or scale guardrails.
 
-Generated text is an input to later decode work. With FP8 MoE inference and
-speculative decoding, even a greedy request can follow a different token and
-expert-routing path on repeated execution. Useful tokens per second therefore
-mixes two quantities:
+The priorities are explicit:
+
+1. C1 single-user programming performance;
+2. C2/C4/C8 sub-agent fan-out;
+3. C16/C32 scale behavior;
+4. cold-prefill rate;
+5. production-shaped AgentX behavior and correctness/stability gates.
+
+No weighted composite hides a regression in one dimension.
+
+## Why engine work and useful throughput are separate
+
+With speculative decoding:
 
 ```text
-useful tokens / second
-  = speculative decode steps / second
-  x useful tokens / step
+useful output tokens / second
+  = decode forward passes / second
+  x useful tokens / forward
 ```
 
-The benchmark records both factors. It never treats speculative acceptance as
-proof of a kernel speedup, and it never hides acceptance when reporting useful
-throughput.
+Generated token paths can change speculative acceptance, expert routing, and
+later work even with greedy sampling. The controlled gate therefore records
+the server's forward-pass rate as the primary engine execution measure and
+reports useful tokens/sec and tokens/forward beside it. A change is not called
+a kernel or scheduler speedup solely because one generated path accepted more
+draft tokens.
 
-## Same-process repeatability
+Temperature 0 and top-p 1 remove intentional sampling randomness from this
+engine test. Temperature 1 and top-p 0.95 are retained in the separate AgentX
+workload because that test asks about deployed agentic behavior.
 
-All repetitions hold the requested concurrency, require an empty queue, admit
-no prefill during the decode window, and use the same in-pod AIPerf placement.
-The fixed prompt and seed panel exposes path-dependent variation without adding
-server-restart variation between panel members.
+## Fixed shape and comparable window
 
-## Workloads and estimands
+All decode concurrencies use 16K requested input and 4K forced output. Holding
+shape constant avoids changing the amount of prefill, decode context, or work
+per request as concurrency changes. A 4K output is long enough to expose a
+stable server-side interval without making routine gates multi-hour campaigns.
 
-### Decode engine gate
+The analyzer fits counter slopes only over the same 17,408–20,480 average
+context interval. It requires:
 
-The gate uses temperature zero and top-p one to avoid adding sampling RNG to a
-test whose purpose is engine execution. The prompt corpus and seeds are fixed
-before comparison. Each request has exact input and minimum output lengths and
-ignores EOS.
+- exact target occupancy for at least 98% of the interval;
+- an empty request queue;
+- no prefill counter change;
+- monotonic counters;
+- at least 7 seconds and 20 metric scrapes.
 
-For each prompt-panel member, the analyzer selects a fixed average
-context-length interval and estimates:
+Client throughput includes fill and drain and is therefore not used as the
+fixed-window engine clock. ITL is retained as the user-facing decode measure.
+Request latency is a secondary integrated measurement of the fixed request.
+TTFT remains in the raw AIPerf output because it is needed to calculate prefill
+rate, but it is not scored or published separately: for long prompts it is the
+same prefill observation expressed as elapsed time.
 
-- OLS slope of speculative decode steps: primary engine-work rate;
-- OLS slope of useful output tokens: deployed useful throughput;
-- useful tokens per forward per request: acceptance/path control.
+## Repetitions and uncertainty
 
-The slopes are accepted only when exact occupancy holds for at least 98% of the
-window, the request queue remains empty, prefill counters do not change,
-counters remain monotonic, and at least 10 seconds and 30 scrapes are present.
-The scrape-count requirement is independent of elapsed time; the duration
-floor must not reject a candidate merely because it traverses the fixed context
-interval faster.
+A quick panel uses three fixed prompt paths at C1/C4/C8. A qualification panel
+uses five paths at the priority C1/C2/C4/C8 cells and three at C16/C32. Public
+tables use five at every supported concurrency for a simple uniform contract.
 
-### Cold prefill
+These are same-process prompt-path repetitions, not independent machine or
+deployment replicates. They provide:
 
-Prefill uses temperature zero and one output token. Each request is cache-busted.
-SGLang is explicitly flushed at the cell boundary. vLLM r33 does not expose its
-development-only reset API, so its analyzer instead requires the live cached
-prompt-token counter to remain zero. The primary rate is observed prompt tokens
-divided by the first request start through the last first-token time. Median
-TTFT is reported separately. Server counters are controls rather than the
-primary clock. The common near-limit target is 130,816 synthetic content tokens;
-the retained headroom accounts for engine chat-template expansion below the
-131,072-token context limit. Throughput uses each request's observed input-token
-count, not the nominal target.
+- the median effect;
+- every individual run value;
+- min/max, sample standard deviation, and sample coefficient of variation;
+- acceptance/path controls for each decode run.
 
-### Production workload and quality
+They do not justify a p-value or a claim that a sub-noise percentage is real.
+If an otherwise qualified candidate is close enough that the decision depends
+on a small effect, the next experiment uses independent matched process blocks:
+alternate baseline/candidate order, measure the paired log ratios, estimate
+variance from those blocks, and add blocks only for the stated smallest effect
+that matters. Routine changes do not pay that cold-start cost preemptively.
 
-Temperature 1.0 and top-p 0.95 are appropriate for the agentic workload that
-characterizes deployed behavior. That workload answers a different question
-and remains separate from the engine regression gate. GSM8K and long-output
-completion are correctness and stability checks, not decode-capacity
-replicates.
+## Warmup and process lifetime
 
-## Prompt-panel allocation
+Warmup is coverage, not a measured repetition. After a server start, image or
+configuration change, or profiling attachment, each decode concurrency and
+prefill length is exercised once. The measured panel then runs sequentially
+without restarting the process or warming between repetitions.
 
-A batch at concurrency C already averages C token paths. The fixed panel gives
-more repetitions to low concurrency, where one path otherwise dominates:
+This removes avoidable cold-compile and process-start variability while keeping
+the comparison representative of a warm serving engine. A cold-cache prefill
+cell still gets a distinct request marker and the engine-specific cache control
+described in the harness README.
 
-| Mode | C1 | C2 | C4 | C8 | C16 | C32 |
-|---|---:|---:|---:|---:|---:|---:|
-| quick | 3 | - | - | 2 | - | 1 |
-| decode supplement | - | 6 | 4 | - | 2 | - |
-| qualification | 8 | 6 | 4 | 3 | 2 | 2 |
-| publication | 5 | 5 | 5 | 5 | 5 | 5 where supported |
+## Production workload
 
-The decode supplement is used only to extend a matched quick comparison with
-the missing intermediate concurrency cells. Keeping it separate avoids
-repeating valid quick-gate work while preserving immutable artifacts and the
-qualification repetition budget for C2/C4/C16.
+AgentX is not used to diagnose an individual kernel. It is a separate external
+validity check using AIPerf's date-pinned public trace scenario and locked replay
+rules. C1 represents the primary coding-agent session and C8 represents fan-out.
+The scenario must run at least 900 seconds and must report
+`submission_valid=true`.
 
-C32 is omitted, not imputed, for a deployment whose configured sequence or KV
-capacity cannot admit it. Comparisons publish the resulting capacity mismatch.
+Fixed synthetic and AgentX results are both factual. They answer different
+questions and are never merged into one score.
 
-The publication panel is deliberately uniform: every reported decode
-concurrency contains five fresh prompt-path repetitions from one unchanged
-server process. A publication comparison never splices cells from quick,
-supplement, qualification, or an earlier run. Each of the three published cold
-prefill lengths likewise contains five cache-cold requests. This fixed rule
-keeps the public method simple and repeatable; it does not turn same-process
-prompt paths into independent deployment replicates.
+## Validity and reporting
 
-These counts are engineering budgets, not claims of a universal statistically
-correct sample size. The summary publishes every value, median, mean, range,
-sample standard deviation, and sample CV. A high CV is evidence that the cell
-needs more paths or a targeted diagnostic; it is not a reason to discard a
-valid result.
+Objective invalidation conditions are wrong token shape, failed requests,
+cancellation, failure to reach target concurrency, nonempty queue, prefill in a
+decode window, counter reset, cached tokens in a cold-prefill cell, missing
+records, or an insufficient equal-context window. A result is never discarded
+because its performance is surprising or unfavorable.
 
-## Comparison and independence
-
-Baseline and candidate use the same committed seeds and workload shapes. A
-single gate runs all panel members sequentially on one unchanged process. This
-removes restart churn from routine comparisons and makes prompt-path variation
-visible quickly.
-
-Panel members within one process are subsamples. They do not estimate
-deployment-to-deployment variation. Routine decisions therefore report paired
-effect sizes and controls without inferential language.
-
-When a candidate is close enough to the decision boundary that formal
-uncertainty matters, independent serving-process blocks become the experimental
-unit. Collect matched baseline/candidate blocks, alternate order, estimate the
-paired log-ratio variance from those blocks, and choose additional block count
-for the specific smallest effect that matters. Do not automatically run a
-fixed five-to-ten-block campaign for every code change, and do not pretend a
-maximum count achieved a target power when it did not.
-
-## Validity and exclusions
-
-Objective analyzer failures include wrong token shape, cancellation, missing
-records, failure to reach target concurrency, nonempty queue, occupancy loss,
-counter reset, prefill in a decode window, cached tokens in cold prefill, or an
-insufficient equal-context window. Performance value itself is never an
-exclusion reason.
-
-Public result packages contain the configs, fixed seeds, run-level values,
-source revisions, image digest, and calculation code while removing internal
-cluster names, registry locations, endpoints, and credentials.
+Public results state the image digest, source revisions, model and hardware,
+server command/configuration, AIPerf revision, workload shape, sampling
+settings, supported concurrency, and all run-level engine, acceptance, prefill,
+and ITL values. Request latency may be included as a separately labeled
+end-to-end workload result. TTFT is omitted because it is not an independent
+measurement. Internal endpoints, credentials, cluster names, and registry
+locations are omitted because they do not affect reproduction.

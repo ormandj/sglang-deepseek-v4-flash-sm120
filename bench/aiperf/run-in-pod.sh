@@ -35,8 +35,8 @@ case "$metrics_url" in
   *) echo "error: SERVER_METRICS_URL must be pod-localhost, got $metrics_url" >&2; exit 2 ;;
 esac
 
-aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-03c9c6dd/venv/bin/python}
-aiperf_bin=${AIPERF_BIN:-/models/.bench-tools/aiperf-0.12.0-03c9c6dd/venv/bin/aiperf}
+aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-6ed4823d/venv/bin/python}
+aiperf_bin=${AIPERF_BIN:-/models/.bench-tools/aiperf-0.12.0-6ed4823d/venv/bin/aiperf}
 uv_bin=${AIPERF_UV_BIN:-/models/.bench-tools/uv-0.12.3-linux-x86_64/uv}
 artifact_root=${AIPERF_ARTIFACT_ROOT:-/models/bench/results/aiperf-greenfield}
 artifact_dir="$artifact_root/$run_id"

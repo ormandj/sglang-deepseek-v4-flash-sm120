@@ -43,7 +43,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 config_dir="$script_dir/configs"
 panel="$script_dir/seed-panel.json"
 lock="$script_dir/aiperf.lock.json"
-aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-03c9c6dd/venv/bin/python}
+aiperf_python=${AIPERF_PYTHON:-/models/.bench-tools/aiperf-0.12.0-6ed4823d/venv/bin/python}
 uv_bin=${AIPERF_UV_BIN:-/models/.bench-tools/uv-0.12.3-linux-x86_64/uv}
 campaign_root=${AIPERF_CAMPAIGN_ROOT:-/models/bench/results/aiperf-greenfield/campaigns/$campaign}
 block_root="$campaign_root/$phase/$pair-$role"
@@ -134,8 +134,9 @@ run_decode() {
     --output "$cell/decode-analysis.json"
 }
 
-# Calibrated on RC3 to produce a natural terminal occupancy drop after a
-# minimum 30-second exact-occupancy analysis window.
+# Legacy paired-block shapes produce a natural terminal occupancy drop after a
+# minimum 30-second exact-occupancy analysis window. The canonical publication
+# runner uses one fixed 16K-input/4K-output shape instead.
 run_decode 1 18432
 run_decode 2 16384
 run_decode 4 12288

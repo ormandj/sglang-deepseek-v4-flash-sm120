@@ -43,9 +43,8 @@ def test_compare_reports_matched_prompt_effects() -> None:
     assert result["prefill"]["8k-c1"]["prompt_tokens_per_second"][
         "change_percent"
     ] == pytest.approx(10)
-    assert result["prefill"]["8k-c1"]["median_ttft_ms"][
-        "change_percent"
-    ] == pytest.approx(-9.090909)
+    assert set(result["prefill"]["8k-c1"]) == {"prompt_tokens_per_second"}
+    assert result["schema_version"] == "1.1"
 
 
 def test_compare_rejects_different_modes() -> None:

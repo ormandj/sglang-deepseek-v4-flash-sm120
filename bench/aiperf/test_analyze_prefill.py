@@ -110,6 +110,73 @@ def test_cached_tokens_invalidate_cell(tmp_path: Path) -> None:
     assert "server attributed 256 tokens to prefill cache" in result["failures"]
 
 
+def test_absent_sglang_cache_mode_is_zero_when_counter_family_exists(
+    tmp_path: Path,
+) -> None:
+    summary, records, server = _write_fixture(tmp_path)
+    document = json.loads(server.read_text(encoding="utf-8"))
+    series = document["metrics"]["sglang:realtime_tokens"]["series"]
+    document["metrics"]["sglang:realtime_tokens"]["series"] = [
+        row for row in series if row["labels"]["mode"] != "prefill_cache"
+    ]
+    server.write_text(json.dumps(document), encoding="utf-8")
+
+    result = analyze(
+        summary,
+        records,
+        server,
+        target_isl=8192,
+        target_concurrency=2,
+        expected_requests=4,
+        isl_tolerance=16,
+        maximum_compute_ratio=1.10,
+    )
+
+    assert result["validation"]["valid"] is True
+    assert result["server_controls"]["cache"]["total_tokens"] == 0.0
+
+
+def test_dp_owned_counters_sum_owners_and_deduplicate_tp_replicas(
+    tmp_path: Path,
+) -> None:
+    summary, records, server = _write_fixture(tmp_path)
+    document = json.loads(server.read_text(encoding="utf-8"))
+    series = []
+    for mode, total, rate in (
+        ("prefill_compute", 16896.0, 8000.0),
+        ("prefill_cache", 0.0, 0.0),
+    ):
+        for dp_rank in ("0", "1"):
+            for tp_rank in ("0", "1"):
+                series.append(
+                    {
+                        "labels": {
+                            "mode": mode,
+                            "dp_rank": dp_rank,
+                            "tp_rank": tp_rank,
+                        },
+                        "stats": {"total": total, "rate": rate},
+                    }
+                )
+    document["metrics"]["sglang:realtime_tokens"]["series"] = series
+    server.write_text(json.dumps(document), encoding="utf-8")
+
+    result = analyze(
+        summary,
+        records,
+        server,
+        target_isl=8192,
+        target_concurrency=2,
+        expected_requests=4,
+        isl_tolerance=16,
+        maximum_compute_ratio=1.10,
+    )
+
+    assert result["validation"]["valid"] is True
+    assert result["server_controls"]["compute"]["total_tokens"] == 33792.0
+    assert result["server_controls"]["compute"]["tokens_per_second"] == 16000.0
+
+
 def test_missing_record_and_concurrency_invalidate_cell(tmp_path: Path) -> None:
     summary, records, server = _write_fixture(tmp_path)
     lines = records.read_text(encoding="utf-8").splitlines()
