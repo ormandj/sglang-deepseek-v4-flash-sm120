@@ -111,17 +111,17 @@ capacity to admit the workload. No value is imputed.
 
 | Engine | C | Verifier steps/s | Useful decode tok/s | ITL ms/token |
 |---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 55.54 | 301.6 | 3.58 |
+| SGLang v0.2.0-rc.0 | 1 | 56.09 | 269.3 | 3.83 |
 | vLLM r33 | 1 | 66.58 | 255.2 | 3.89 |
-| SGLang v0.2.0-rc.0 | 2 | 44.22 | 480.3 | 4.35 |
+| SGLang v0.2.0-rc.0 | 2 | 45.37 | 493.5 | 4.24 |
 | vLLM r33 | 2 | 46.34 | 421.0 | 5.22 |
-| SGLang v0.2.0-rc.0 | 4 | 32.19 | 698.5 | 6.34 |
+| SGLang v0.2.0-rc.0 | 4 | 32.32 | 713.7 | 6.06 |
 | vLLM r33 | 4 | 33.07 | 616.0 | 7.06 |
-| SGLang v0.2.0-rc.0 | 8 | 21.39 | 865.3 | 10.66 |
+| SGLang v0.2.0-rc.0 | 8 | 21.65 | 870.1 | 10.60 |
 | vLLM r33 | 8 | 23.45 | 795.8 | 11.08 |
-| SGLang v0.2.0-rc.0 | 16 | 16.44 | 1,332.0 | 15.88 |
+| SGLang v0.2.0-rc.0 | 16 | 16.45 | 1,359.0 | 15.11 |
 | vLLM r33 | 16 | 15.86 | 1,097.2 | 17.59 |
-| SGLang v0.2.0-rc.0 | 32 | 12.15 | 1,881.0 | 24.77 |
+| SGLang v0.2.0-rc.0 | 32 | 12.29 | 1,949.2 | 23.11 |
 | vLLM r33 | 32 | Not measured: insufficient KV capacity | Not measured | Not measured |
 
 ## DSpARK acceptance
@@ -130,24 +130,24 @@ Each entry is the median of the five per-run means.
 
 | Engine | C | Acceptance rate | Accepted tokens/step/request |
 |---|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 0.889 | 5.444 |
+| SGLang v0.2.0-rc.0 | 1 | 0.764 | 4.821 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.2.0-rc.0 | 2 | 0.864 | 5.321 |
+| SGLang v0.2.0-rc.0 | 2 | 0.888 | 5.439 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.2.0-rc.0 | 4 | 0.886 | 5.429 |
+| SGLang v0.2.0-rc.0 | 4 | 0.924 | 5.618 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.2.0-rc.0 | 8 | 0.793 | 4.963 |
+| SGLang v0.2.0-rc.0 | 8 | 0.791 | 4.954 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.2.0-rc.0 | 16 | 0.796 | 4.981 |
+| SGLang v0.2.0-rc.0 | 16 | 0.795 | 4.976 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.2.0-rc.0 | 32 | 0.754 | 4.768 |
+| SGLang v0.2.0-rc.0 | 32 | 0.778 | 4.889 |
 | vLLM r33 | 32 | Not measured | Not measured |
 
 ## Cold prefill
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 6,424.4 | 7,075.6 | 6,835.5 | 6,546.2 |
+| SGLang v0.2.0-rc.0 | 7,484.1 | 8,521.2 | 8,299.8 | 7,824.5 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ## Completed quality result
