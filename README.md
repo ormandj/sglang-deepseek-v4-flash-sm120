@@ -187,11 +187,6 @@ effective trees.
 
 ## Measurements
 
-The published table below predates the fused-MHC runtime opt-in above. It is
-retained as the immutable `v0.2.0-rc.0` publication record until the matching
-same-process measurement is replaced; no fused-MHC throughput claim is derived
-from these values.
-
 Both engines were measured on the same two RTX PRO 6000 Blackwell Max-Q GPUs
 at TP2 over PCIe Gen 4 x16, with a 300 W limit per GPU. Only one engine was
 active. Clients ran inside the serving pod against localhost. Decode used a
@@ -205,17 +200,17 @@ AIPerf's average post-first-token time per generated token.
 
 | Engine | C | Verifier steps/s | Useful decode tok/s | ITL ms/token |
 |---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 56.09 | 269.3 | 3.83 |
+| SGLang v0.2.0-rc.0 | 1 | 59.61 | 278.8 | 3.65 |
 | vLLM r33 | 1 | 66.58 | 255.2 | 3.89 |
-| SGLang v0.2.0-rc.0 | 2 | 45.37 | 493.5 | 4.24 |
+| SGLang v0.2.0-rc.0 | 2 | 44.63 | 438.3 | 4.52 |
 | vLLM r33 | 2 | 46.34 | 421.0 | 5.22 |
-| SGLang v0.2.0-rc.0 | 4 | 32.32 | 713.7 | 6.06 |
+| SGLang v0.2.0-rc.0 | 4 | 31.55 | 595.9 | 6.96 |
 | vLLM r33 | 4 | 33.07 | 616.0 | 7.06 |
-| SGLang v0.2.0-rc.0 | 8 | 21.65 | 870.1 | 10.60 |
+| SGLang v0.2.0-rc.0 | 8 | 22.27 | 855.9 | 10.55 |
 | vLLM r33 | 8 | 23.45 | 795.8 | 11.08 |
-| SGLang v0.2.0-rc.0 | 16 | 16.45 | 1,359.0 | 15.11 |
+| SGLang v0.2.0-rc.0 | 16 | 16.97 | 1,342.0 | 15.12 |
 | vLLM r33 | 16 | 15.86 | 1,097.2 | 17.59 |
-| SGLang v0.2.0-rc.0 | 32 | 12.29 | 1,949.2 | 23.11 |
+| SGLang v0.2.0-rc.0 | 32 | 12.61 | 1,974.2 | 22.89 |
 | vLLM r33 | 32 | Not measured: insufficient KV capacity | Not measured | Not measured |
 
 ### DSpARK acceptance
@@ -224,17 +219,17 @@ Each entry is the median of the five per-run means.
 
 | Engine | C | Acceptance rate | Accepted tokens/step/request |
 |---|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 0.764 | 4.821 |
+| SGLang v0.2.0-rc.0 | 1 | 0.737 | 4.685 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.2.0-rc.0 | 2 | 0.888 | 5.439 |
+| SGLang v0.2.0-rc.0 | 2 | 0.796 | 4.979 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.2.0-rc.0 | 4 | 0.924 | 5.618 |
+| SGLang v0.2.0-rc.0 | 4 | 0.716 | 4.581 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.2.0-rc.0 | 8 | 0.791 | 4.954 |
+| SGLang v0.2.0-rc.0 | 8 | 0.753 | 4.764 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.2.0-rc.0 | 16 | 0.795 | 4.976 |
+| SGLang v0.2.0-rc.0 | 16 | 0.783 | 4.914 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.2.0-rc.0 | 32 | 0.778 | 4.889 |
+| SGLang v0.2.0-rc.0 | 32 | 0.771 | 4.857 |
 | vLLM r33 | 32 | Not measured | Not measured |
 
 ### Cold prefill
@@ -243,7 +238,7 @@ One output token and five cache-cold requests were used per cell.
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 7,484.1 | 8,521.2 | 8,299.8 | 7,824.5 |
+| SGLang v0.2.0-rc.0 | 7,519.9 | 8,425.2 | 8,146.2 | 7,689.8 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ### Completed quality result
@@ -269,6 +264,7 @@ graders, and machine-readable summaries are under [`bench/`](bench/).
 - Chunked prefill: 8,192 tokens.
 - HC prenorm: SM120 DeepGEMM for large-token prefill batches; the existing
   fallback remains selected below the 1,024-token dispatch threshold.
+- Fused MHC post+pre: `SGLANG_OPT_FUSE_MHC_POST_PRE=1`.
 - DSpARK block size: 5.
 - Communication: upstream NCCL; custom all-reduce disabled.
 
