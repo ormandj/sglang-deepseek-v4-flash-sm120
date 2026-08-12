@@ -33,13 +33,10 @@ source of truth.
 
 ### Start the server
 
-Install Docker, the NVIDIA Container Toolkit, and `uv`, then clone this
-repository for the validated launch script:
+Install Docker, the NVIDIA Container Toolkit, and `uv`. Download the pinned
+model snapshot and create a persistent compiled-kernel cache:
 
 ```bash
-git clone https://github.com/ormandj/sglang-deepseek-v4-flash-sm120.git
-cd sglang-deepseek-v4-flash-sm120
-
 export MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731
 uvx --from huggingface-hub hf download \
   deepseek-ai/DeepSeek-V4-Flash-0731 \
@@ -47,14 +44,60 @@ uvx --from huggingface-hub hf download \
   --local-dir "$MODEL_DIR"
 
 export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
-MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
-  ./examples/serve-dsv4-0731.sh
+mkdir -p "$CACHE_DIR"
 ```
 
-The script pulls the prebuilt image when necessary, mounts the model read-only,
-uses GPUs 0 and 1, persists compiled kernels under `CACHE_DIR`, and exposes the
-OpenAI-compatible API on port 8000. The first launch compiles SM120 kernels;
-subsequent launches reuse the persistent `v10` cache.
+Start the prebuilt image directly:
+
+```bash
+docker run --rm \
+  --name dsv4-flash-sglang \
+  --entrypoint sglang \
+  --gpus all \
+  --shm-size 64g \
+  --ulimit memlock=-1 \
+  --publish 8000:8000 \
+  --volume "$MODEL_DIR:/models/deepseek-ai/DeepSeek-V4-Flash-0731:ro" \
+  --volume "$CACHE_DIR:/root/.cache" \
+  --env CUDA_VISIBLE_DEVICES=0,1 \
+  --env SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0 \
+  --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
+  --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
+  --env TVM_CACHE_DIR=/root/.cache/tvm \
+  --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
+  --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
+  --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0 \
+  serve \
+  --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
+  --served-model-name deepseek-v4-flash \
+  --trust-remote-code \
+  --tensor-parallel-size 2 \
+  --kv-cache-dtype fp8_e4m3 \
+  --mem-fraction-static 0.93 \
+  --context-length 774656 \
+  --chunked-prefill-size 8192 \
+  --cuda-graph-max-bs-decode 32 \
+  --max-running-requests 48 \
+  --disable-custom-all-reduce \
+  --fp8-gemm-backend auto \
+  --enable-deepseek-v4-fp4-indexer \
+  --speculative-algorithm DSPARK \
+  --speculative-dspark-block-size 5 \
+  --reasoning-parser deepseek-v4 \
+  --tool-call-parser deepseekv4 \
+  --enable-metrics \
+  --enable-cache-report \
+  --sleep-on-idle \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+This command mounts the model read-only, uses GPUs 0 and 1, persists compiled
+kernels under `CACHE_DIR`, and exposes the OpenAI-compatible API on port 8000.
+The first launch compiles SM120 kernels; subsequent launches reuse the
+persistent `v10` cache.
 
 In another shell, verify the server and send a request:
 
@@ -72,8 +115,9 @@ curl -fsS http://localhost:8000/v1/chat/completions \
 ```
 
 See [RUN.md](RUN.md) for requirements, image and port overrides, API examples,
-capacity checks, and operational notes. The exact validated command is kept in
-[examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
+capacity checks, and operational notes. For users who prefer a checked wrapper,
+[examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh) validates the paths
+and executes this same Docker configuration.
 
 `v0.2.0-rc.0` is a clean reimage. It does not carry the experimental
 TRT/MNNVL all-reduce fusion, PCIe-IPC communication paths, TBO, or other
