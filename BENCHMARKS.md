@@ -158,8 +158,7 @@ The full GSM8K set ran once at concurrency 16, temperature 0, seed 42, and a
 |---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | 1,319 | 1,258 | 95.38% | 0 |
 
-The long-format n=5, near-context, and AgentX checks remain pending and are not
-represented as completed results.
+Near-context and AgentX checks are not represented as completed results.
 
 ## Machine-readable results
 

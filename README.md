@@ -109,8 +109,7 @@ One output token and five cache-cold requests were used per cell.
 |---|---|---:|---:|---:|---:|
 | SGLang v0.2.0-rc.0 | GSM8K | 1,319 | 1,258 | 95.38% | 0 |
 
-The long-format n=5, near-context, and AgentX checks are pending and are not
-represented as completed results.
+Near-context and AgentX checks are not represented as completed results.
 
 [BENCHMARKS.md](BENCHMARKS.md) documents the frozen method, exact revisions,
 metric definitions, and commands. The executable harness, scoring code,

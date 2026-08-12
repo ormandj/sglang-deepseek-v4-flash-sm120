@@ -1,4 +1,4 @@
-"""Run and validate the deterministic long single-file generation check."""
+"""Run and validate an optional long single-file generation diagnostic."""
 
 from __future__ import annotations
 

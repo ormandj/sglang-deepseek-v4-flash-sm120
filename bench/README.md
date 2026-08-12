@@ -33,9 +33,6 @@ in [`aiperf/README.md`](aiperf/README.md). The rationale is in
 
 - [`aiperf/configs/gsm8k.yaml`](aiperf/configs/gsm8k.yaml): full 1,319-question
   GSM8K accuracy run.
-- [`long_write_quality.py`](long_write_quality.py): five sequential
-  temperature-1/top-p-0.95 long HTML/JavaScript generations plus deterministic
-  structural and `node --check` validation.
 - [`near_context_bench.py`](near_context_bench.py): one persisted-corpus
   near-context admission request.
 - [`aiperf/run-agentx-gate-in-pod.sh`](aiperf/run-agentx-gate-in-pod.sh): pinned
@@ -43,10 +40,14 @@ in [`aiperf/README.md`](aiperf/README.md). The rationale is in
 
 Quality results remain separate from engine-performance measurements.
 
+[`long_write_quality.py`](long_write_quality.py) remains available as an
+optional targeted diagnostic. It is not part of the recurring release or
+publication protocol.
+
 Both authenticated and keyless endpoints are supported. `BENCH_API_KEY` is
-used when set; otherwise no authorization header is sent. Long-output and
-near-context tools also accept their documented API-key environment variables.
-No key is written to output.
+used when set; otherwise no authorization header is sent. Optional diagnostic
+tools also accept their documented API-key environment variables. No key is
+written to output.
 
 ## Results
 

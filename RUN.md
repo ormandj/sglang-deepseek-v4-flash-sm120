@@ -101,7 +101,7 @@ inside the selected serving pod against localhost. The frozen protocol uses:
 - five repetitions at each published supported concurrency;
 - separate cache-cold prefill diagnostics;
 - C1 and C8 AgentX programming-trace replay;
-- correctness, long-generation, and near-context-limit gates.
+- correctness and near-context-limit gates.
 
 Results from the previous benchmark shape are historical and are not mixed
 with `v0.2.0` measurements.

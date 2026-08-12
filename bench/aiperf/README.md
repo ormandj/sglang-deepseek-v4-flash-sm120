@@ -189,35 +189,6 @@ GSM8K_MAX_TOKENS=16384 \
 ./run-in-pod.sh configs/gsm8k.yaml gsm8k-full
 ```
 
-### Long single-file generation
-
-[`../long_write_quality.py`](../long_write_quality.py) issues five sequential
-single-file HTML/JavaScript requests at temperature 1.0, top-p 0.95,
-`reasoning_effort=max`, and a 131,072-token response cap. Request traffic must
-originate inside the serving pod against localhost. Authentication is optional:
-set `LLM_API_KEY` or `BENCH_API_KEY` when the endpoint requires it.
-
-The serving image need not contain Node.js. Save the responses in the pod,
-retrieve that JSON, and run the deterministic validator wherever `node` is
-available:
-
-```bash
-uv run --no-project python ../long_write_quality.py run \
-  --model deepseek-v4-flash \
-  --runs 5 \
-  --output /path/to/long-output-responses.json
-
-uv run --no-project python ../long_write_quality.py validate \
-  --input /path/to/long-output-responses.json \
-  --output /path/to/long-output-validation.json
-```
-
-A response is complete only when its HTML fence closes, `</html>` is present,
-no configured placeholder expression is present, and every inline script body
-passes `node --check`. The validation output records the SHA-256 of the response
-artifact it grades. The response artifact records the prompt hash and the same
-image, GitOps, project, and model provenance variables used by the engine gate.
-
 ### Near-context and AgentX
 
 [`../near_context_bench.py`](../near_context_bench.py) sends one persisted-corpus
@@ -228,3 +199,11 @@ when the selected API-key environment variable is unset.
 MVP scenario for 900 seconds each at C1 and C8 with temperature 1.0 and top-p
 0.95. It requires AIPerf's `submission_valid` result and writes a checksum
 inventory on success.
+
+## Optional targeted diagnostics
+
+[`../long_write_quality.py`](../long_write_quality.py) issues sequential
+single-file HTML/JavaScript requests and validates their structure and inline
+JavaScript. It is not part of the recurring release or publication protocol;
+run it only when investigating long-generation behavior. See the tool's
+`--help` output for its run and validation commands.
