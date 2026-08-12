@@ -1,24 +1,83 @@
-# sglang-deepseek-v4-flash-sm120
+# SGLang for DeepSeek-V4-Flash on SM120
 
-An SGLang container image for DeepSeek-V4-Flash-0731 on RTX PRO 6000
-Blackwell (SM120) GPUs. The image is assembled from immutable upstream pins and
-a small, audited set of unmerged model-support and correctness changes.
+This repository publishes a ready-to-run SGLang container image for
+`deepseek-ai/DeepSeek-V4-Flash-0731` on NVIDIA RTX PRO 6000 Blackwell (SM120)
+GPUs. You do not need to build SGLang, FlashInfer, or the image locally.
 
-Current release candidate:
+## Fast path: run the prebuilt image
+
+The current public release candidate is already built and available for
+anonymous pulls from GitHub Container Registry:
 
 ```text
 ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
 ```
 
+Pull it directly with Docker; no local image build is required:
+
+```bash
+docker pull ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
+```
+
+The image is built and published by
+[this repository's GitHub Actions workflow](.github/workflows/build-image.yml)
+using this repository's `Containerfile`, `release.json`, `stack.lock.json`, and
+recorded patches as its build inputs. The image records this GitHub repository
+and the exact source commit in its OCI source and revision labels. It is not a
+separately maintained or manually modified image.
+
+It is a Linux x86_64 image validated with two SM120 GPUs at tensor parallel
+size 2. Candidate and stable tags are immutable, and this project does not
+publish a mutable `latest` tag. [`release.json`](release.json) is the version
+source of truth.
+
+### Start the server
+
+Install Docker, the NVIDIA Container Toolkit, and `uv`, then clone this
+repository for the validated launch script:
+
+```bash
+git clone https://github.com/ormandj/sglang-deepseek-v4-flash-sm120.git
+cd sglang-deepseek-v4-flash-sm120
+
+export MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731
+uvx --from huggingface-hub hf download \
+  deepseek-ai/DeepSeek-V4-Flash-0731 \
+  --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
+  --local-dir "$MODEL_DIR"
+
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
+MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+  ./examples/serve-dsv4-0731.sh
+```
+
+The script pulls the prebuilt image when necessary, mounts the model read-only,
+uses GPUs 0 and 1, persists compiled kernels under `CACHE_DIR`, and exposes the
+OpenAI-compatible API on port 8000. The first launch compiles SM120 kernels;
+subsequent launches reuse the persistent `v10` cache.
+
+In another shell, verify the server and send a request:
+
+```bash
+curl -fsS http://localhost:8000/health
+
+curl -fsS http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "deepseek-v4-flash",
+    "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
+    "max_tokens": 32,
+    "temperature": 0
+  }'
+```
+
+See [RUN.md](RUN.md) for requirements, image and port overrides, API examples,
+capacity checks, and operational notes. The exact validated command is kept in
+[examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh).
+
 `v0.2.0-rc.0` is a clean reimage. It does not carry the experimental
 TRT/MNNVL all-reduce fusion, PCIe-IPC communication paths, TBO, or other
-performance experiments from the previous release line. Candidate and stable
-tags are immutable; there is no `latest` tag. [`release.json`](release.json)
-is the version source of truth and uses the new `v10` cache namespace.
-
-See [RUN.md](RUN.md) for deployment and
-[examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh) for the exact TP2
-configuration used below.
+performance experiments from the previous release line.
 
 ## Source composition
 
