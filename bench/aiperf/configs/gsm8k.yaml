@@ -9,6 +9,7 @@ benchmark:
   endpoint:
     url: ${INFERENCE_URL:http://127.0.0.1:8000}
     type: chat
+    api_key: ${BENCH_API_KEY:}
     streaming: true
     timeout: ${REQUEST_TIMEOUT_SECONDS:1800}
     useServerTokenCount: true

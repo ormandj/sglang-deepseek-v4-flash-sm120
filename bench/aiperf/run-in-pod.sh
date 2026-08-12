@@ -22,6 +22,7 @@ esac
 
 inference_url=${INFERENCE_URL:-http://127.0.0.1:8000}
 metrics_url=${SERVER_METRICS_URL:-http://127.0.0.1:8000/metrics}
+export BENCH_API_KEY=${BENCH_API_KEY:-${VLLM_API_KEY:-}}
 case "$inference_url" in
   http://127.0.0.1:*/*|http://localhost:*/*)
     echo "error: INFERENCE_URL must not include an endpoint path: $inference_url" >&2
