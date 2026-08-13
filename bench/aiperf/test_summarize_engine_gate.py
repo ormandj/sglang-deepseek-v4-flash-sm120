@@ -200,9 +200,9 @@ def test_prefill_quick_requires_only_quick_prefill_cells(tmp_path) -> None:
     }
 
 
-def test_publication_requires_ten_c1_paths_and_five_other_samples(tmp_path) -> None:
+def test_publication_requires_five_samples_per_cell(tmp_path) -> None:
     for concurrency in (1, 2, 4, 8, 16, 32):
-        repetitions = 10 if concurrency == 1 else 5
+        repetitions = 5
         for repetition in range(1, repetitions + 1):
             _write(
                 tmp_path
@@ -260,13 +260,12 @@ def test_publication_requires_ten_c1_paths_and_five_other_samples(tmp_path) -> N
     result = summarize(tmp_path, mode="publication", build_id="rc3")
 
     assert set(result["decode"]) == {"c1", "c2", "c4", "c8", "c16", "c32"}
-    assert result["decode"]["c1"]["engine_forward_passes_per_second"]["count"] == 10
     assert all(
         result["decode"][f"c{concurrency}"]["engine_forward_passes_per_second"][
             "count"
         ]
         == 5
-        for concurrency in (2, 4, 8, 16, 32)
+        for concurrency in (1, 2, 4, 8, 16, 32)
     )
     assert all(cell["requests"] == 5 for cell in result["prefill"].values())
 
@@ -304,8 +303,7 @@ def test_publication_rejects_nonuniform_prefill_count(tmp_path) -> None:
             )
             _write(target, json.loads(source.read_text(encoding="utf-8")))
     for concurrency in (1, 4, 8):
-        final_repetition = 10 if concurrency == 1 else 5
-        for repetition in range(4, final_repetition + 1):
+        for repetition in range(4, 6):
             source = root / "decode" / f"c{concurrency}" / "r01" / "decode-analysis.json"
             target = root / "decode" / f"c{concurrency}" / f"r{repetition:02d}" / "decode-analysis.json"
             _write(target, json.loads(source.read_text(encoding="utf-8")))

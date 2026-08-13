@@ -98,18 +98,12 @@ warmup.
 | `decode-supplement` | C2/C16 x3 | none | fill scale guardrails after a quick run |
 | `prefill-quick` | none | 8K/32K/64K/128K x3 | matched prefill-only comparison |
 | `qualification` | C1/C2/C4/C8 x5; C16/C32 x3 | all lengths x5 | release decision |
-| `publication` | C1 x10; every other supported C x5 | all lengths x5 | public table |
+| `publication` | every supported C x5 | all lengths x5 | uniform public table |
 
 C1 is the primary single-user programming workload. C2/C4/C8 cover ordinary
 sub-agent fan-out. C16/C32 are scale and regression guardrails. vLLM r33 is
 configured for at most 16 sequences, so C32 is recorded as unsupported rather
 than assigned a synthetic value.
-
-Publication expands C1 to ten sequential fixed-seed prompt paths because one
-C1 repetition exposes only one generated path and this cell has shown the
-largest path-dependent spread. At C2 and above, each of the five repetitions
-already executes multiple distinct prompt paths concurrently. The reported
-sample count is always the number of repetitions, not the number of requests.
 
 Run an engine gate inside the selected pod:
 
@@ -172,8 +166,8 @@ engine gate and cannot turn an engine regression into a pass.
   old methods into one table.
 
 Publication uses only a fresh `publication` panel for each engine. It includes
-all ten C1 run values, all five run values for every other supported decode
-cell, medians and dispersion, and states unsupported cells directly.
+all five run values, medians and dispersion, and states unsupported cells
+directly.
 
 ## Release quality and stability checks
 

@@ -113,11 +113,12 @@ The executable harness lives in [`bench/aiperf`](bench/aiperf). Clients run
 inside the selected serving pod against localhost. The frozen protocol uses:
 
 - identical 16,384-token input and 4,096-token output shapes at C1–C32;
-- ten sequential fixed-seed repetitions at C1 and five at every other
-  published supported concurrency;
+- five sequential fixed-seed repetitions at every published supported
+  concurrency;
 - separate cache-cold prefill diagnostics;
 - C1 and C8 AgentX programming-trace replay;
 - correctness and near-context-limit gates.
 
-Results from the previous benchmark shape are historical and are not mixed
-with `v0.2.1` measurements.
+The published `v0.2.1-rc.0` panel preserves the sample counts actually
+collected for that release, including ten C1 paths. Future uniform-n=5 panels
+are not spliced into that historical result.

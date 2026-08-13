@@ -35,9 +35,8 @@ throughput. It varies with the accepted-draft-length distribution of each fixed
 prompt/seed path; verifier steps/s is reported separately from that acceptance
 effect.
 
-Publication uses ten sequential fixed-seed paths at C1, five repetitions at
-every other supported decode concurrency, and five requests at each prefill
-length.
+Publication uses five sequential fixed-seed paths at every supported decode
+concurrency and five requests at each prefill length.
 
 ## Release quality checks
 
@@ -52,7 +51,24 @@ Quality results remain separate from engine-performance measurements.
 
 [`long_write_quality.py`](long_write_quality.py) remains available as an
 optional targeted diagnostic. It is not part of the recurring release or
-publication protocol.
+publication protocol. The request phase must run inside the serving pod against
+localhost; JavaScript validation can run on any host with Node.js:
+
+```bash
+uv run --no-project python bench/long_write_quality.py run \
+  --model deepseek-v4-flash \
+  --runs 5 \
+  --output /models/bench/results/quality/long-write-responses.json
+
+uv run --no-project python bench/long_write_quality.py validate \
+  --input /path/to/long-write-responses.json \
+  --output bench/results/long-write-summary.json \
+  --node-command node
+```
+
+The default request is temperature 1.0, top-p 0.95, maximum reasoning effort,
+and a 131,072-token completion budget. The validation summary records request
+settings and provenance but omits generated response bodies.
 
 Both authenticated and keyless endpoints are supported. `BENCH_API_KEY` is
 used when set; otherwise no authorization header is sent. Optional diagnostic

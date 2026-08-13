@@ -1,8 +1,17 @@
 # Changelog
 
-This changelog records the user-visible composition and runtime changes in the
-`0.2.x` image line. Exact source revisions, effective trees, patch hashes, and
+This changelog records user-visible composition, runtime, and benchmark-tooling
+changes. Exact source revisions, effective trees, patch hashes, and
 image digests are recorded in each release bundle and OCI labels.
+
+## Unreleased
+
+### Benchmark tooling
+
+- Standardized future publication panels at five repetitions for every
+  supported decode concurrency and cold-prefill length.
+- Preserved request settings and provenance in optional long-write validation
+  summaries without retaining generated response bodies.
 
 ## v0.2.1-rc.0 - 2026-08-12
 

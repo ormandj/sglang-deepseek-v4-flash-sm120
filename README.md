@@ -197,6 +197,11 @@ active. Clients ran inside the serving pod against localhost. Decode used a
 SGLang C1 used ten fixed-seed prompt paths; vLLM C1 and every other measured
 cell used five.
 
+Those counts describe the published `v0.2.1-rc.0` result. The checked harness
+now uses five repetitions at every supported concurrency for future
+publication panels; historical result files and tables are not resampled or
+combined with the new protocol.
+
 Each table entry below is a same-process median. C1 uses ten fixed-seed prompt
 paths; every other supported concurrency uses five. ITL is AIPerf's average
 post-first-token time per generated token. Synthetic fixed-window output tok/s

@@ -58,10 +58,11 @@ The engine measurement was collected with project harness revision:
 6fc08101a6c309b998a2f393b30065942e98a0b4
 ```
 
-The engine runner and analyzers copied into this public repository are
-unchanged from that revision. Later changes add quality gates and clarify
-reporting: TTFT remains in raw AIPerf output but is not scored or presented as
-an independent result.
+The results below were collected with that revision. The current checked
+harness standardizes future publication panels at five repetitions for every
+supported concurrency; it does not retroactively alter this release's recorded
+sample counts. TTFT remains in raw AIPerf output but is not scored or presented
+as an independent result.
 
 ## Publication method
 

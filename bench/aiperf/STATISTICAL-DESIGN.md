@@ -69,11 +69,9 @@ same prefill observation expressed as elapsed time.
 
 A quick panel uses three fixed-seed repetitions at C1/C4/C8. A qualification
 panel uses five repetitions at the priority C1/C2/C4/C8 cells and three at
-C16/C32. Publication expands C1 to ten sequential repetitions and uses five at
-every other supported concurrency. One C1 repetition contains one prompt path;
-each C2-or-higher repetition already contains multiple distinct paths. The
-larger C1 panel directly addresses the path-dependent spread observed in the
-primary single-user cell without multiplying the runtime of the entire panel.
+C16/C32. Publication uses five sequential repetitions at every supported
+concurrency. One C1 repetition contains one prompt path; each C2-or-higher
+repetition contains multiple distinct paths.
 
 These are same-process prompt-path repetitions, not independent machine or
 deployment replicates. They provide:

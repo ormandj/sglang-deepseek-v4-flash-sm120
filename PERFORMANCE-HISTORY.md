@@ -1,7 +1,7 @@
 # Release performance history
 
 This file preserves the measured performance snapshot for each published
-`0.2.x` release candidate. [BENCHMARKS.md](BENCHMARKS.md) remains the
+release candidate. [BENCHMARKS.md](BENCHMARKS.md) remains the
 current-result view; this file is historical and never substitutes results
 across releases or benchmark methods.
 
