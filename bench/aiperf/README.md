@@ -7,7 +7,7 @@ starts, stops, or restarts the server.
 The method deliberately separates three questions:
 
 1. Does the engine execute a fixed decode shape faster?
-2. How much useful output does the speculative stack produce?
+2. How many output tokens does the speculative stack produce per verifier step?
 3. How does the server behave on cold prefill and production-shaped agentic
    traffic?
 
@@ -44,14 +44,22 @@ Every decode cell uses the same workload:
 - analysis over the same 17,408–20,480 average-context interval.
 
 The primary engine rate is the OLS slope of server-side decode forward passes.
-Useful output-token rate and useful tokens per forward are reported beside it,
-so speculative-acceptance variation remains visible. Every repetition also
-records the mean, median, minimum, and maximum DSpARK acceptance rate and
-accepted draft length; the summary describes those run-level values without
-pooling them. SGLang uses its acceptance gauges. vLLM uses the deltas of its
-cumulative draft, draft-token, and accepted-token counters between adjacent
-server-metric scrapes; the per-run record also retains each whole-window
-counter ratio. The analyzer rejects a window with queueing, prefill work,
+Synthetic fixed-window output rate and output tokens per forward are reported
+beside it, so speculative-acceptance variation remains visible. “Synthetic
+fixed-window output tok/s” is the OLS slope of the engine's
+generated-output-token counter over the fixed 17,408–20,480 average-context
+interval in this synthetic workload. It is not client end-to-end, production,
+interactive, or application throughput. It combines verifier rate with output
+tokens produced per step, so the accepted-draft-length distribution of each
+fixed prompt/seed path directly affects it and gives it a wider observed spread
+than verifier steps/s. Every
+repetition also records the mean, median, minimum, and maximum DSpARK acceptance
+rate and accepted draft length; the summary describes those run-level values
+without pooling them. SGLang uses its acceptance gauges. vLLM uses the deltas
+of its cumulative draft, draft-token, and accepted-token counters between
+adjacent server-metric scrapes; the per-run record also retains each
+whole-window counter ratio. The analyzer rejects a window with queueing,
+prefill work,
 counter resets, wrong occupancy, or an insufficient equal-context interval.
 
 Client metrics are retained in the machine-readable summary, not substituted
@@ -90,12 +98,18 @@ warmup.
 | `decode-supplement` | C2/C16 x3 | none | fill scale guardrails after a quick run |
 | `prefill-quick` | none | 8K/32K/64K/128K x3 | matched prefill-only comparison |
 | `qualification` | C1/C2/C4/C8 x5; C16/C32 x3 | all lengths x5 | release decision |
-| `publication` | every supported C x5 | all lengths x5 | uniform public table |
+| `publication` | C1 x10; every other supported C x5 | all lengths x5 | public table |
 
 C1 is the primary single-user programming workload. C2/C4/C8 cover ordinary
 sub-agent fan-out. C16/C32 are scale and regression guardrails. vLLM r33 is
 configured for at most 16 sequences, so C32 is recorded as unsupported rather
 than assigned a synthetic value.
+
+Publication expands C1 to ten sequential fixed-seed prompt paths because one
+C1 repetition exposes only one generated path and this cell has shown the
+largest path-dependent spread. At C2 and above, each of the five repetitions
+already executes multiple distinct prompt paths concurrently. The reported
+sample count is always the number of repetitions, not the number of requests.
 
 Run an engine gate inside the selected pod:
 
@@ -158,8 +172,8 @@ engine gate and cannot turn an engine regression into a pass.
   old methods into one table.
 
 Publication uses only a fresh `publication` panel for each engine. It includes
-all five run values plus medians and dispersion, and states unsupported cells
-directly.
+all ten C1 run values, all five run values for every other supported decode
+cell, medians and dispersion, and states unsupported cells directly.
 
 ## Release quality and stability checks
 

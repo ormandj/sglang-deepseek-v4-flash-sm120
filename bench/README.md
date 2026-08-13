@@ -14,8 +14,8 @@ project, and model revisions without recording credentials.
 The runner separates:
 
 - server-side decode steps per second;
-- useful output tokens per second;
-- useful tokens per step per request;
+- synthetic fixed-window output tokens per second;
+- output tokens per step per request;
 - DSpARK acceptance rate and accepted length;
 - AIPerf inter-token latency;
 - cache-cold prompt tokens per second.
@@ -28,6 +28,16 @@ and scheduling and is treated as a secondary integrated measurement.
 The complete workload, warmup, validity, repetition, and reporting contract is
 in [`aiperf/README.md`](aiperf/README.md). The rationale is in
 [`aiperf/STATISTICAL-DESIGN.md`](aiperf/STATISTICAL-DESIGN.md).
+
+The synthetic fixed-window output rate is an engine-comparison measurement,
+not an estimate of expected production, interactive, or application
+throughput. It varies with the accepted-draft-length distribution of each fixed
+prompt/seed path; verifier steps/s is reported separately from that acceptance
+effect.
+
+Publication uses ten sequential fixed-seed paths at C1, five repetitions at
+every other supported decode concurrency, and five requests at each prefill
+length.
 
 ## Release quality checks
 

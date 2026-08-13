@@ -10,13 +10,13 @@ The current public release candidate is already built and available for
 anonymous pulls from GitHub Container Registry:
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0
 ```
 
 Pull it directly with Docker; no local image build is required:
 
 ```bash
-docker pull ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
+docker pull ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0
 ```
 
 The image is built and published by
@@ -43,7 +43,7 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v11
 mkdir -p "$CACHE_DIR"
 
 export GPU_IDS=0,1
@@ -73,7 +73,8 @@ docker run --rm \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0 \
+  --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
@@ -101,7 +102,7 @@ docker run --rm \
 
 This command mounts the model read-only, persists compiled kernels under
 `CACHE_DIR`, and exposes the OpenAI-compatible API on port 8000. The first
-launch compiles SM120 kernels; subsequent launches reuse the persistent `v10`
+launch compiles SM120 kernels; subsequent launches reuse the persistent `v11`
 cache.
 
 `GPU_IDS` selects the devices and `TP_SIZE` sets the tensor-parallel size. The
@@ -147,9 +148,10 @@ capacity checks, and operational notes. For users who prefer a checked wrapper,
 [examples/serve-dsv4-0731.sh](examples/serve-dsv4-0731.sh) validates the paths
 and executes this same Docker configuration.
 
-`v0.2.0-rc.0` is a clean reimage. It does not carry the experimental
-TRT/MNNVL all-reduce fusion, PCIe-IPC communication paths, TBO, or other
-performance experiments from the previous release line.
+`v0.2.1-rc.0` adds the SM120/SM121 FP8 W_o_A target-model path from SGLang
+#34018 to the clean `v0.2.0-rc.0` source stack. It does not carry the
+experimental TRT/MNNVL all-reduce fusion, PCIe-IPC communication paths, TBO,
+or other performance experiments from the previous release line.
 
 The launch command enables the fused MHC post+pre implementation already in
 the image with `SGLANG_OPT_FUSE_MHC_POST_PRE=1`. This follows the open upstream
@@ -163,7 +165,7 @@ change the image.
 - Base image: `lmsysorg/sglang:nightly-dev-cu13-20260812-c7c03ec5`, pinned by
   digest.
 - SGLang main: `dc5f6c488317645d96dc630b1f410e4dfb6f9667`.
-- SGLang effective tree: `8c336f4426844b2028938f7c542c0a403d37b804`.
+- SGLang effective tree: `68de16e0e3ddc5b5d04b6a2bdfbabbbebefc5e03`.
 - FlashInfer main: `065971254bca6ad0509d775e5806de53b64ac7b9`.
 - FlashInfer effective tree: `09b10c6dc66ca0c96c62a13dfa5ea3b63f1018e4`.
 - FlashInfer package version: `0.6.18.dev20260811`.
@@ -177,6 +179,7 @@ The SGLang patch contains the current reviewed heads of:
 | SGLang #32686 | Bound DeepGEMM warmup allocation by available memory |
 | SGLang #33568 | Reference-compatible DeepSeek-V4 tool encoding |
 | SGLang #33805 | Sliding-window KV eviction on the DFLASH/DSPARK path |
+| SGLang #34018 | SM120/SM121 FP8 W_o_A target-model GEMM |
 
 The FlashInfer patch contains PR #3930 and its exact CUDA-runtime filename
 resolver follow-up. Every source head, integration commit, patch checksum, and
@@ -190,46 +193,55 @@ effective trees.
 Both engines were measured on the same two RTX PRO 6000 Blackwell Max-Q GPUs
 at TP2 over PCIe Gen 4 x16, with a 300 W limit per GPU. Only one engine was
 active. Clients ran inside the serving pod against localhost. Decode used a
-16,384-token input, 4,096 forced output tokens, temperature 0, top-p 1, and
-five fixed prompt paths at every supported concurrency.
+16,384-token input, 4,096 forced output tokens, temperature 0, and top-p 1.
+SGLang C1 used ten fixed-seed prompt paths; vLLM C1 and every other measured
+cell used five.
 
-Each table entry below is the median of five same-process repetitions. ITL is
-AIPerf's average post-first-token time per generated token.
+Each table entry below is a same-process median. C1 uses ten fixed-seed prompt
+paths; every other supported concurrency uses five. ITL is AIPerf's average
+post-first-token time per generated token. Synthetic fixed-window output tok/s
+is a controlled engine-comparison metric, not expected production throughput.
+It combines verifier-step rate with output tokens produced per step, so DSpARK
+acceptance directly affects it. Different fixed prompt/seed paths have
+different accepted-draft-length distributions, making this metric more variable
+than verifier steps/s. Acceptance and output tokens/step are reported
+separately below.
 
-### Controlled decode
+### Synthetic fixed-window decode
 
-| Engine | C | Verifier steps/s | Useful decode tok/s | ITL ms/token |
-|---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 59.61 | 278.8 | 3.65 |
-| vLLM r33 | 1 | 66.58 | 255.2 | 3.89 |
-| SGLang v0.2.0-rc.0 | 2 | 44.63 | 438.3 | 4.52 |
-| vLLM r33 | 2 | 46.34 | 421.0 | 5.22 |
-| SGLang v0.2.0-rc.0 | 4 | 31.55 | 595.9 | 6.96 |
-| vLLM r33 | 4 | 33.07 | 616.0 | 7.06 |
-| SGLang v0.2.0-rc.0 | 8 | 22.27 | 855.9 | 10.55 |
-| vLLM r33 | 8 | 23.45 | 795.8 | 11.08 |
-| SGLang v0.2.0-rc.0 | 16 | 16.97 | 1,342.0 | 15.12 |
-| vLLM r33 | 16 | 15.86 | 1,097.2 | 17.59 |
-| SGLang v0.2.0-rc.0 | 32 | 12.61 | 1,974.2 | 22.89 |
-| vLLM r33 | 32 | Not measured: insufficient KV capacity | Not measured | Not measured |
+| Engine | C | n | Verifier steps/s | Synthetic output tok/s (acceptance-dependent) | ITL ms/token |
+|---|---:|---:|---:|---:|---:|
+| SGLang v0.2.1-rc.0 | 1 | 10 | 62.37 | 322.0 | 3.35 |
+| vLLM r33 | 1 | 5 | 66.58 | 255.2 | 3.89 |
+| SGLang v0.2.1-rc.0 | 2 | 5 | 46.85 | 462.1 | 4.57 |
+| vLLM r33 | 2 | 5 | 46.34 | 421.0 | 5.22 |
+| SGLang v0.2.1-rc.0 | 4 | 5 | 32.16 | 665.4 | 6.49 |
+| vLLM r33 | 4 | 5 | 33.07 | 616.0 | 7.06 |
+| SGLang v0.2.1-rc.0 | 8 | 5 | 22.33 | 871.0 | 10.63 |
+| vLLM r33 | 8 | 5 | 23.45 | 795.8 | 11.08 |
+| SGLang v0.2.1-rc.0 | 16 | 5 | 17.19 | 1,356.3 | 14.89 |
+| vLLM r33 | 16 | 5 | 15.86 | 1,097.2 | 17.59 |
+| SGLang v0.2.1-rc.0 | 32 | 5 | 12.64 | 1,951.5 | 22.81 |
+| vLLM r33 | 32 | 0 | Not measured: insufficient KV capacity | Not measured | Not measured |
 
 ### DSpARK acceptance
 
-Each entry is the median of the five per-run means.
+Each entry is the median of the per-run means. Sample counts match the decode
+table above.
 
-| Engine | C | Acceptance rate | Accepted tokens/step/request |
+| Engine | C | Acceptance rate | Output tokens/step/request |
 |---|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 1 | 0.737 | 4.685 |
+| SGLang v0.2.1-rc.0 | 1 | 0.841 | 5.206 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.2.0-rc.0 | 2 | 0.796 | 4.979 |
+| SGLang v0.2.1-rc.0 | 2 | 0.773 | 4.819 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.2.0-rc.0 | 4 | 0.716 | 4.581 |
+| SGLang v0.2.1-rc.0 | 4 | 0.827 | 5.080 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.2.0-rc.0 | 8 | 0.753 | 4.764 |
+| SGLang v0.2.1-rc.0 | 8 | 0.755 | 4.825 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.2.0-rc.0 | 16 | 0.783 | 4.914 |
+| SGLang v0.2.1-rc.0 | 16 | 0.769 | 4.938 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.2.0-rc.0 | 32 | 0.771 | 4.857 |
+| SGLang v0.2.1-rc.0 | 32 | 0.760 | 4.819 |
 | vLLM r33 | 32 | Not measured | Not measured |
 
 ### Cold prefill
@@ -238,7 +250,7 @@ One output token and five cache-cold requests were used per cell.
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | 7,519.9 | 8,425.2 | 8,146.2 | 7,689.8 |
+| SGLang v0.2.1-rc.0 | 7,541.7 | 8,528.6 | 7,907.6 | 7,771.2 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ### Completed quality result
@@ -249,14 +261,16 @@ performance sweep above does not replace it.
 
 | Engine | Gate | Questions | Correct | Accuracy | Request errors |
 |---|---|---:|---:|---:|---:|
-| SGLang v0.2.0-rc.0 | GSM8K | 1,319 | 1,258 | 95.38% | 0 |
+| SGLang v0.2.1-rc.0 | GSM8K | 1,319 | 1,262 | 95.68% | 0 |
 | vLLM r33 | GSM8K | 1,319 | 1,243 | 94.24% | 0 |
 
 Near-context and AgentX checks are not represented as completed results.
 
 [BENCHMARKS.md](BENCHMARKS.md) documents the frozen method, exact revisions,
-metric definitions, and commands. The executable harness, scoring code,
-graders, and machine-readable summaries are under [`bench/`](bench/).
+metric definitions, and commands. Immutable per-release snapshots are in
+[PERFORMANCE-HISTORY.md](PERFORMANCE-HISTORY.md). The executable harness,
+scoring code, graders, and machine-readable summaries are under
+[`bench/`](bench/).
 
 ## Validated configuration
 
@@ -269,6 +283,7 @@ graders, and machine-readable summaries are under [`bench/`](bench/).
 - HC prenorm: SM120 DeepGEMM for large-token prefill batches; the existing
   fallback remains selected below the 1,024-token dispatch threshold.
 - Fused MHC post+pre: `SGLANG_OPT_FUSE_MHC_POST_PRE=1`.
+- FP8 W_o_A target path: `SGLANG_OPT_FP8_WO_A_GEMM=1`.
 - DSpARK block size: 5.
 - Communication: upstream NCCL; custom all-reduce disabled.
 

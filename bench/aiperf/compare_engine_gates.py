@@ -47,6 +47,7 @@ def _paired_change(
     baseline_rows: list[dict[str, Any]],
     candidate_rows: list[dict[str, Any]],
     metric: str,
+    legacy_metric: str | None = None,
 ) -> dict[str, Any]:
     baseline_by_id = {str(row["id"]): row for row in baseline_rows}
     candidate_by_id = {str(row["id"]): row for row in candidate_rows}
@@ -61,12 +62,14 @@ def _paired_change(
     pairs: list[dict[str, Any]] = []
     log_ratios: list[float] = []
     for repetition in sorted(baseline_by_id):
+        baseline_row = baseline_by_id[repetition]
+        candidate_row = candidate_by_id[repetition]
         baseline = _positive(
-            baseline_by_id[repetition].get(metric),
+            baseline_row.get(metric, baseline_row.get(legacy_metric or "")),
             f"baseline {repetition} {metric}",
         )
         candidate = _positive(
-            candidate_by_id[repetition].get(metric),
+            candidate_row.get(metric, candidate_row.get(legacy_metric or "")),
             f"candidate {repetition} {metric}",
         )
         change = candidate / baseline - 1
@@ -108,16 +111,24 @@ def compare(
 
     decode: dict[str, Any] = {}
     metrics = (
-        "forward_passes_per_second",
-        "useful_tokens_per_second",
-        "useful_tokens_per_forward_per_request",
+        ("forward_passes_per_second", None),
+        ("synthetic_decode_tokens_per_second", "useful_tokens_per_second"),
+        (
+            "output_tokens_per_forward_per_request",
+            "useful_tokens_per_forward_per_request",
+        ),
     )
     for cell in sorted(common_cells):
         baseline_rows = baseline_decode[cell].get("repetitions", [])
         candidate_rows = candidate_decode[cell].get("repetitions", [])
         decode[cell] = {
-            metric: _paired_change(baseline_rows, candidate_rows, metric)
-            for metric in metrics
+            metric: _paired_change(
+                baseline_rows,
+                candidate_rows,
+                metric,
+                legacy_metric,
+            )
+            for metric, legacy_metric in metrics
         }
 
     baseline_prefill = baseline.get("prefill", {})
@@ -143,7 +154,7 @@ def compare(
         }
 
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "mode": baseline["mode"],
         "baseline_engine": baseline.get("engine"),
         "candidate_engine": candidate.get("engine"),

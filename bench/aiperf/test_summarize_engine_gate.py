@@ -89,7 +89,10 @@ def _gate(tmp_path):
 def test_summarize_quick_gate_retains_every_repetition(tmp_path) -> None:
     result = summarize(_gate(tmp_path), mode="quick", build_id="rc3")
     c1 = result["decode"]["c1"]
+    assert result["schema_version"] == "1.2"
     assert c1["engine_forward_passes_per_second"]["count"] == 3
+    assert c1["synthetic_decode_tokens_per_second"]["count"] == 3
+    assert c1["output_tokens_per_forward_per_request"]["count"] == 3
     assert c1["engine_forward_passes_per_second"]["median"] == 52
     assert [row["id"] for row in c1["repetitions"]] == ["r01", "r02", "r03"]
     assert c1["repetitions"][0]["speculative"]["accept_rate"]["mean"] == 0.71
@@ -197,9 +200,10 @@ def test_prefill_quick_requires_only_quick_prefill_cells(tmp_path) -> None:
     }
 
 
-def test_publication_requires_five_repetitions_and_prefill_requests(tmp_path) -> None:
+def test_publication_requires_ten_c1_paths_and_five_other_samples(tmp_path) -> None:
     for concurrency in (1, 2, 4, 8, 16, 32):
-        for repetition in range(1, 6):
+        repetitions = 10 if concurrency == 1 else 5
+        for repetition in range(1, repetitions + 1):
             _write(
                 tmp_path
                 / "decode"
@@ -256,9 +260,13 @@ def test_publication_requires_five_repetitions_and_prefill_requests(tmp_path) ->
     result = summarize(tmp_path, mode="publication", build_id="rc3")
 
     assert set(result["decode"]) == {"c1", "c2", "c4", "c8", "c16", "c32"}
+    assert result["decode"]["c1"]["engine_forward_passes_per_second"]["count"] == 10
     assert all(
-        cell["engine_forward_passes_per_second"]["count"] == 5
-        for cell in result["decode"].values()
+        result["decode"][f"c{concurrency}"]["engine_forward_passes_per_second"][
+            "count"
+        ]
+        == 5
+        for concurrency in (2, 4, 8, 16, 32)
     )
     assert all(cell["requests"] == 5 for cell in result["prefill"].values())
 
@@ -296,7 +304,8 @@ def test_publication_rejects_nonuniform_prefill_count(tmp_path) -> None:
             )
             _write(target, json.loads(source.read_text(encoding="utf-8")))
     for concurrency in (1, 4, 8):
-        for repetition in range(4, 6):
+        final_repetition = 10 if concurrency == 1 else 5
+        for repetition in range(4, final_repetition + 1):
             source = root / "decode" / f"c{concurrency}" / "r01" / "decode-analysis.json"
             target = root / "decode" / f"c{concurrency}" / f"r{repetition:02d}" / "decode-analysis.json"
             _write(target, json.loads(source.read_text(encoding="utf-8")))

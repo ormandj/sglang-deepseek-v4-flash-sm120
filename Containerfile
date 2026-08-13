@@ -1,23 +1,22 @@
 # DeepSeek-V4-Flash-0731 on SGLang for RTX PRO 6000 Blackwell (SM120).
 #
-# v0.2.0 is a clean reimage. It starts from the current official CUDA 13 /
-# Torch 2.13 nightly, advances both source trees to the audited main commits,
-# and applies only the required model-support and correctness carries recorded
-# in stack.lock.json. Performance experiments from the v0.1.0 line are absent.
-ARG DSV4_0731_RELEASE_VERSION=0.2.0
+# v0.2.1 tests upstream SGLang PR #34018 on the exact v0.2.0-rc.0 source stack.
+# No other source pin or carry changes in this candidate.
+ARG DSV4_0731_RELEASE_VERSION=0.2.1
 ARG DSV4_0731_RELEASE_CANDIDATE=0
-ARG DSV4_0731_CACHE_SCHEMA=v10
+ARG DSV4_0731_CACHE_SCHEMA=v11
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260812-c7c03ec5@sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050
 ARG DSV4_0731_SGLANG_BASE_HEAD=c7c03ec53b1e664c2d415db4f02e43f86661f31d
 ARG DSV4_0731_SGLANG_MAIN_HEAD=dc5f6c488317645d96dc630b1f410e4dfb6f9667
 ARG DSV4_0731_SGLANG_MAIN_TREE=d117eca486f68ecbdf7d6168a47cfab7e2c8110b
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=8c336f4426844b2028938f7c542c0a403d37b804
-ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=f5356c7daec4565c2a0a06f9499b775545937db3
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=68de16e0e3ddc5b5d04b6a2bdfbabbbebefc5e03
+ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=59881760d4a9d7a5938f531b4f0c85fcd54f14c2
 ARG DSV4_0731_SGLANG_PR29927_HEAD=e5ea881c5dd487acef17d58ba1a9d2b7ecfeee91
 ARG DSV4_0731_SGLANG_PR33614_HEAD=fca0998feda2bfc2a735286d34d354b979850d72
 ARG DSV4_0731_SGLANG_PR32686_HEAD=15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b
 ARG DSV4_0731_SGLANG_PR33568_HEAD=cab45a29997f8898e076e9253741a5119a401db0
 ARG DSV4_0731_SGLANG_PR33805_HEAD=26a2a3981798b8deb97d053d163fa3c48668e03f
+ARG DSV4_0731_SGLANG_PR34018_HEAD=c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD=065971254bca6ad0509d775e5806de53b64ac7b9
 ARG DSV4_0731_FLASHINFER_MAIN_TREE=5d0f69e41f414efba115dcd13c03cbd46e40d640
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=09b10c6dc66ca0c96c62a13dfa5ea3b63f1018e4
@@ -44,6 +43,7 @@ ARG DSV4_0731_SGLANG_PR33614_HEAD
 ARG DSV4_0731_SGLANG_PR32686_HEAD
 ARG DSV4_0731_SGLANG_PR33568_HEAD
 ARG DSV4_0731_SGLANG_PR33805_HEAD
+ARG DSV4_0731_SGLANG_PR34018_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_TREE
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE
@@ -56,7 +56,7 @@ ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
 ARG IMAGE_SOURCE
 ARG IMAGE_SOURCE_REVISION
 
-COPY patches/sglang/0001-sglang-dsv4-0731-v0.2.0-rc.0.patch /tmp/sglang-release.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-v0.2.1-rc.0.patch /tmp/sglang-release.patch
 RUN set -e; cd /sgl-workspace/sglang; \
     git config --local --unset-all http.https://github.com/.extraheader || true; \
     git remote set-url origin https://github.com/sgl-project/sglang.git; \
@@ -82,7 +82,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       python/sglang/srt/speculative/spec_utils.py; \
     rm /tmp/sglang-release.patch
 
-COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.2.0-rc.0.patch /tmp/flashinfer-release.patch
+COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.2.1-rc.0.patch /tmp/flashinfer-release.patch
 RUN set -e; \
     git init /tmp/flashinfer-src; \
     git -C /tmp/flashinfer-src remote add origin https://github.com/flashinfer-ai/flashinfer.git; \
@@ -139,6 +139,7 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.pr32686.head=${DSV4_0731_SGLANG_PR32686_HEAD} \
       ai.sglang.pr33568.head=${DSV4_0731_SGLANG_PR33568_HEAD} \
       ai.sglang.pr33805.head=${DSV4_0731_SGLANG_PR33805_HEAD} \
+      ai.sglang.pr34018.head=${DSV4_0731_SGLANG_PR34018_HEAD} \
       ai.flashinfer.version=${DSV4_0731_FLASHINFER_VERSION} \
       ai.flashinfer.main.head=${DSV4_0731_FLASHINFER_MAIN_HEAD} \
       ai.flashinfer.main.tree=${DSV4_0731_FLASHINFER_MAIN_TREE} \

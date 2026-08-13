@@ -1,8 +1,9 @@
 # Running the image
 
 This candidate targets Linux x86_64 and NVIDIA RTX PRO 6000 Blackwell
-(SM120). TP2 is the primary qualification topology. TP4 must pass the release
-regression gate before public promotion.
+(SM120). The published measurements cover TP2. The same image and configurable
+launcher support larger tensor-parallel topologies, but this repository does
+not yet publish TP4 or TP8 performance results.
 
 ## Requirements
 
@@ -17,7 +18,7 @@ Check GPU passthrough:
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0
 ```
 
 ## Model and cache
@@ -29,12 +30,12 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v10
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v11
 mkdir -p "$CACHE_DIR"
 ```
 
-`v10` is a fresh cache schema. Do not reuse a `v0.1.0` cache directory for
-this reimage.
+`v11` is a fresh cache schema for this source change. Do not reuse the
+`v0.2.0-rc.0` cache directory.
 
 ## Start TP2
 
@@ -62,7 +63,10 @@ implementation and runtime selector are already present in the image; open
 [SGLang PR #34019](https://github.com/sgl-project/sglang/pull/34019) changes the
 upstream SM120 default and is tracked rather than applied to this image.
 
-The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v10
+The script additionally sets `SGLANG_OPT_FP8_WO_A_GEMM=1` to select the
+SM120/SM121 target-model FP8 W_o_A path carried from upstream PR #34018.
+
+The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v11
 cache for subsequent starts of the identical image; do not time compilation as
 serving startup or inference.
 
@@ -109,10 +113,11 @@ The executable harness lives in [`bench/aiperf`](bench/aiperf). Clients run
 inside the selected serving pod against localhost. The frozen protocol uses:
 
 - identical 16,384-token input and 4,096-token output shapes at C1–C32;
-- five repetitions at each published supported concurrency;
+- ten sequential fixed-seed repetitions at C1 and five at every other
+  published supported concurrency;
 - separate cache-cold prefill diagnostics;
 - C1 and C8 AgentX programming-trace replay;
 - correctness and near-context-limit gates.
 
 Results from the previous benchmark shape are historical and are not mixed
-with `v0.2.0` measurements.
+with `v0.2.1` measurements.

@@ -14,14 +14,14 @@ def _summary(build_id: str, scale: float = 1.0) -> dict:
                     {
                         "id": "r01",
                         "forward_passes_per_second": 50 * scale,
-                        "useful_tokens_per_second": 300 * scale,
-                        "useful_tokens_per_forward_per_request": 6 * scale,
+                        "synthetic_decode_tokens_per_second": 300 * scale,
+                        "output_tokens_per_forward_per_request": 6 * scale,
                     },
                     {
                         "id": "r02",
                         "forward_passes_per_second": 60 * scale,
-                        "useful_tokens_per_second": 330 * scale,
-                        "useful_tokens_per_forward_per_request": 5.5 * scale,
+                        "synthetic_decode_tokens_per_second": 330 * scale,
+                        "output_tokens_per_forward_per_request": 5.5 * scale,
                     },
                 ]
             }
@@ -44,7 +44,24 @@ def test_compare_reports_matched_prompt_effects() -> None:
         "change_percent"
     ] == pytest.approx(10)
     assert set(result["prefill"]["8k-c1"]) == {"prompt_tokens_per_second"}
-    assert result["schema_version"] == "1.1"
+    assert result["schema_version"] == "1.2"
+
+
+def test_compare_accepts_legacy_useful_token_field_names() -> None:
+    baseline = _summary("base")
+    for row in baseline["decode"]["c1"]["repetitions"]:
+        row["useful_tokens_per_second"] = row.pop(
+            "synthetic_decode_tokens_per_second"
+        )
+        row["useful_tokens_per_forward_per_request"] = row.pop(
+            "output_tokens_per_forward_per_request"
+        )
+
+    result = compare(baseline, _summary("candidate", 1.1))
+
+    assert result["decode"]["c1"]["synthetic_decode_tokens_per_second"][
+        "geometric_mean_change_percent"
+    ] == pytest.approx(10)
 
 
 def test_compare_rejects_different_modes() -> None:

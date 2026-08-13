@@ -8,7 +8,7 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.0-rc.0}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 TP_SIZE=${TP_SIZE:-2}
@@ -73,6 +73,7 @@ exec docker run --rm \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
+  --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
   "$IMAGE" \
   serve \
   --model-path "$container_model_path" \

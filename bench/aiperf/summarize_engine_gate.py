@@ -24,14 +24,14 @@ EXPECTED_DECODE = {
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3, 32: 3},
-        "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5, 32: 5},
+        "publication": {1: 10, 2: 5, 4: 5, 8: 5, 16: 5, 32: 5},
     },
     "vllm": {
         "quick": {1: 3, 4: 3, 8: 3},
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3},
-        "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5},
+        "publication": {1: 10, 2: 5, 4: 5, 8: 5, 16: 5},
     },
 }
 EXPECTED_PREFILL = {
@@ -214,8 +214,8 @@ def summarize(
                 {
                     "id": repetition,
                     "forward_passes_per_second": forward_rate,
-                    "useful_tokens_per_second": token_rate,
-                    "useful_tokens_per_forward_per_request": accepted_length,
+                    "synthetic_decode_tokens_per_second": token_rate,
+                    "output_tokens_per_forward_per_request": accepted_length,
                     "speculative": speculative,
                     "client_latency_ms": client_latency,
                 }
@@ -223,8 +223,8 @@ def summarize(
         decode[f"c{concurrency}"] = {
             "repetitions": repetitions,
             "engine_forward_passes_per_second": _distribution(forward_rates),
-            "useful_tokens_per_second": _distribution(token_rates),
-            "useful_tokens_per_forward_per_request": _distribution(accepted_lengths),
+            "synthetic_decode_tokens_per_second": _distribution(token_rates),
+            "output_tokens_per_forward_per_request": _distribution(accepted_lengths),
             "speculative": {
                 metric: {
                     f"{statistic}_per_run": _distribution(values)
@@ -275,13 +275,16 @@ def summarize(
         }
 
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "engine": engine,
         "build_id": build_id,
         "mode": mode,
         "interpretation": (
-            "same-process engineering regression signal; repetitions are prompt-path "
-            "subsamples, not independent deployment replicates"
+            "same-process engineering regression signal; synthetic fixed-window "
+            "output rate is not expected production, interactive, or application "
+            "throughput and includes path-dependent speculative acceptance; "
+            "repetitions are "
+            "prompt-path subsamples, not independent deployment replicates"
         ),
         "decode": decode,
         "prefill": prefill,

@@ -165,8 +165,8 @@
               "min": 0.5714285714285714
             }
           },
-          "useful_tokens_per_forward_per_request": 5.078231292517007,
-          "useful_tokens_per_second": 336.54606814555484
+          "synthetic_decode_tokens_per_second": 336.54606814555484,
+          "output_tokens_per_forward_per_request": 5.078231292517007
         },
         {
           "client_latency_ms": {
@@ -205,8 +205,8 @@
               "min": 0.16363636363636364
             }
           },
-          "useful_tokens_per_forward_per_request": 3.2690631808278865,
-          "useful_tokens_per_second": 212.40372962528528
+          "synthetic_decode_tokens_per_second": 212.40372962528528,
+          "output_tokens_per_forward_per_request": 3.2690631808278865
         },
         {
           "client_latency_ms": {
@@ -245,8 +245,8 @@
               "min": 0.25217391304347825
             }
           },
-          "useful_tokens_per_forward_per_request": 3.9518229166666665,
-          "useful_tokens_per_second": 255.23260599027432
+          "synthetic_decode_tokens_per_second": 255.23260599027432,
+          "output_tokens_per_forward_per_request": 3.9518229166666665
         },
         {
           "client_latency_ms": {
@@ -285,8 +285,8 @@
               "min": 0.3
             }
           },
-          "useful_tokens_per_forward_per_request": 3.7280701754385963,
-          "useful_tokens_per_second": 229.94033511754364
+          "synthetic_decode_tokens_per_second": 229.94033511754364,
+          "output_tokens_per_forward_per_request": 3.7280701754385963
         },
         {
           "client_latency_ms": {
@@ -325,8 +325,8 @@
               "min": 0.6363636363636364
             }
           },
-          "useful_tokens_per_forward_per_request": 5.847058823529411,
-          "useful_tokens_per_second": 395.4436908573991
+          "synthetic_decode_tokens_per_second": 395.4436908573991,
+          "output_tokens_per_forward_per_request": 5.847058823529411
         }
       ],
       "speculative": {
@@ -407,16 +407,7 @@
           }
         }
       },
-      "useful_tokens_per_forward_per_request": {
-        "count": 5,
-        "max": 5.847058823529411,
-        "mean": 4.374849277795914,
-        "median": 3.9518229166666665,
-        "min": 3.2690631808278865,
-        "sample_cv": 0.24196457025026594,
-        "sample_stddev": 1.0585585254115746
-      },
-      "useful_tokens_per_second": {
+      "synthetic_decode_tokens_per_second": {
         "count": 5,
         "max": 395.4436908573991,
         "mean": 285.9132859472114,
@@ -424,6 +415,15 @@
         "min": 212.40372962528528,
         "sample_cv": 0.27113745564405933,
         "sample_stddev": 77.52180088655929
+      },
+      "output_tokens_per_forward_per_request": {
+        "count": 5,
+        "max": 5.847058823529411,
+        "mean": 4.374849277795914,
+        "median": 3.9518229166666665,
+        "min": 3.2690631808278865,
+        "sample_cv": 0.24196457025026594,
+        "sample_stddev": 1.0585585254115746
       }
     },
     "c16": {
@@ -590,8 +590,8 @@
               "min": 0.465
             }
           },
-          "useful_tokens_per_forward_per_request": 4.3524159663865545,
-          "useful_tokens_per_second": 1093.6807231347825
+          "synthetic_decode_tokens_per_second": 1093.6807231347825,
+          "output_tokens_per_forward_per_request": 4.3524159663865545
         },
         {
           "client_latency_ms": {
@@ -630,8 +630,8 @@
               "min": 0.47
             }
           },
-          "useful_tokens_per_forward_per_request": 4.1312390542907185,
-          "useful_tokens_per_second": 1067.8451152913706
+          "synthetic_decode_tokens_per_second": 1067.8451152913706,
+          "output_tokens_per_forward_per_request": 4.1312390542907185
         },
         {
           "client_latency_ms": {
@@ -670,8 +670,8 @@
               "min": 0.585
             }
           },
-          "useful_tokens_per_forward_per_request": 4.456687358916478,
-          "useful_tokens_per_second": 1123.6848464167238
+          "synthetic_decode_tokens_per_second": 1123.6848464167238,
+          "output_tokens_per_forward_per_request": 4.456687358916478
         },
         {
           "client_latency_ms": {
@@ -710,8 +710,8 @@
               "min": 0.535
             }
           },
-          "useful_tokens_per_forward_per_request": 4.542023809523809,
-          "useful_tokens_per_second": 1162.1536213215734
+          "synthetic_decode_tokens_per_second": 1162.1536213215734,
+          "output_tokens_per_forward_per_request": 4.542023809523809
         },
         {
           "client_latency_ms": {
@@ -750,8 +750,8 @@
               "min": 0.4375
             }
           },
-          "useful_tokens_per_forward_per_request": 4.300947319778189,
-          "useful_tokens_per_second": 1097.2069946734293
+          "synthetic_decode_tokens_per_second": 1097.2069946734293,
+          "output_tokens_per_forward_per_request": 4.300947319778189
         }
       ],
       "speculative": {
@@ -832,16 +832,7 @@
           }
         }
       },
-      "useful_tokens_per_forward_per_request": {
-        "count": 5,
-        "max": 4.542023809523809,
-        "mean": 4.3566627017791495,
-        "median": 4.3524159663865545,
-        "min": 4.1312390542907185,
-        "sample_cv": 0.035982940522782565,
-        "sample_stddev": 0.15676553487594433
-      },
-      "useful_tokens_per_second": {
+      "synthetic_decode_tokens_per_second": {
         "count": 5,
         "max": 1162.1536213215734,
         "mean": 1108.914260167576,
@@ -849,6 +840,15 @@
         "min": 1067.8451152913706,
         "sample_cv": 0.03222658443372941,
         "sample_stddev": 35.73651903505697
+      },
+      "output_tokens_per_forward_per_request": {
+        "count": 5,
+        "max": 4.542023809523809,
+        "mean": 4.3566627017791495,
+        "median": 4.3524159663865545,
+        "min": 4.1312390542907185,
+        "sample_cv": 0.035982940522782565,
+        "sample_stddev": 0.15676553487594433
       }
     },
     "c2": {
@@ -1015,8 +1015,8 @@
               "min": 0.65
             }
           },
-          "useful_tokens_per_forward_per_request": 5.376556016597511,
-          "useful_tokens_per_second": 492.21847598995527
+          "synthetic_decode_tokens_per_second": 492.21847598995527,
+          "output_tokens_per_forward_per_request": 5.376556016597511
         },
         {
           "client_latency_ms": {
@@ -1055,8 +1055,8 @@
               "min": 0.3625
             }
           },
-          "useful_tokens_per_forward_per_request": 3.7516339869281046,
-          "useful_tokens_per_second": 356.97131771351985
+          "synthetic_decode_tokens_per_second": 356.97131771351985,
+          "output_tokens_per_forward_per_request": 3.7516339869281046
         },
         {
           "client_latency_ms": {
@@ -1095,8 +1095,8 @@
               "min": 0.43333333333333335
             }
           },
-          "useful_tokens_per_forward_per_request": 4.681308411214953,
-          "useful_tokens_per_second": 420.9767736754248
+          "synthetic_decode_tokens_per_second": 420.9767736754248,
+          "output_tokens_per_forward_per_request": 4.681308411214953
         },
         {
           "client_latency_ms": {
@@ -1135,8 +1135,8 @@
               "min": 0.40588235294117647
             }
           },
-          "useful_tokens_per_forward_per_request": 3.9884559884559883,
-          "useful_tokens_per_second": 373.66873490902384
+          "synthetic_decode_tokens_per_second": 373.66873490902384,
+          "output_tokens_per_forward_per_request": 3.9884559884559883
         },
         {
           "client_latency_ms": {
@@ -1175,8 +1175,8 @@
               "min": 0.3875
             }
           },
-          "useful_tokens_per_forward_per_request": 4.637795275590551,
-          "useful_tokens_per_second": 438.5115862595583
+          "synthetic_decode_tokens_per_second": 438.5115862595583,
+          "output_tokens_per_forward_per_request": 4.637795275590551
         }
       ],
       "speculative": {
@@ -1257,16 +1257,7 @@
           }
         }
       },
-      "useful_tokens_per_forward_per_request": {
-        "count": 5,
-        "max": 5.376556016597511,
-        "mean": 4.487149935757421,
-        "median": 4.637795275590551,
-        "min": 3.7516339869281046,
-        "sample_cv": 0.14274759750540594,
-        "sample_stddev": 0.6405298729759086
-      },
-      "useful_tokens_per_second": {
+      "synthetic_decode_tokens_per_second": {
         "count": 5,
         "max": 492.21847598995527,
         "mean": 416.4693777094964,
@@ -1274,6 +1265,15 @@
         "min": 356.97131771351985,
         "sample_cv": 0.1293944128661413,
         "sample_stddev": 53.888810605447524
+      },
+      "output_tokens_per_forward_per_request": {
+        "count": 5,
+        "max": 5.376556016597511,
+        "mean": 4.487149935757421,
+        "median": 4.637795275590551,
+        "min": 3.7516339869281046,
+        "sample_cv": 0.14274759750540594,
+        "sample_stddev": 0.6405298729759086
       }
     },
     "c4": {
@@ -1440,8 +1440,8 @@
               "min": 0.5708333333333333
             }
           },
-          "useful_tokens_per_forward_per_request": 5.104989604989605,
-          "useful_tokens_per_second": 684.2327942141924
+          "synthetic_decode_tokens_per_second": 684.2327942141924,
+          "output_tokens_per_forward_per_request": 5.104989604989605
         },
         {
           "client_latency_ms": {
@@ -1480,8 +1480,8 @@
               "min": 0.4863636363636364
             }
           },
-          "useful_tokens_per_forward_per_request": 4.813878676470588,
-          "useful_tokens_per_second": 616.0134430017462
+          "synthetic_decode_tokens_per_second": 616.0134430017462,
+          "output_tokens_per_forward_per_request": 4.813878676470588
         },
         {
           "client_latency_ms": {
@@ -1520,8 +1520,8 @@
               "min": 0.4590909090909091
             }
           },
-          "useful_tokens_per_forward_per_request": 4.15010460251046,
-          "useful_tokens_per_second": 549.2084928546624
+          "synthetic_decode_tokens_per_second": 549.2084928546624,
+          "output_tokens_per_forward_per_request": 4.15010460251046
         },
         {
           "client_latency_ms": {
@@ -1560,8 +1560,8 @@
               "min": 0.5545454545454546
             }
           },
-          "useful_tokens_per_forward_per_request": 4.486294896030246,
-          "useful_tokens_per_second": 590.5380338956123
+          "synthetic_decode_tokens_per_second": 590.5380338956123,
+          "output_tokens_per_forward_per_request": 4.486294896030246
         },
         {
           "client_latency_ms": {
@@ -1600,8 +1600,8 @@
               "min": 0.42727272727272725
             }
           },
-          "useful_tokens_per_forward_per_request": 4.845574387947269,
-          "useful_tokens_per_second": 638.6284519264394
+          "synthetic_decode_tokens_per_second": 638.6284519264394,
+          "output_tokens_per_forward_per_request": 4.845574387947269
         }
       ],
       "speculative": {
@@ -1682,16 +1682,7 @@
           }
         }
       },
-      "useful_tokens_per_forward_per_request": {
-        "count": 5,
-        "max": 5.104989604989605,
-        "mean": 4.680168433589634,
-        "median": 4.813878676470588,
-        "min": 4.15010460251046,
-        "sample_cv": 0.07881589373242869,
-        "sample_stddev": 0.36887165791166776
-      },
-      "useful_tokens_per_second": {
+      "synthetic_decode_tokens_per_second": {
         "count": 5,
         "max": 684.2327942141924,
         "mean": 615.7242431785305,
@@ -1699,6 +1690,15 @@
         "min": 549.2084928546624,
         "sample_cv": 0.08232138417757169,
         "sample_stddev": 50.68727197014439
+      },
+      "output_tokens_per_forward_per_request": {
+        "count": 5,
+        "max": 5.104989604989605,
+        "mean": 4.680168433589634,
+        "median": 4.813878676470588,
+        "min": 4.15010460251046,
+        "sample_cv": 0.07881589373242869,
+        "sample_stddev": 0.36887165791166776
       }
     },
     "c8": {
@@ -1865,8 +1865,8 @@
               "min": 0.4875
             }
           },
-          "useful_tokens_per_forward_per_request": 4.123816287878788,
-          "useful_tokens_per_second": 777.2906581397806
+          "synthetic_decode_tokens_per_second": 777.2906581397806,
+          "output_tokens_per_forward_per_request": 4.123816287878788
         },
         {
           "client_latency_ms": {
@@ -1905,8 +1905,8 @@
               "min": 0.4625
             }
           },
-          "useful_tokens_per_forward_per_request": 4.691304347826087,
-          "useful_tokens_per_second": 872.7725590053482
+          "synthetic_decode_tokens_per_second": 872.7725590053482,
+          "output_tokens_per_forward_per_request": 4.691304347826087
         },
         {
           "client_latency_ms": {
@@ -1945,8 +1945,8 @@
               "min": 0.45625
             }
           },
-          "useful_tokens_per_forward_per_request": 4.3163865546218485,
-          "useful_tokens_per_second": 811.7014167593181
+          "synthetic_decode_tokens_per_second": 811.7014167593181,
+          "output_tokens_per_forward_per_request": 4.3163865546218485
         },
         {
           "client_latency_ms": {
@@ -1985,8 +1985,8 @@
               "min": 0.43333333333333335
             }
           },
-          "useful_tokens_per_forward_per_request": 4.059235976789168,
-          "useful_tokens_per_second": 756.8597550487972
+          "synthetic_decode_tokens_per_second": 756.8597550487972,
+          "output_tokens_per_forward_per_request": 4.059235976789168
         },
         {
           "client_latency_ms": {
@@ -2025,8 +2025,8 @@
               "min": 0.45625
             }
           },
-          "useful_tokens_per_forward_per_request": 4.240765765765766,
-          "useful_tokens_per_second": 795.8144877831687
+          "synthetic_decode_tokens_per_second": 795.8144877831687,
+          "output_tokens_per_forward_per_request": 4.240765765765766
         }
       ],
       "speculative": {
@@ -2107,16 +2107,7 @@
           }
         }
       },
-      "useful_tokens_per_forward_per_request": {
-        "count": 5,
-        "max": 4.691304347826087,
-        "mean": 4.286301786576331,
-        "median": 4.240765765765766,
-        "min": 4.059235976789168,
-        "sample_cv": 0.0577351458933087,
-        "sample_stddev": 0.24747025899073422
-      },
-      "useful_tokens_per_second": {
+      "synthetic_decode_tokens_per_second": {
         "count": 5,
         "max": 872.7725590053482,
         "mean": 802.8877753472825,
@@ -2124,11 +2115,20 @@
         "min": 756.8597550487972,
         "sample_cv": 0.05494842213190473,
         "sample_stddev": 44.11741640432837
+      },
+      "output_tokens_per_forward_per_request": {
+        "count": 5,
+        "max": 4.691304347826087,
+        "mean": 4.286301786576331,
+        "median": 4.240765765765766,
+        "min": 4.059235976789168,
+        "sample_cv": 0.0577351458933087,
+        "sample_stddev": 0.24747025899073422
       }
     }
   },
   "engine": "vllm",
-  "interpretation": "same-process engineering regression signal; repetitions are prompt-path subsamples, not independent deployment replicates",
+  "interpretation": "same-process engineering regression signal; synthetic fixed-window output rate is not expected production, interactive, or application throughput and includes path-dependent speculative acceptance; repetitions are prompt-path subsamples, not independent deployment replicates",
   "mode": "publication",
   "prefill": {
     "128k-c1": {
@@ -2152,5 +2152,5 @@
       "requests": 5
     }
   },
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }

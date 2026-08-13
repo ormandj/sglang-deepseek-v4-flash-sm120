@@ -16,21 +16,26 @@ The priorities are explicit:
 
 No weighted composite hides a regression in one dimension.
 
-## Why engine work and useful throughput are separate
+## Why engine work and synthetic output rate are separate
 
 With speculative decoding:
 
 ```text
-useful output tokens / second
+synthetic fixed-window output tokens / second
   = decode forward passes / second
-  x useful tokens / forward
+  x output tokens / forward
 ```
 
 Generated token paths can change speculative acceptance, expert routing, and
 later work even with greedy sampling. The controlled gate therefore records
 the server's forward-pass rate as the primary engine execution measure and
-reports useful tokens/sec and tokens/forward beside it. A change is not called
-a kernel or scheduler speedup solely because one generated path accepted more
+reports synthetic fixed-window output tok/s and output tokens/forward beside
+it. The token rate is the slope of the server's generated-output counter over
+the fixed decode interval in this synthetic workload; it is not an estimate of
+interactive, production, or application throughput. Different fixed
+prompt/seed paths produce different accepted-draft-length distributions, so
+this rate is more variable than verifier steps/s. A change is not called a
+kernel or scheduler speedup solely because one generated path accepted more
 draft tokens.
 
 Temperature 0 and top-p 1 remove intentional sampling randomness from this
@@ -62,9 +67,13 @@ same prefill observation expressed as elapsed time.
 
 ## Repetitions and uncertainty
 
-A quick panel uses three fixed prompt paths at C1/C4/C8. A qualification panel
-uses five paths at the priority C1/C2/C4/C8 cells and three at C16/C32. Public
-tables use five at every supported concurrency for a simple uniform contract.
+A quick panel uses three fixed-seed repetitions at C1/C4/C8. A qualification
+panel uses five repetitions at the priority C1/C2/C4/C8 cells and three at
+C16/C32. Publication expands C1 to ten sequential repetitions and uses five at
+every other supported concurrency. One C1 repetition contains one prompt path;
+each C2-or-higher repetition already contains multiple distinct paths. The
+larger C1 panel directly addresses the path-dependent spread observed in the
+primary single-user cell without multiplying the runtime of the entire panel.
 
 These are same-process prompt-path repetitions, not independent machine or
 deployment replicates. They provide:
@@ -112,10 +121,11 @@ decode window, counter reset, cached tokens in a cold-prefill cell, missing
 records, or an insufficient equal-context window. A result is never discarded
 because its performance is surprising or unfavorable.
 
-Public results state the image digest, source revisions, model and hardware,
-server command/configuration, AIPerf revision, workload shape, sampling
-settings, supported concurrency, and all run-level engine, acceptance, prefill,
-and ITL values. Request latency may be included as a separately labeled
-end-to-end workload result. TTFT is omitted because it is not an independent
-measurement. Internal endpoints, credentials, cluster names, and registry
-locations are omitted because they do not affect reproduction.
+Public results state the per-cell repetition count, image digest, source
+revisions, model and hardware, server command/configuration, AIPerf revision,
+workload shape, sampling settings, supported concurrency, and all run-level
+engine, acceptance, prefill, and ITL values. Request latency may be included as
+a separately labeled end-to-end workload result. TTFT is omitted because it is
+not an independent measurement. Internal endpoints, credentials, cluster
+names, and registry locations are omitted because they do not affect
+reproduction.

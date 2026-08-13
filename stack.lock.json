@@ -2,15 +2,15 @@
   "schema": 1,
   "release": {
     "manifest": "release.json",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "candidate": 0,
-    "candidate_tag": "v0.2.0-rc.0",
-    "stable_tag": "v0.2.0",
-    "cache_schema": "v10"
+    "candidate_tag": "v0.2.1-rc.0",
+    "stable_tag": "v0.2.1",
+    "cache_schema": "v11"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.2.0-rc.0",
+    "tag": "v0.2.1-rc.0",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -28,18 +28,18 @@
   "pins": [
     {
       "arg": "DSV4_0731_RELEASE_VERSION",
-      "value": "0.2.0",
-      "description": "Stable SemVer target for the clean reimage line."
+      "value": "0.2.1",
+      "description": "Stable SemVer target for the FP8 W_o_A evaluation line."
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
       "value": "0",
-      "description": "Initial release candidate for the 0.2.0 line."
+      "description": "Initial release candidate for the 0.2.1 line."
     },
     {
       "arg": "DSV4_0731_CACHE_SCHEMA",
-      "value": "v10",
-      "description": "Fresh runtime compilation-cache namespace for the reimage."
+      "value": "v11",
+      "description": "Fresh runtime compilation-cache namespace for the FP8 W_o_A source change."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE",
@@ -63,12 +63,12 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "8c336f4426844b2028938f7c542c0a403d37b804",
+      "value": "68de16e0e3ddc5b5d04b6a2bdfbabbbebefc5e03",
       "description": "Final audited SGLang tree after the release patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_INTEGRATION_HEAD",
-      "value": "f5356c7daec4565c2a0a06f9499b775545937db3",
+      "value": "59881760d4a9d7a5938f531b4f0c85fcd54f14c2",
       "description": "Head of the linear local integration branch from which the patch was generated."
     },
     {
@@ -95,6 +95,11 @@
       "arg": "DSV4_0731_SGLANG_PR33805_HEAD",
       "value": "26a2a3981798b8deb97d053d163fa3c48668e03f",
       "description": "SGLang PR #33805 source head: DFLASH/DSPARK SWA eviction."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR34018_HEAD",
+      "value": "c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0",
+      "description": "SGLang PR #34018 source head: SM120/SM121 FP8 W_o_A GEMM."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
@@ -145,7 +150,7 @@
   "integration": {
     "sglang": {
       "base": "dc5f6c488317645d96dc630b1f410e4dfb6f9667",
-      "head": "b90ed01b2ea65e8bc084a0063c98eb2c868a2f53",
+      "head": "59881760d4a9d7a5938f531b4f0c85fcd54f14c2",
       "commits": [
         {
           "source": "sgl-project/sglang#29927",
@@ -171,6 +176,16 @@
           "source": "sgl-project/sglang#33805",
           "source_head": "26a2a3981798b8deb97d053d163fa3c48668e03f",
           "integration_commit": "b90ed01b2ea65e8bc084a0063c98eb2c868a2f53"
+        },
+        {
+          "source": "local focused test adaptation for current runtime context",
+          "source_head": "f5356c7daec4565c2a0a06f9499b775545937db3",
+          "integration_commit": "f5356c7daec4565c2a0a06f9499b775545937db3"
+        },
+        {
+          "source": "sgl-project/sglang#34018",
+          "source_head": "c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0",
+          "integration_commit": "59881760d4a9d7a5938f531b4f0c85fcd54f14c2"
         }
       ]
     },
@@ -193,14 +208,14 @@
   },
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.2.0-rc.0.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.2.1-rc.0.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "f1f48f1f7ddd99eef817dc8b3583fdb37f8d71206810b60065ebe834b2cba3f1",
-      "description": "Required current-head SM120 model support and correctness carries only: SGLang #29927, #33614, #32686, #33568, and #33805, with #33805's focused test adapted to current runtime-context access."
+      "sha256": "1dfc38b6b2cf89f9f00b770cc3340cfe782ecf22216baa6b8bcc78df772bb711",
+      "description": "The v0.2.0-rc.0 SGLang tree plus the exact source head of SGLang #34018 for isolated FP8 W_o_A evaluation."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.2.0-rc.0.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.2.1-rc.0.patch",
       "repository": "flashinfer",
       "order": 1,
       "sha256": "ec556b35a5e474e05d2b524853f98b27e8b9e6c27c5ff84d189936bbcec778bd",
