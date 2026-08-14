@@ -11,7 +11,9 @@ digests are recorded in each release bundle and its OCI labels.
 - Retained the v0.3.2 SGLang, FlashInfer, PCIe-IPC, model, and launch
   configuration.
 - Corrected DeepGEMM's compiled-dimension mapping for SM120 operand-swapped
-  GEMMs so residual token counts do not create distinct W_o_A kernels.
+  GEMMs so residual token counts do not create distinct W_o_A kernels; the
+  production change is tracked in
+  [`sgl-project/DeepGEMM#76`](https://github.com/sgl-project/DeepGEMM/pull/76).
 - Added focused BMM/einsum and ordinary-GEMM regression coverage for multiple
   runtime token counts within one compiled tile bucket.
 - Started the `v15` runtime compilation-cache namespace.

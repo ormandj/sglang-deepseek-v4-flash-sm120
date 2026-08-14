@@ -161,7 +161,11 @@ The SGLang patch contains the audited source heads of #29927, #33614, #32686,
 #33568, #33805, #34018, and #34528. The FlashInfer patch contains #3930,
 #4393, the exact CUDA-runtime filename resolver follow-up, and the focused
 outer-autotune preservation fix. The DeepGEMM patch contains the held-constant
-SM120 single-token split-K change and the reviewed runtime-dimension fix.
+SM120 single-token split-K change and the production fix from
+[`sgl-project/DeepGEMM#76`](https://github.com/sgl-project/DeepGEMM/pull/76)
+at commit `865f8f202b62a0bc8a6f32513fc33d2789c87031`. The current PR head,
+`4900cbd750b4fb10bf756bd1be1f4357b66eac74`, adds test-only hardening and does
+not change the production code included in v0.3.3.
 Every source head, integration commit, patch checksum, and resulting tree is
 recorded in [stack.lock.json](stack.lock.json). Run
 [`scripts/verify-patches.sh`](scripts/verify-patches.sh) to reconstruct and
