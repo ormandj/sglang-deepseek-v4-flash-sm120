@@ -157,11 +157,25 @@ preventing residual token counts from producing distinct W_o_A JIT kernels.
 | DeepGEMM effective tree | `b166d085065d39155a8f745126d6db88597d268c` |
 | DeepGEMM package | `0.1.5.post2+sm120jit2` |
 
-The SGLang patch contains the audited source heads of #29927, #33614, #32686,
-#33568, #33805, #34018, and #34528. The FlashInfer patch contains #3930,
-#4393, the exact CUDA-runtime filename resolver follow-up, and the focused
-outer-autotune preservation fix. The DeepGEMM patch contains the held-constant
-SM120 single-token split-K change and the production fix from
+The SGLang patch contains the audited source heads of
+[`sgl-project/sglang#29927`](https://github.com/sgl-project/sglang/pull/29927),
+[`sgl-project/sglang#33614`](https://github.com/sgl-project/sglang/pull/33614),
+[`sgl-project/sglang#32686`](https://github.com/sgl-project/sglang/pull/32686),
+[`sgl-project/sglang#33568`](https://github.com/sgl-project/sglang/pull/33568),
+[`sgl-project/sglang#33805`](https://github.com/sgl-project/sglang/pull/33805),
+[`sgl-project/sglang#34018`](https://github.com/sgl-project/sglang/pull/34018),
+and [`sgl-project/sglang#34528`](https://github.com/sgl-project/sglang/pull/34528).
+The FlashInfer patch contains
+[`flashinfer-ai/flashinfer#3930`](https://github.com/flashinfer-ai/flashinfer/pull/3930),
+[`flashinfer-ai/flashinfer#4393`](https://github.com/flashinfer-ai/flashinfer/pull/4393),
+the exact CUDA-runtime resolver follow-up submitted as
+[`aryanputta/flashinfer#1`](https://github.com/aryanputta/flashinfer/pull/1),
+and the outer-autotune preservation follow-up submitted as
+[`qsang-nv/flashinfer#1`](https://github.com/qsang-nv/flashinfer/pull/1).
+The DeepGEMM patch contains the held-constant SM120 single-token split-K change
+submitted as
+[`sgl-project/DeepGEMM#77`](https://github.com/sgl-project/DeepGEMM/pull/77)
+and the production fix from
 [`sgl-project/DeepGEMM#76`](https://github.com/sgl-project/DeepGEMM/pull/76)
 at commit `865f8f202b62a0bc8a6f32513fc33d2789c87031`. The current PR head,
 `4900cbd750b4fb10bf756bd1be1f4357b66eac74`, adds test-only hardening and does
@@ -170,6 +184,28 @@ Every source head, integration commit, patch checksum, and resulting tree is
 recorded in [stack.lock.json](stack.lock.json). Run
 [`scripts/verify-patches.sh`](scripts/verify-patches.sh) to reconstruct and
 verify the three effective trees.
+
+### Upstream validation
+
+The CUDA-runtime follow-up reproduces the serving-container collision where a
+mapped TileLang `libcudart_stub.so` preceded the actual runtime. The exact
+matcher selected the real runtime and the same server configuration initialized
+successfully. The change has 12 focused resolver cases; no performance change
+is attributed to it.
+
+The PCIe-IPC follow-up ran in the actual SGLang model-warmup autotune context
+with a persisted machine-local tuning cache. Matched C1 and C8 Nsight captures
+retained 127 complete paired target-plus-draft steps. The profiled step changed
+from 15.681 to 14.965 milliseconds at C1 and from 35.399 to 33.421 milliseconds
+at C8. All 11,938 captured C8 all-reduces used PCIe-IPC. These measurements
+establish parent-backend execution; they are not isolated attribution for the
+cache-preservation follow-up.
+
+The DeepGEMM split-K pull request records an isolated SM120 projection profile
+of approximately 22.4 microseconds with split-K plus reduction and 13.2
+microseconds with `split_k=1` for `M=4, N=8192, K=1024`. All three changes were
+also present in the source-equivalent stack that completed the v0.3.3 n=5
+decode and prefill panels, full GSM8K, and 8/8 long-output validation.
 
 ## Current measurements
 

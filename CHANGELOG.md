@@ -16,6 +16,9 @@ digests are recorded in each release bundle and its OCI labels.
   [`sgl-project/DeepGEMM#76`](https://github.com/sgl-project/DeepGEMM/pull/76).
 - Added focused BMM/einsum and ordinary-GEMM regression coverage for multiple
   runtime token counts within one compiled tile bucket.
+- Submitted the retained SM120 single-token split-K heuristic as
+  [`sgl-project/DeepGEMM#77`](https://github.com/sgl-project/DeepGEMM/pull/77),
+  including its isolated projection profile and complete serving qualification.
 - Started the `v15` runtime compilation-cache namespace.
 - Made the documented Docker wrapper configurable through `TP_SIZE` and
   `CONTEXT_LENGTH` while retaining the qualified TP2 defaults.
@@ -49,19 +52,26 @@ Status: internal evaluation candidate; not published to GHCR.
 
 - Preserved explicit machine-local PCIe-IPC launch selections when an
   enclosing FlashInfer autotune context had no matching distributed tune
-  group.
+  group; the focused follow-up is
+  [`qsang-nv/flashinfer#1`](https://github.com/qsang-nv/flashinfer/pull/1)
+  against
+  [`flashinfer-ai/flashinfer#4393`](https://github.com/flashinfer-ai/flashinfer/pull/4393).
 
 ## v0.3.1-rc.0 - 2026-08-13
 
 Status: internal evaluation candidate; not published to GHCR.
 
-- Enabled the optional PCIe-IPC all-reduce consumer for the qualified TP2
-  decode shape.
+- Enabled the optional PCIe-IPC all-reduce consumer from
+  [`sgl-project/sglang#34528`](https://github.com/sgl-project/sglang/pull/34528)
+  and
+  [`flashinfer-ai/flashinfer#4393`](https://github.com/flashinfer-ai/flashinfer/pull/4393)
+  for the qualified TP2 decode shape.
 - Excluded TRT/MNNVL fusion and PCIe-IPC all-gather.
 
 ## v0.2.1-rc.0 - 2026-08-12
 
-- Added the SM120/SM121 FP8 W_o_A target-model path from SGLang #34018.
+- Added the SM120/SM121 FP8 W_o_A target-model path from
+  [`sgl-project/sglang#34018`](https://github.com/sgl-project/sglang/pull/34018).
 - Added `SGLANG_OPT_FP8_WO_A_GEMM=1` to the serving recipe while retaining HC
   prenorm and fused MHC post+pre.
 - Moved the runtime compilation cache to schema `v11`.
@@ -79,7 +89,17 @@ Status: internal evaluation candidate; not published to GHCR.
 - Removed the experimental PCIe-IPC, TBO, one-token-output,
   prefill-workspace, and local MHC-default patches.
 - Removed carries already merged, replaced, or supplied by upstream main,
-  including SGLang #30700 and FlashInfer #4308.
-- Retained the audited SGLang #29927, #33614, #32686, #33568, and #33805
-  carries plus FlashInfer #3930 and its exact-runtime-filename follow-up.
+  including
+  [`sgl-project/sglang#30700`](https://github.com/sgl-project/sglang/pull/30700)
+  and
+  [`flashinfer-ai/flashinfer#4308`](https://github.com/flashinfer-ai/flashinfer/pull/4308).
+- Retained the audited
+  [`sgl-project/sglang#29927`](https://github.com/sgl-project/sglang/pull/29927),
+  [`sgl-project/sglang#33614`](https://github.com/sgl-project/sglang/pull/33614),
+  [`sgl-project/sglang#32686`](https://github.com/sgl-project/sglang/pull/32686),
+  [`sgl-project/sglang#33568`](https://github.com/sgl-project/sglang/pull/33568),
+  and [`sgl-project/sglang#33805`](https://github.com/sgl-project/sglang/pull/33805)
+  carries plus [`flashinfer-ai/flashinfer#3930`](https://github.com/flashinfer-ai/flashinfer/pull/3930)
+  and its exact-runtime-filename follow-up,
+  [`aryanputta/flashinfer#1`](https://github.com/aryanputta/flashinfer/pull/1).
 - Started the `v10` runtime compilation-cache namespace.
