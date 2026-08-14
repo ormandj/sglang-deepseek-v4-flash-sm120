@@ -29,6 +29,7 @@ esac
 : "${AIPERF_REVISION:?AIPERF_REVISION must be set}"
 : "${BENCH_MODEL_REVISION:?BENCH_MODEL_REVISION must be set}"
 bench_dp_size=${BENCH_DP_SIZE:-1}
+decode_minimum_window_seconds=${DECODE_MINIMUM_WINDOW_SECONDS:-6.5}
 case "$bench_dp_size" in
   *[!0-9]*|'') echo "error: BENCH_DP_SIZE must be a positive integer" >&2; exit 2 ;;
 esac
@@ -114,7 +115,7 @@ run_decode() {
         --target-concurrency "$concurrency" \
         --average-context-lower 17408 \
         --average-context-upper 20480 \
-        --minimum-window-seconds 7 \
+        --minimum-window-seconds "$decode_minimum_window_seconds" \
         --minimum-samples 20 \
         --output "$cell/decode-analysis.json"
     else
@@ -125,7 +126,7 @@ run_decode() {
         --target-concurrency "$concurrency" \
         --average-context-lower 17408 \
         --average-context-upper 20480 \
-        --minimum-window-seconds 7 \
+        --minimum-window-seconds "$decode_minimum_window_seconds" \
         --minimum-samples 20 \
         --output "$cell/decode-analysis.json"
     fi

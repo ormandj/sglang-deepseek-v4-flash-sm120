@@ -1,0 +1,223 @@
+diff --git a/csrc/apis/einsum.hpp b/csrc/apis/einsum.hpp
+index 781701b4c74ab22878f4abd447b93c0fa8e28339..11ca6b31818064389b69125150bef4196433e83a 100644
+--- a/csrc/apis/einsum.hpp
++++ b/csrc/apis/einsum.hpp
+@@ -197,7 +197,8 @@ static void fp8_bmm(const torch::Tensor& a, const torch::Tensor& sfa,
+             b, transformed_sfa_swap, a, transformed_sfb_swap, c, d,
+             batch_size, /*m=*/n, /*n=*/m, k,
+             gran_k_a_swap, gran_k_b_swap,
+-            major_b, major_a, compiled_dims,
++            // Keep compile-time dimensions attached to the caller's logical axes.
++            major_b, major_a, swap_mn_compiled_dims(compiled_dims),
+             /*swap_ab=*/true);
+         return;
+     }
+diff --git a/csrc/apis/gemm.hpp b/csrc/apis/gemm.hpp
+index 444ab6f464cb6429899b74e444706f44c80a1ae3..1b7012014e7b805943b9779d40f11a645e13c949 100644
+--- a/csrc/apis/gemm.hpp
++++ b/csrc/apis/gemm.hpp
+@@ -144,9 +144,10 @@ static void fp8_fp4_gemm_nt_sm120(const std::pair<torch::Tensor, torch::Tensor>&
+         eff_recipe_a, eff_recipe_b, std::nullopt, std::nullopt, disable_ue8m0_cast);
+ 
+     if (swap_ab) {
++        // Keep compile-time dimensions attached to the caller's logical axes.
+         sm120_fp8_fp4_gemm_1d1d(b_data, sfa, a_data, sfb, std::nullopt, d,
+                                 eff_m, eff_n, k, gran_k_a, gran_k_b,
+-                                k_major, k_major, compiled_dims,
++                                k_major, k_major, swap_mn_compiled_dims(compiled_dims),
+                                 std::nullopt, true);
+     } else {
+         sm120_fp8_fp4_gemm_1d1d(a_data, sfa, b_data, sfb, c, d, m, n, k, gran_k_a, gran_k_b,
+diff --git a/csrc/jit_kernels/heuristics/sm120.hpp b/csrc/jit_kernels/heuristics/sm120.hpp
+index 0dcdcc8675ac8219d5f55ad147e653c9b4468fbc..50ebf6e27fae18cc74fbe8617970b09f86732c59 100644
+--- a/csrc/jit_kernels/heuristics/sm120.hpp
++++ b/csrc/jit_kernels/heuristics/sm120.hpp
+@@ -326,6 +326,18 @@ struct SM120ArchSpec {
+         if (num_mn_blocks >= desc.num_sms / 2)
+             return 1;
+ 
++        // Single-token decode (M well below block_m) leaves the split-K
++        // reduction dominated by launch and write-back cost rather than by the
++        // partial-sum arithmetic it parallelises: the reduction reads
++        // split_k * M * N floats to produce M * N, and at M = 4 that is a
++        // separate kernel whose runtime exceeds the GEMM time it saves.
++        // Measured on SM120 (RTX PRO 6000, DeepSeek-V4-Flash decode, M = 4,
++        // N = 8192, K = 1024): the split GEMM plus reduction costs about
++        // 22.4 us against about 13.2 us for the same projection without a
++        // split. Keep split-K for shapes with a real M tile.
++        if (desc.get_expected_m() * 4 <= layout.block_m)
++            return 1;
++
+         const int target_blocks = desc.num_sms * 3 / 4;
+         int split_k = ceil_div(target_blocks, num_mn_blocks);
+ 
+diff --git a/csrc/utils/layout.hpp b/csrc/utils/layout.hpp
+index bb09f21a724adb81f150db4569435baa6fbbc05f..1ea62a2f996b6d8f57a402e93bfd51155948fc5f 100644
+--- a/csrc/utils/layout.hpp
++++ b/csrc/utils/layout.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <cute/arch/mma_sm100_umma.hpp>
++#include <string>
+ #include <torch/torch.h>
+ 
+ #include "math.hpp"
+@@ -9,6 +10,16 @@
+ 
+ namespace deep_gemm {
+ 
++static std::string swap_mn_compiled_dims(std::string compiled_dims) {
++    for (auto& dim: compiled_dims) {
++        if (dim == 'm')
++            dim = 'n';
++        else if (dim == 'n')
++            dim = 'm';
++    }
++    return compiled_dims;
++}
++
+ // Major-ness stuffs
+ static void major_check(const torch::Tensor& t) {
+     const auto dim = t.dim();
+diff --git a/sgl_deep_gemm/VERSION b/sgl_deep_gemm/VERSION
+index d53ada0c4bd55e345ea5c5d56a78db0a6bd2d196..16a9f801e10c7ff6c007c0c26d4663c81277d1f8 100644
+--- a/sgl_deep_gemm/VERSION
++++ b/sgl_deep_gemm/VERSION
+@@ -1 +1 @@
+-0.1.5.post1
+\ No newline at end of file
++0.1.5.post2+sm120jit2
+diff --git a/sgl_deep_gemm/run_tests.sh b/sgl_deep_gemm/run_tests.sh
+index 86dba4b4c910abf2fe5e28f5cf1c0a89c3323046..99c7164d97717330e917660c41684b12f638297d 100755
+--- a/sgl_deep_gemm/run_tests.sh
++++ b/sgl_deep_gemm/run_tests.sh
+@@ -110,6 +110,7 @@ DEFAULT_SINGLE_GPU_TESTS=(
+   test_attention.py
+ )
+ SM120_SINGLE_GPU_TESTS=(
++  test_runtime_compiled_dims.py
+   test_bf16.py
+   test_einsum.py
+   test_fp8_fp4.py
+diff --git a/sgl_deep_gemm/tests/test_runtime_compiled_dims.py b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb460a98c9
+--- /dev/null
++++ b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
+@@ -0,0 +1,114 @@
++import os
++import subprocess
++import sys
++import tempfile
++
++
++TEST_PROGRAM = r'''
++import os
++from pathlib import Path
++import re
++
++import torch
++
++import deep_gemm
++from deep_gemm.testing import calc_diff, get_arch_major
++from deep_gemm.utils import ceil_div, per_token_cast_to_fp8
++
++
++if get_arch_major() == 12:
++    cache_dir = Path(os.environ['DG_JIT_CACHE_DIR']) / 'cache'
++
++    def kernel_dirs(name):
++        return set(cache_dir.glob(f'kernel.{name}.*'))
++
++    def assert_compiled_shape(kernel_dir, expected):
++        source = (kernel_dir / 'kernel.cu').read_text()
++        match = re.search(
++            r'sm120_fp8_fp4_gemm_1d1d_impl<\s*(\d+),\s*(\d+),\s*(\d+),',
++            source,
++        )
++        assert match is not None
++        assert tuple(map(int, match.groups())) == expected
++
++    h, n, k = 4, 1024, 4096
++    weight = torch.randn((h, n, k), device='cuda', dtype=torch.bfloat16)
++    weight_fp8 = per_token_cast_to_fp8(weight.view(-1, k), use_ue8m0=True)
++    weight_fp8 = (
++        weight_fp8[0].view(h, n, k),
++        weight_fp8[1].view(h, n, ceil_div(k, 128)),
++    )
++
++    bmm_kernels = None
++    for tokens in (3, 11):
++        activation = torch.randn((tokens, h, k), device='cuda', dtype=torch.bfloat16)
++        reference = torch.einsum('bhr,hdr->bhd', activation, weight)
++        activation_fp8 = per_token_cast_to_fp8(
++            activation.view(-1, k), use_ue8m0=True
++        )
++        activation_fp8 = (
++            activation_fp8[0].view(tokens, h, k),
++            activation_fp8[1].view(tokens, h, ceil_div(k, 128)),
++        )
++        output = torch.empty((tokens, h, n), device='cuda', dtype=torch.bfloat16)
++
++        deep_gemm.fp8_einsum(
++            'bhr,hdr->bhd',
++            activation_fp8,
++            weight_fp8,
++            output,
++            recipe=(1, 1, 128),
++        )
++        assert calc_diff(output, reference) < 1e-3
++
++        current_kernels = kernel_dirs('sm120_fp8_fp4_bmm')
++        if bmm_kernels is None:
++            assert len(current_kernels) == 1
++            assert_compiled_shape(next(iter(current_kernels)), (1024, 0, 4096))
++            bmm_kernels = current_kernels
++        else:
++            assert current_kernels == bmm_kernels
++
++    matrix_weight = torch.randn((n, k), device='cuda', dtype=torch.bfloat16)
++    matrix_weight_fp8 = per_token_cast_to_fp8(matrix_weight, use_ue8m0=True)
++
++    gemm_kernels = None
++    for tokens in (3, 11):
++        activation = torch.randn((tokens, k), device='cuda', dtype=torch.bfloat16)
++        reference = activation @ matrix_weight.T
++        activation_fp8 = per_token_cast_to_fp8(activation, use_ue8m0=True)
++        output = torch.empty((tokens, n), device='cuda', dtype=torch.bfloat16)
++
++        deep_gemm.fp8_fp4_gemm_nt(
++            activation_fp8,
++            matrix_weight_fp8,
++            output,
++            recipe=(1, 1, 128),
++            compiled_dims='nk',
++        )
++        assert calc_diff(output, reference) < 1e-3
++
++        current_kernels = kernel_dirs('sm120_fp8_fp4_gemm_1d1d')
++        if gemm_kernels is None:
++            assert len(current_kernels) == 1
++            assert_compiled_shape(next(iter(current_kernels)), (1024, 0, 4096))
++            gemm_kernels = current_kernels
++        else:
++            assert current_kernels == gemm_kernels
++'''
++
++
++def test_sm120_swap_ab_runtime_token_dim():
++    with tempfile.TemporaryDirectory(prefix='deep-gemm-runtime-dim-') as cache_dir:
++        env = os.environ.copy()
++        env['DG_JIT_CACHE_DIR'] = cache_dir
++        subprocess.run(
++            [sys.executable, '-c', TEST_PROGRAM],
++            check=True,
++            cwd=cache_dir,
++            env=env,
++        )
++
++
++if __name__ == '__main__':
++    test_sm120_swap_ab_runtime_token_dim()
+

@@ -15,6 +15,45 @@ therefore driven in part by DSpARK acceptance. Different fixed prompt/seed
 paths produce different accepted-draft-length distributions, so this rate is
 more variable than verifier steps/s.
 
+## v0.3.3-rc.0
+
+| Field | Value |
+|---|---|
+| Public image tag | `ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0` |
+| SGLang effective tree | `2833e60bfdb9c17820095e2e1aa478bb2eb041ef` |
+| FlashInfer effective tree | `b68d15ef203d0e0e11b3734ade4ccf6dca1b6b4d` |
+| DeepGEMM effective tree | `b166d085065d39155a8f745126d6db88597d268c` |
+| AIPerf revision | `6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23` |
+| Harness revision | `5146a50047fd896fc2b81fb34df4d4efabcddfdf` |
+| Decode samples | five at every supported concurrency |
+| Prefill samples | five cache-cold requests per length |
+| Runtime selectors | HC prenorm, fused MHC post+pre, FP8 W_o_A, and PCIe-IPC all-reduce enabled; legacy custom all-reduce and TRT/MNNVL disabled |
+
+Hardware was two RTX PRO 6000 Blackwell Max-Q GPUs at TP2 over PCIe Gen 4 x16
+with a 300 W limit per GPU. Decode used 16,384 input tokens, 4,096 forced output
+tokens, temperature 0, top-p 1, and fixed seeds.
+
+| C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token | Acceptance rate |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 5 | 63.864 `[63.016, 66.412]` | 331.7 `[321.5, 398.5]` | 3.110 `[2.745, 3.241]` | 0.851 `[0.777, 1.000]` |
+| 2 | 5 | 47.737 `[46.815, 48.797]` | 488.6 `[456.9, 514.4]` | 4.321 `[4.096, 4.783]` | 0.807 `[0.715, 0.886]` |
+| 4 | 5 | 34.322 `[32.950, 37.119]` | 653.9 `[652.1, 783.3]` | 6.481 `[5.839, 9.767]` | 0.779 `[0.732, 0.812]` |
+| 8 | 5 | 22.968 `[22.795, 23.197]` | 912.3 `[864.6, 936.0]` | 9.911 `[9.488, 13.423]` | 0.775 `[0.740, 0.794]` |
+| 16 | 5 | 17.304 `[17.066, 17.533]` | 1,392.0 `[1,388.6, 1,412.5]` | 14.440 `[14.202, 14.548]` | 0.793 `[0.786, 0.817]` |
+| 32 | 5 | 12.722 `[12.624, 12.763]` | 2,036.8 `[1,968.7, 2,102.9]` | 22.085 `[21.874, 22.587]` | 0.790 `[0.769, 0.821]` |
+
+| 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
+|---:|---:|---:|---:|
+| 7,776.8 | 8,743.1 | 8,464.5 | 7,966.6 |
+
+| Gate | Questions | Correct | Accuracy | Request errors |
+|---|---:|---:|---:|---:|
+| GSM8K | 1,319 | 1,261 | 95.60% | 0 |
+
+The requested long-output diagnostic completed eight of eight requests and all
+eight passed its structural and JavaScript-parse checks. It is not a routine
+recurring performance gate.
+
 ## v0.2.0-rc.0
 
 | Field | Value |

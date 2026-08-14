@@ -72,6 +72,7 @@ done < <(find patches -type f | sort)
 
 sglang_repo=$(jq -r '.verification.sglang_repository' "$lock")
 flashinfer_repo=$(jq -r '.verification.flashinfer_repository' "$lock")
+deepgemm_repo=$(jq -r '.verification.deepgemm_repository' "$lock")
 
 sglang_head=$(lock_value DSV4_0731_SGLANG_MAIN_HEAD)
 sglang_tree=$(lock_value DSV4_0731_SGLANG_MAIN_TREE)
@@ -79,6 +80,9 @@ sglang_effective_tree=$(lock_value DSV4_0731_SGLANG_EFFECTIVE_TREE)
 flashinfer_head=$(lock_value DSV4_0731_FLASHINFER_MAIN_HEAD)
 flashinfer_tree=$(lock_value DSV4_0731_FLASHINFER_MAIN_TREE)
 flashinfer_effective_tree=$(lock_value DSV4_0731_FLASHINFER_EFFECTIVE_TREE)
+deepgemm_head=$(lock_value DSV4_0731_DEEPGEMM_MAIN_HEAD)
+deepgemm_tree=$(lock_value DSV4_0731_DEEPGEMM_MAIN_TREE)
+deepgemm_effective_tree=$(lock_value DSV4_0731_DEEPGEMM_EFFECTIVE_TREE)
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -110,5 +114,14 @@ while IFS= read -r path; do
 done < <(jq -r '[.patches[] | select(.repository == "flashinfer")] | sort_by(.order)[].path' "$lock")
 test "$(git -C "$work/flashinfer" write-tree)" = "$flashinfer_effective_tree"
 echo "  final tree $flashinfer_effective_tree"
+
+echo "== DeepGEMM $deepgemm_head =="
+fetch_commit "$work/deepgemm" "$deepgemm_repo" "$deepgemm_head" "$deepgemm_tree"
+while IFS= read -r path; do
+  git -C "$work/deepgemm" apply --index --binary "$repo/$path"
+  printf '  applied %s\n' "$path"
+done < <(jq -r '[.patches[] | select(.repository == "deepgemm")] | sort_by(.order)[].path' "$lock")
+test "$(git -C "$work/deepgemm" write-tree)" = "$deepgemm_effective_tree"
+echo "  final tree $deepgemm_effective_tree"
 
 echo "stack.lock.json, Containerfile, and patches agree; every tree hash reproduces"

@@ -18,7 +18,7 @@ Check GPU passthrough:
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0
 ```
 
 ## Model and cache
@@ -30,12 +30,12 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v11
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v15
 mkdir -p "$CACHE_DIR"
 ```
 
-`v11` is a fresh cache schema for this source change. Do not reuse the
-`v0.2.0-rc.0` cache directory.
+`v15` is the cache schema for this source composition. Do not reuse a cache
+directory from another image source tree.
 
 ## Start TP2
 
@@ -50,9 +50,11 @@ context length. `IMAGE`, `PORT`, `CUDA_VISIBLE_DEVICES`, `TP_SIZE`,
 listed in `CUDA_VISIBLE_DEVICES` must equal `TP_SIZE`. Record all overrides with
 results.
 
-The runtime intentionally does not enable FlashInfer PCIe-IPC all-reduce,
-PCIe-IPC all-gather, or TRT/MNNVL fusion. The reimage establishes an upstream-
-default NCCL baseline before communication experiments are reconsidered.
+The qualified runtime enables FlashInfer PCIe-IPC all-reduce for eligible
+decode reductions. `--disable-custom-all-reduce` disables SGLang's legacy
+custom all-reduce so those reductions reach the optional FlashInfer consumer.
+Unsupported and prefill-sized reductions use NCCL. PCIe-IPC all-gather is
+absent, and TRT/MNNVL fusion remains disabled.
 
 The launch script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. The carried SM120
 implementation selects DeepGEMM for large-token prefill batches and retains
@@ -66,7 +68,7 @@ upstream SM120 default and is tracked rather than applied to this image.
 The script additionally sets `SGLANG_OPT_FP8_WO_A_GEMM=1` to select the
 SM120/SM121 target-model FP8 W_o_A path carried from upstream PR #34018.
 
-The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v11
+The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v15
 cache for subsequent starts of the identical image; do not time compilation as
 serving startup or inference.
 
@@ -91,8 +93,8 @@ curl -fsS http://localhost:8000/v1/chat/completions \
 ```
 
 Agentic requests should follow the model card: temperature `1.0` and top-p
-`0.95`. The deterministic performance gate uses temperature `0` to isolate
-engine behavior; the AgentX trace replay covers the agentic request shape.
+`0.95`. The deterministic engine gate uses temperature `0` to isolate engine
+behavior.
 
 ## Capacity
 
@@ -116,9 +118,9 @@ inside the selected serving pod against localhost. The frozen protocol uses:
 - five sequential fixed-seed repetitions at every published supported
   concurrency;
 - separate cache-cold prefill diagnostics;
-- C1 and C8 AgentX programming-trace replay;
-- correctness and near-context-limit gates.
+- full GSM8K correctness; and
+- targeted near-context or long-output diagnostics when requested.
 
-The published `v0.2.1-rc.0` panel preserves the sample counts actually
-collected for that release, including ten C1 paths. Future uniform-n=5 panels
-are not spliced into that historical result.
+The published `v0.3.3-rc.0` panel uses five measured repetitions at every
+supported concurrency and prefill length. All measured cells run sequentially
+on one unchanged process after one warmup per distinct shape.

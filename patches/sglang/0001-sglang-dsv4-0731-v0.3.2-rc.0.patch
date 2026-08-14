@@ -398,11 +398,291 @@ index 173b5ee619..c50b7d2e68 100644
      )
      _tag_groups_for_flashinfer_allreduce_only()
      initialize_dp_attention(
+diff --git a/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py b/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py
+new file mode 100644
+index 0000000000..1f0342c513
+--- /dev/null
++++ b/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py
+@@ -0,0 +1,221 @@
++# SPDX-License-Identifier: Apache-2.0
++"""FlashInfer PCIe-IPC all-reduce for switch-free intra-node machines.
++
++FlashInfer's ``pcie_ipc_comm`` targets hosts where every peer transfer crosses the
++CPU root complex -- no NVLink, no multicast. The existing custom all-reduce
++backends assume one of those fabrics, so on such a host every per-layer reduction
++falls back to NCCL, which leaves a large margin on the table at decode sizes.
++
++Why the kernel wins here
++------------------------
++Naive all-to-all peer writes collapse on this fabric, and the collapse worsens
++with the number of concurrently writing blocks. FlashInfer's kernels instead
++*stage* their pushes so each rank has exactly one outbound and one inbound stream
++at any instant, and the 8-rank path keeps a 4+4 island decomposition so the
++scarce cross-socket link carries the minimum. Measured on one 8x SM120 host
++(GPUs 0-3 and 4-7 on separate NUMA nodes), against NCCL, hidden 6144 bf16:
++
++=========  ===========  ==========  =========
++Message    FlashInfer   NCCL        Speed-up
++=========  ===========  ==========  =========
++12 KiB     5.3 us       205.1 us    38.8x
++96 KiB     15.3 us      584.9 us    38.2x
++384 KiB    34.6 us      1169.3 us   33.8x
++100 MiB    8.5 ms       50.4 ms     5.9x
++=========  ===========  ==========  =========
++
++Shape coverage is decided by FlashInfer's own tuning table, reached through
++:meth:`PcieIpcAllReduceWorkspace.supports`. A shape the kernels do not beat is
++reported unsupported and falls back to NCCL, so this wrapper needs no size knob
++of its own -- it asks and obeys.
++
++Workspace sizing
++----------------
++The workspace is sized for decode, ``cuda_graph_max_bs * hidden``, which leaves
++every prefill chunk on NCCL. That split is deliberate. These kernels win by
++latency at small messages; a prefill chunk is three orders of magnitude larger,
++and there NCCL's ring is the better algorithm. Measured at 8 ranks, TP8, 8k
++context, against NCCL as the baseline:
++
++===================  ==========  ==========  ===============
++Workspace            TTFT        TPOT        Output tok/s
++===================  ==========  ==========  ===============
++NCCL only            1910 ms     21.14 ms    35.02
++prefill-sized        3176 ms     13.64 ms    38.43
++decode-sized         1849 ms     13.62 ms    48.05
++===================  ==========  ==========  ===============
++
++Handing prefill to these kernels costs 66% on TTFT and buys nothing on TPOT.
++The decode-sized workspace keeps the whole TPOT win, stays level with NCCL on
++TTFT, and is the only one of the three that is not worse than NCCL anywhere we
++measured. It is also ~250x smaller, which matters at long context: at 128k with
++4 concurrent requests the prefill-sized workspace regressed TPOT by 45%, and
++that regression disappears when it is sized for decode.
++
++The bound comes from the server args, but the hidden size is not known when the
++group is built, so the workspace is created on the first eligible tensor, whose
++trailing dimension is exactly that hidden size. Ranks run the same sequence of
++reductions, so they all reach that first call with the same shape and build the
++same workspace. ``SGLANG_PCIE_IPC_MAX_NUMEL`` overrides the derivation for
++deployments that want to hand larger reductions to the kernels anyway.
++"""
++
++import logging
++from typing import Any, Optional
++
++import torch
++import torch.distributed as dist
++from torch.distributed import ProcessGroup
++
++from sglang.srt.environ import envs
++
++logger = logging.getLogger(__name__)
++
++# The kernels build IPC channels for these world sizes only.
++_SUPPORTED_WORLD_SIZES = (2, 4, 8)
++
++# Fallback decode width when the server args are absent (unit tests, embedded
++# use). Covers the batch sizes we serve; anything larger stays on NCCL.
++_FALLBACK_DECODE_WIDTH = 64
++
++
++def _decode_width() -> Optional[int]:
++    """Rows in the widest decode reduction, or None when the server args are absent.
++
++    Decode runs inside a captured graph, so the largest captured batch bounds the
++    reduction. Speculative decoding verifies several tokens per sequence in one
++    forward, and the decode phase's ``max_bs`` is the batch the runner captures
++    for, which already accounts for that.
++    """
++    try:
++        from sglang.srt.server_args import get_global_server_args
++
++        config = get_global_server_args().cuda_graph_config
++        return config.decode.max_bs if config is not None else None
++    except Exception:
++        return None
++
++
++class PcieIpcCommunicator:
++    """Adapter between ``GroupCoordinator`` and FlashInfer's PCIe-IPC all-reduce."""
++
++    def __init__(self, group: ProcessGroup, device: torch.device | int):
++        self.disabled = True
++        self.max_numel = 0
++        self._workspace: Optional[Any] = None
++        self._bound_stream: Optional[torch.cuda.Stream] = None
++
++        world_size = dist.get_world_size(group=group)
++        if world_size not in _SUPPORTED_WORLD_SIZES:
++            logger.debug(
++                "FlashInfer PCIe-IPC all-reduce skipped: unsupported world size %d",
++                world_size,
++            )
++            return
++
++        if isinstance(device, int):
++            device = torch.device(f"cuda:{device}")
++        if device.type != "cuda":
++            return
++
++        try:
++            from flashinfer.comm import PcieIpcAllReduceWorkspace
++        except ImportError:
++            logger.warning(
++                "SGLANG_ENABLE_PCIE_IPC_ALLREDUCE is set but this FlashInfer build has "
++                "no pcie_ipc_comm; falling back to NCCL all-reduce."
++            )
++            return
++
++        # The workspace is built on the first eligible tensor: sizing it needs the
++        # hidden size, which the group does not know yet.
++        self._group = group
++        self._device = device
++        self._world_size = world_size
++        self._workspace_cls = PcieIpcAllReduceWorkspace
++        self._build_failed = False
++        self.disabled = False
++        logger.info(
++            "FlashInfer PCIe-IPC all-reduce enabled (world=%d, workspace sized on "
++            "first reduction)",
++            world_size,
++        )
++
++    def _ensure_workspace(self, inp: torch.Tensor) -> bool:
++        """Build the workspace for the widest decode, using ``inp`` for the hidden size.
++
++        Every rank issues the same reductions in the same order, so they all arrive
++        here with the same shape and agree on ``max_numel`` without extra exchange.
++        """
++        if self._workspace is not None:
++            return True
++        if self._build_failed:
++            return False
++
++        override = envs.SGLANG_PCIE_IPC_MAX_NUMEL.get()
++        if override:
++            max_numel = override
++        else:
++            hidden = inp.shape[-1]
++            max_numel = (_decode_width() or _FALLBACK_DECODE_WIDTH) * hidden
++
++        try:
++            self._workspace = self._workspace_cls(
++                group=self._group, max_numel=max_numel, dtype=torch.bfloat16
++            )
++        except Exception as e:
++            logger.warning(
++                "FlashInfer PCIe-IPC workspace (max_numel=%d) failed: %s; "
++                "reductions stay on NCCL",
++                max_numel,
++                e,
++            )
++            self._build_failed = True
++            self.disabled = True
++            return False
++
++        self.max_numel = max_numel
++        logger.info(
++            "FlashInfer PCIe-IPC workspace built (world=%d, max_numel=%d, "
++            "hidden=%d)",
++            self._world_size,
++            max_numel,
++            inp.shape[-1],
++        )
++        return True
++
++    def should_pcie_ipc_ar(self, inp: torch.Tensor) -> bool:
++        """Whether FlashInfer has a tuned configuration for this exact shape.
++
++        ``supports`` consults the tuning table, so a shape the kernels lose on is
++        rejected here and the caller keeps its NCCL path.
++        """
++        if self.disabled or not inp.is_contiguous() or inp.dim() < 2:
++            return False
++        if not self._ensure_workspace(inp):
++            return False
++        if inp.numel() > self.max_numel:
++            return False
++        return self._workspace.supports(inp)
++
++    def pcie_ipc_all_reduce(self, inp: torch.Tensor) -> Optional[torch.Tensor]:
++        """All-reduce ``inp``, rebinding the workspace when the stream changes.
++
++        One workspace serves one stream: its epoch and arrival counters assume the
++        calls sharing it are totally ordered. SGLang switches streams at phase
++        boundaries -- graph capture, then replay -- so the binding is moved with
++        the caller rather than kept on whichever stream got there first. This is
++        safe because those phases do not overlap; it would not be safe if two
++        streams issued reductions concurrently on the same group.
++        """
++        stream = torch.cuda.current_stream()
++        if self._bound_stream is None or stream != self._bound_stream:
++            self._workspace.rebind_stream()
++            self._bound_stream = stream
++        return self._workspace.all_reduce(inp)
++
++    def destroy(self) -> None:
++        if self._workspace is not None:
++            self._workspace.destroy()
++            self._workspace = None
++            self.disabled = True
 diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
-index 903fdff793..c4c6b9ea3b 100644
+index 903fdff793..29518095f5 100644
 --- a/python/sglang/srt/distributed/parallel_state.py
 +++ b/python/sglang/srt/distributed/parallel_state.py
-@@ -1469,6 +1469,24 @@ class GroupCoordinator:
+@@ -467,6 +467,26 @@ class GroupCoordinator:
+ 
+         self.ca_comm: Optional[Any] = None
+         self.qr_comm: Optional[QuickAllReduce] = None
++
++        self.pcie_ipc_comm: Optional[Any] = None
++        # Only the tensor-parallel group issues the per-layer reductions these
++        # kernels target; other groups would just pin IPC buffers.
++        if (
++            envs.SGLANG_ENABLE_PCIE_IPC_ALLREDUCE.get()
++            and self.world_size > 1
++            and "tp" in self.unique_name
++        ):
++            try:
++                from sglang.srt.distributed.device_communicators.pcie_ipc_ar import (
++                    PcieIpcCommunicator,
++                )
++
++                # The IPC handshake needs the CUDA (NCCL) group, not the CPU one.
++                self.pcie_ipc_comm = PcieIpcCommunicator(
++                    group=self.device_group, device=self.device
++                )
++            except Exception as e:
++                logger.warning(f"Setup FlashInfer PCIe-IPC allreduce failed with {e}.")
+         if use_custom_allreduce and self.world_size > 1:
+             # Initialize a custom fast all-reduce implementation.
+             try:
+@@ -926,6 +946,16 @@ class GroupCoordinator:
+             and self.ca_comm.should_custom_ar(input_)
+         ):
+             return "ca"
++        # After ``ca``: the PCIe-IPC kernels are for hosts where no fabric-specific
++        # backend applies. They do not probe for NVLink, so on a host that has it
++        # this ordering is what keeps the faster backend in front of them.
++        if (
++            self.pcie_ipc_comm is not None
++            and not self.pcie_ipc_comm.disabled
++            and not should_use_pymscclpp_allreduce
++            and self.pcie_ipc_comm.should_pcie_ipc_ar(input_)
++        ):
++            return "pcie_ipc"
+         if (
+             self.qr_comm is not None
+             and not self.qr_comm.disabled
+@@ -1007,6 +1037,8 @@ class GroupCoordinator:
+         elif outplace_all_reduce_method == "pymscclpp":
+             assert not pymscclpp_comm.disabled
+             out = pymscclpp_comm.all_reduce(input_)
++        elif outplace_all_reduce_method == "pcie_ipc":
++            return self.pcie_ipc_comm.pcie_ipc_all_reduce(input_)
+         elif outplace_all_reduce_method == "pynccl":
+             with pynccl_comm.change_state(enable=True):
+                 out = pynccl_comm.outplace_all_reduce(input_)
+@@ -1469,6 +1501,24 @@ class GroupCoordinator:
          )
          return input_
  
@@ -427,7 +707,7 @@ index 903fdff793..c4c6b9ea3b 100644
      def broadcast_object(self, obj: Optional[Any] = None, src: int = 0):
          """Broadcast the input object.
          NOTE: `src` is the local rank of the source rank.
-@@ -2296,6 +2314,7 @@ def initialize_model_parallel(
+@@ -2296,6 +2346,7 @@ def initialize_model_parallel(
      recovered_rank: bool = False,
      rank_offset: int = 0,
      max_world_size: Optional[int] = None,
@@ -435,7 +715,7 @@ index 903fdff793..c4c6b9ea3b 100644
  ) -> None:
      """
      Initialize model parallel groups.
-@@ -2318,6 +2337,9 @@ def initialize_model_parallel(
+@@ -2318,6 +2369,9 @@ def initialize_model_parallel(
              tensor-parallel group during decoding. Must be a divisor of
              tensor_model_parallel_size and is currently only supported on the
              AMD HIP platform.
@@ -445,7 +725,7 @@ index 903fdff793..c4c6b9ea3b 100644
  
      Let's say we have a total of 8 GPUs denoted by g0 ... g7 and we
      use 2 GPUs to parallelize the model tensor, and 4 GPUs to parallelize
-@@ -2513,7 +2535,9 @@ def initialize_model_parallel(
+@@ -2513,7 +2567,9 @@ def initialize_model_parallel(
              group_ranks,
              get_world_group().local_rank,
              backend,
@@ -457,10 +737,10 @@ index 903fdff793..c4c6b9ea3b 100644
              use_torch_symm_mem_allreduce=False,
              use_message_queue_broadcaster=envs.SGLANG_USE_MESSAGE_QUEUE_BROADCASTER.get(),
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index 6919dadf67..73f49cf2fe 100644
+index dd0e3ab55c..c752153820 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
-@@ -1227,7 +1227,13 @@ class OpenAIServingChat(OpenAIServingBase):
+@@ -1228,7 +1228,13 @@ class OpenAIServingChat(OpenAIServingBase):
                  # insert an empty system prompt to help render tool system prompt
                  messages.insert(0, {"role": "system", "content": ""})
              if request.tools:
@@ -475,6 +755,28 @@ index 6919dadf67..73f49cf2fe 100644
  
              # Default encoding (dsv4/dsv32)
              if self.chat_encoding_spec == "dsv4":
+diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
+index 09c4065842..b77b851d07 100644
+--- a/python/sglang/srt/environ.py
++++ b/python/sglang/srt/environ.py
+@@ -1074,6 +1074,17 @@ class Envs:
+     # MNNVL-fabric devices (GB200/GB300) when nnodes > 1; set 0/1 to
+     # override in either direction.
+     SGLANG_ENABLE_CUSTOM_ALL_REDUCE_V2_MULTINODE = EnvBool(False)
++    # FlashInfer PCIe-IPC all-reduce, for switch-free intra-node hosts (no
++    # NVLink, no multicast) where the backends above do not apply. Which shapes
++    # the kernels take is FlashInfer's own decision, not a size knob here: an
++    # unsupported shape is reported as such and the caller keeps its NCCL path.
++    SGLANG_ENABLE_PCIE_IPC_ALLREDUCE = EnvBool(False)
++    # Elements its workspace is sized for. It cannot grow after construction, so
++    # 0 sizes it for the widest decode (cuda_graph_config[decode].max_bs *
++    # hidden), leaving prefill chunks on NCCL -- measured faster than routing
++    # them here. Raise it to hand larger reductions to the kernels, at
++    # ~2 * world_size * max_numel * itemsize bytes per rank.
++    SGLANG_PCIE_IPC_MAX_NUMEL = EnvInt(0)
+ 
+     # ===================================================================
+     # RoPE cache
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 index eff734c6ca..b39bffd4bd 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
@@ -527,7 +829,7 @@ index 05eb1819e8..c2d367b4c0 100644
  
  def _broadcast_indexer_topk_from_rank0(
 diff --git a/python/sglang/srt/layers/attention/dsv4/indexer.py b/python/sglang/srt/layers/attention/dsv4/indexer.py
-index f596caade6..6a637681ca 100644
+index 7e473b71f3..31caf0d5fa 100644
 --- a/python/sglang/srt/layers/attention/dsv4/indexer.py
 +++ b/python/sglang/srt/layers/attention/dsv4/indexer.py
 @@ -29,6 +29,7 @@ from sglang.srt.layers.attention.dsa.dsa_topk_backend import DSATopKBackend
@@ -538,7 +840,7 @@ index f596caade6..6a637681ca 100644
      NonPagedIndexerPlan,
      PagedIndexerMetadata,
  )
-@@ -753,35 +754,6 @@ class C4IndexerBackendMixin:
+@@ -760,35 +761,6 @@ class C4IndexerBackendMixin:
              c4_seq_lens=c4_seq_lens,
              query_rows=query_rows,
          )
@@ -574,7 +876,7 @@ index f596caade6..6a637681ca 100644
          assert indexer_metadata.page_table is core_metadata.page_table
          if self.debug_use_external_c4_sparse_indices:
              return
-@@ -804,45 +776,96 @@ class C4IndexerBackendMixin:
+@@ -811,45 +783,96 @@ class C4IndexerBackendMixin:
          elif core_metadata.c4_sparse_raw_indices is not None:
              raw_indices = core_metadata.c4_sparse_raw_indices
  
@@ -1285,10 +1587,10 @@ index 292aa5bfe8..db3944344c 100644
                      raw_scale,
                      mn=R,
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index 03a92501fc..3e037d5a0a 100644
+index afad543b1d..20cec3f739 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
-@@ -5422,13 +5422,21 @@ class ServerArgs:
+@@ -5445,13 +5445,21 @@ class ServerArgs:
              if is_sm120_supported():
                  # SM120 lacks tcgen05/TMEM: disable features that depend on
                  # DeepGEMM or require >99KB SMEM (topk_v2).
@@ -1316,7 +1618,7 @@ index 03a92501fc..3e037d5a0a 100644
              elif is_hip():
                  envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
                  envs.SGLANG_OPT_USE_FUSED_COMPRESS.set(True)
-@@ -7995,7 +8003,7 @@ class ServerArgs:
+@@ -8024,7 +8032,7 @@ class ServerArgs:
              explicit = envs.SGLANG_OPT_FP8_WO_A_GEMM.is_set()
              supported = deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0 or (
                  deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
@@ -1326,7 +1628,7 @@ index 03a92501fc..3e037d5a0a 100644
              )
              if not supported and explicit:
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft.py b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
-index c7f27428ef..c5c6e05aab 100644
+index 87af5b7d83..7bfd61d2de 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 @@ -22,6 +22,7 @@ from sglang.srt.runtime_context import get_parallel
@@ -1337,7 +1639,7 @@ index c7f27428ef..c5c6e05aab 100644
  from sglang.srt.speculative.spec_info import (
      SpeculativeAlgorithm,
      spec_scale_global_num_tokens,
-@@ -99,6 +100,7 @@ def sample_draft_block(
+@@ -107,6 +108,7 @@ def sample_draft_block(
      sampling_info,
      markov_head,
      device: torch.device,
@@ -1345,7 +1647,7 @@ index c7f27428ef..c5c6e05aab 100644
  ) -> DraftBlockResult:
      bs = base_logits.shape[0]
      greedy_mask = resolve_greedy_mask(bs=bs, sampling_info=sampling_info, device=device)
-@@ -116,7 +118,7 @@ def sample_draft_block(
+@@ -124,7 +126,7 @@ def sample_draft_block(
  
          def sampler(step_logits: torch.Tensor, step_idx: int) -> torch.Tensor:
              expect(_DRAFT_STEP_LOGITS, step_logits, msg=f"step {step_idx}")
@@ -1354,7 +1656,7 @@ index c7f27428ef..c5c6e05aab 100644
  
      else:
  
-@@ -126,11 +128,13 @@ def sample_draft_block(
+@@ -134,11 +136,13 @@ def sample_draft_block(
                  exp_noise = torch.empty(
                      step_logits.shape, dtype=torch.float32, device=step_logits.device
                  ).exponential_(1)
@@ -1373,7 +1675,7 @@ index c7f27428ef..c5c6e05aab 100644
                  )
              else:
                  probs = torch.softmax(
-@@ -139,7 +143,9 @@ def sample_draft_block(
+@@ -147,7 +151,9 @@ def sample_draft_block(
                  probs = expect(_DRAFT_PROBS, probs)
                  argmax_tokens = torch.argmax(step_logits, dim=-1)
                  sampled_tokens = torch.multinomial(probs, num_samples=1).squeeze(-1)
@@ -1384,7 +1686,7 @@ index c7f27428ef..c5c6e05aab 100644
  
      draft_tokens, corrected_logits = markov_head.sample_block(
          base_logits,
-@@ -164,6 +170,7 @@ class DraftBlockProposer:
+@@ -172,6 +178,7 @@ class DraftBlockProposer:
          gamma: int,
          mask_token_id: int,
          draft_block_spec_info,
@@ -1392,7 +1694,7 @@ index c7f27428ef..c5c6e05aab 100644
          dp_moe_sync: bool = False,
      ) -> None:
          self.draft_model = draft_model
-@@ -171,6 +178,7 @@ class DraftBlockProposer:
+@@ -179,6 +186,7 @@ class DraftBlockProposer:
          self.gamma = gamma
          self._mask_token_id = mask_token_id
          self._draft_block_spec_info = draft_block_spec_info
@@ -1400,7 +1702,7 @@ index c7f27428ef..c5c6e05aab 100644
          self._draft_sampler = None
          self._dp_moe_sync = dp_moe_sync
  
-@@ -265,6 +273,7 @@ class DraftBlockProposer:
+@@ -274,6 +282,7 @@ class DraftBlockProposer:
                  sampling_info=sampling_info,
                  markov_head=self.draft_model.markov_head,
                  device=device,
@@ -1755,7 +2057,7 @@ index 281937848a..be99f2470a 100644
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-index 3a8bb71513..154dd79958 100644
+index 3394197413..a6f54f3173 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 @@ -14,6 +14,7 @@ from sglang.srt.environ import envs
@@ -1864,18 +2166,18 @@ index 3a8bb71513..154dd79958 100644
              if available_mem < 1.0:
                  capture_decode_cuda_graph = False
                  logger.warning(
-@@ -350,7 +378,9 @@ class DSparkWorkerV2(BaseSpecWorker):
-                 )
-         with self._draft_context():
-             if capture_decode_cuda_graph:
--                self._draft_sampler = self._maybe_build_draft_sampler()
-+                self._draft_sampler = self._maybe_build_draft_sampler(
-+                    available_memory_gb=available_mem
-+                )
-                 if self._draft_sampler is not None:
-                     self.draft_model_runner.capture_tail_hooks.append(
-                         make_draft_sampler_capture_hook(self._draft_sampler)
-@@ -360,13 +390,15 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -357,7 +385,9 @@ class DSparkWorkerV2(BaseSpecWorker):
+                 # from being the intended precision fallback, skipping the
+                 # unused hook avoids paying for two proposal computations.
+                 if envs.SGLANG_DSPARK_FOLDED_PROPOSAL.get():
+-                    self._draft_sampler = self._maybe_build_draft_sampler()
++                    self._draft_sampler = self._maybe_build_draft_sampler(
++                        available_memory_gb=available_mem
++                    )
+                     if self._draft_sampler is not None:
+                         self.draft_model_runner.capture_tail_hooks.append(
+                             make_draft_sampler_capture_hook(self._draft_sampler)
+@@ -367,13 +397,15 @@ class DSparkWorkerV2(BaseSpecWorker):
                  capture_decode_cuda_graph=capture_decode_cuda_graph
              )
  
@@ -1892,7 +2194,7 @@ index 3a8bb71513..154dd79958 100644
              confidence_fn=(
                  self._verify_planner.compute_confidence_tensor
                  if self._verify_planner.carries_confidence
-@@ -431,6 +463,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -438,6 +470,7 @@ class DSparkWorkerV2(BaseSpecWorker):
          )
          logits_output = batch_output.logits_output
          next_token_ids = batch_output.next_token_ids
@@ -2073,11 +2375,154 @@ index 0000000000..5aee3f4dcc
 +        f"({swz_match:.4f}) — if the kernel changed, revisit use_swizzle in "
 +        "DeepGemmRunnerCore"
 +    )
+diff --git a/test/registered/unit/distributed/test_pcie_ipc_ar.py b/test/registered/unit/distributed/test_pcie_ipc_ar.py
+new file mode 100644
+index 0000000000..eb27a376ca
+--- /dev/null
++++ b/test/registered/unit/distributed/test_pcie_ipc_ar.py
+@@ -0,0 +1,137 @@
++"""Unit tests for the FlashInfer PCIe-IPC all-reduce adapter.
++
++These cover the parts that decide whether a reduction reaches the kernels at
++all -- world-size gating, workspace sizing, and the shape guard -- because each
++of them fails *silently* in production: an unsupported shape is not an error,
++it is a fall back to NCCL, which looks exactly like the kernels being slow.
++"""
++
++import unittest
++from unittest.mock import MagicMock, patch
++
++import torch
++
++from sglang.srt.distributed.device_communicators import pcie_ipc_ar
++from sglang.srt.distributed.device_communicators.pcie_ipc_ar import (
++    PcieIpcCommunicator,
++)
++from sglang.srt.environ import envs
++from sglang.test.ci.ci_register import register_cpu_ci
++from sglang.test.test_utils import CustomTestCase
++
++register_cpu_ci(est_time=5, suite="base-c-test-cpu")
++
++HIDDEN = 6144
++
++
++def _make_comm(world_size=8, decode_width=64, workspace_cls=None):
++    """Build a communicator with the collaborators stubbed out.
++
++    The constructor is bypassed: it needs a live process group and a CUDA
++    device, neither of which this test has, and neither of which the logic
++    under test depends on.
++    """
++    comm = PcieIpcCommunicator.__new__(PcieIpcCommunicator)
++    comm.disabled = False
++    comm.max_numel = 0
++    comm._workspace = None
++    comm._bound_stream = None
++    comm._group = MagicMock()
++    comm._device = torch.device("cpu")
++    comm._world_size = world_size
++    comm._workspace_cls = workspace_cls or MagicMock()
++    comm._build_failed = False
++    return comm
++
++
++class TestWorldSizeGate(CustomTestCase):
++    def test_unsupported_world_size_disables(self):
++        """A world size the kernels have no IPC channels for must disable cleanly."""
++        for world_size in (1, 3, 5, 6, 7, 16):
++            with self.subTest(world_size=world_size):
++                with patch.object(
++                    pcie_ipc_ar.dist, "get_world_size", return_value=world_size
++                ):
++                    comm = PcieIpcCommunicator(group=MagicMock(), device=0)
++                self.assertTrue(comm.disabled)
++
++    def test_missing_flashinfer_disables_instead_of_raising(self):
++        """A build without pcie_ipc_comm must degrade to NCCL, not crash the server."""
++        with patch.object(pcie_ipc_ar.dist, "get_world_size", return_value=8), patch(
++            "builtins.__import__", side_effect=ImportError("no pcie_ipc_comm")
++        ):
++            comm = PcieIpcCommunicator(group=MagicMock(), device=0)
++        self.assertTrue(comm.disabled)
++
++
++class TestWorkspaceSizing(CustomTestCase):
++    def test_sized_for_decode_not_prefill(self):
++        """The default bound is the decode width, so prefill chunks stay on NCCL.
++
++        Sizing for a prefill chunk was measured 66% worse on TTFT and bought
++        nothing on TPOT, so this is the behaviour that must not regress.
++        """
++        comm = _make_comm(decode_width=64)
++        with patch.object(pcie_ipc_ar, "_decode_width", return_value=64):
++            self.assertTrue(comm._ensure_workspace(torch.empty(1, HIDDEN)))
++        self.assertEqual(comm.max_numel, 64 * HIDDEN)
++
++        prefill = torch.empty(16384, HIDDEN)
++        self.assertGreater(prefill.numel(), comm.max_numel)
++        self.assertFalse(comm.should_pcie_ipc_ar(prefill))
++
++    def test_falls_back_when_server_args_absent(self):
++        """Embedded/unit use has no server args; the bound must still be finite."""
++        comm = _make_comm()
++        with patch.object(pcie_ipc_ar, "_decode_width", return_value=None):
++            comm._ensure_workspace(torch.empty(1, HIDDEN))
++        self.assertEqual(comm.max_numel, pcie_ipc_ar._FALLBACK_DECODE_WIDTH * HIDDEN)
++
++    def test_env_override_wins(self):
++        comm = _make_comm()
++        with envs.SGLANG_PCIE_IPC_MAX_NUMEL.override(123456):
++            with patch.object(pcie_ipc_ar, "_decode_width", return_value=64):
++                comm._ensure_workspace(torch.empty(1, HIDDEN))
++        self.assertEqual(comm.max_numel, 123456)
++
++    def test_build_failure_disables_once(self):
++        """A workspace that cannot be allocated must not be retried every layer."""
++        cls = MagicMock(side_effect=RuntimeError("out of IPC handles"))
++        comm = _make_comm(workspace_cls=cls)
++        with patch.object(pcie_ipc_ar, "_decode_width", return_value=64):
++            self.assertFalse(comm._ensure_workspace(torch.empty(1, HIDDEN)))
++            self.assertFalse(comm._ensure_workspace(torch.empty(1, HIDDEN)))
++        self.assertTrue(comm.disabled)
++        self.assertEqual(cls.call_count, 1)
++
++
++class TestShapeGuard(CustomTestCase):
++    def _ready_comm(self):
++        comm = _make_comm()
++        with patch.object(pcie_ipc_ar, "_decode_width", return_value=64):
++            comm._ensure_workspace(torch.empty(1, HIDDEN))
++        comm._workspace.supports.return_value = True
++        return comm
++
++    def test_delegates_to_flashinfer_supports(self):
++        """Coverage is FlashInfer's decision; a rejected shape keeps the NCCL path."""
++        comm = self._ready_comm()
++        inp = torch.empty(4, HIDDEN)
++        self.assertTrue(comm.should_pcie_ipc_ar(inp))
++
++        comm._workspace.supports.return_value = False
++        self.assertFalse(comm.should_pcie_ipc_ar(inp))
++
++    def test_rejects_noncontiguous_and_1d(self):
++        comm = self._ready_comm()
++        self.assertFalse(comm.should_pcie_ipc_ar(torch.empty(4, HIDDEN).t()))
++        self.assertFalse(comm.should_pcie_ipc_ar(torch.empty(HIDDEN)))
++
++    def test_disabled_communicator_never_claims_a_tensor(self):
++        comm = self._ready_comm()
++        comm.disabled = True
++        self.assertFalse(comm.should_pcie_ipc_ar(torch.empty(4, HIDDEN)))
++
++
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-index 63330b441d..53a7af48ce 100644
+index 0875c0a307..b2628096d1 100644
 --- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
 +++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-@@ -1156,6 +1156,39 @@ class ServingChatTestCase(unittest.TestCase):
+@@ -1160,6 +1160,39 @@ class ServingChatTestCase(unittest.TestCase):
  
                  self.chat._process_messages(req, is_multimodal=False)
  

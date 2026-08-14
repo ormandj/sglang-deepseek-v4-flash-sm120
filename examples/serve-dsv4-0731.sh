@@ -8,12 +8,14 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.2.1-rc.0}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 TP_SIZE=${TP_SIZE:-2}
 CONTEXT_LENGTH=${CONTEXT_LENGTH:-774656}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
+SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=${SGLANG_ENABLE_PCIE_IPC_ALLREDUCE:-1}
+SGLANG_PCIE_IPC_MAX_NUMEL=${SGLANG_PCIE_IPC_MAX_NUMEL:-786432}
 
 if [[ ! -d "$MODEL_DIR" ]]; then
   echo "MODEL_DIR is not a directory: $MODEL_DIR" >&2
@@ -74,6 +76,8 @@ exec docker run --rm \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
   --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
+  --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE="$SGLANG_ENABLE_PCIE_IPC_ALLREDUCE" \
+  --env SGLANG_PCIE_IPC_MAX_NUMEL="$SGLANG_PCIE_IPC_MAX_NUMEL" \
   "$IMAGE" \
   serve \
   --model-path "$container_model_path" \
