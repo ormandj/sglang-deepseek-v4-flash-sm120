@@ -45,6 +45,7 @@ docker run --rm \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
   --env TVM_CACHE_DIR=/root/.cache/tvm \
+  --env TRITON_CACHE_DIR=/root/.cache/triton \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
@@ -76,6 +77,37 @@ docker run --rm \
   --sleep-on-idle \
   --host 0.0.0.0 \
   --port 8000
+```
+
+### KV cache capacity
+
+`--mem-fraction-static` sets how much device memory is reserved for the static
+KV pool. It is the most consequential capacity knob and trades directly against
+per-request workspace. Measured on 2x RTX PRO 6000 Max-Q at TP2;
+`max_total_num_tokens` and the free-memory column are SGLang's own self-reported
+startup figures:
+
+| `--mem-fraction-static` | `--context-length` | `max_total_num_tokens` | Free after startup | 240k-token request |
+|---|---:|---:|---:|---|
+| 0.95 | 786,432 | 990,208 | 3.11 GB | passes |
+| 0.96 | 524,288 | 1,099,264 | 2.38 GB | not tested |
+| 0.96 | 774,656 | 1,099,264 | 2.21 GB | **crashes the server** |
+
+The third row is the important one. At 0.96/774,656 a single 240,269-token
+request killed the server with `c10::OutOfMemoryError` even though the KV pool
+was large enough to hold it and startup was clean. The same request returns 200
+at 0.95/786,432 -- a *larger* context with a *smaller* pool -- because the extra
+headroom covers the workspace. Do not choose this knob by maximising
+`max_total_num_tokens`.
+
+`--context-length` is not only an input limit: it also sizes per-request
+workspace, so declaring more context than you serve costs memory on every
+request. A configuration can boot cleanly and still fail later on a large
+request, so validate with a near-limit request rather than trusting startup:
+
+```bash
+curl -fsS http://localhost:8000/get_server_info \
+  | jq '{max_total_num_tokens, max_req_input_len}'
 ```
 
 Alternatively, clone this repository and use the checked wrapper, which
@@ -237,7 +269,7 @@ generated token.
 | SGLang v0.3.3-rc.0 | 16 | 5 | 17.304 | 1,392.0 | 14.440 |
 | vLLM r33 | 16 | 5 | 15.860 | 1,097.2 | 17.590 |
 | SGLang v0.3.3-rc.0 | 32 | 5 | 12.722 | 2,036.8 | 22.085 |
-| vLLM r33 | 32 | 0 | Not measured: insufficient KV capacity | Not measured | Not measured |
+| vLLM r33 | 32 | 0 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — | — |
 
 ### DSpARK acceptance
 
@@ -257,7 +289,31 @@ it is not used as an engine-clock metric.
 | SGLang v0.3.3-rc.0 | 16 | 0.793 | 5.027 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
 | SGLang v0.3.3-rc.0 | 32 | 0.790 | 4.984 |
-| vLLM r33 | 32 | Not measured | Not measured |
+| vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — |
+
+> **On the missing vLLM C=32 rows.** The vLLM side runs the upstream-documented
+> TP2 profile unmodified -- "Gilded Gnosis v20 r33, documented TP2 fixed-K5"
+> from [`local-inference-lab/rtx6kpro`](https://github.com/local-inference-lab/rtx6kpro/blob/master/models/ds4dspark-v20-r33.md).
+> C=32 is unreachable under it for two independent reasons. The recipe sets
+> `max_num_seqs=16`, capping concurrency at 16 outright. Independently, vLLM
+> self-reported at startup:
+>
+> ```
+> Available KV cache memory: 8.07 GiB
+> GPU KV cache size: 143,599 tokens
+> Maximum concurrency for 131,072 tokens per request: 1.10x
+> ```
+>
+> Those are vLLM's own figures, not our measurement of it. At the benchmark's
+> 16,384-token input plus 4,096 output, 32 streams need roughly 655,000 KV
+> tokens against the 143,599 available.
+>
+> Both limits belong to that published profile, not to vLLM as an engine.
+> Raising `max_num_seqs` or `--gpu-memory-utilization`, lowering
+> `--max-model-len`, or shortening the input would all change the answer. The
+> engines also ran different contexts (vLLM `max_model_len=131,072` vs SGLang
+> 774,656), so the KV pools are not directly comparable.
+
 
 ### Cold prefill
 
