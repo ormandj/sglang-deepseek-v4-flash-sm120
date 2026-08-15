@@ -122,7 +122,7 @@ capacity to admit the workload. No value is imputed.
 | SGLang v0.2.0-rc.0 | 16 | 16.45 | 1,359.0 | 15.11 |
 | vLLM r33 | 16 | 15.86 | 1,097.2 | 17.59 |
 | SGLang v0.2.0-rc.0 | 32 | 12.29 | 1,949.2 | 23.11 |
-| vLLM r33 | 32 | Not measured: insufficient KV capacity | Not measured | Not measured |
+| vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — | — |
 
 ## DSpARK acceptance
 
@@ -141,7 +141,25 @@ Each entry is the median of the five per-run means.
 | SGLang v0.2.0-rc.0 | 16 | 0.795 | 4.976 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
 | SGLang v0.2.0-rc.0 | 32 | 0.778 | 4.889 |
-| vLLM r33 | 32 | Not measured | Not measured |
+| vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — |
+
+> **vLLM C=32 capacity.** The vLLM side runs the upstream-documented TP2 profile
+> unmodified -- "Gilded Gnosis v20 r33, documented TP2 fixed-K5" from
+> [`local-inference-lab/rtx6kpro`](https://github.com/local-inference-lab/rtx6kpro/blob/master/models/ds4dspark-v20-r33.md).
+> C=32 is unreachable under it for two independent reasons: the recipe sets
+> `max_num_seqs=16`, and vLLM self-reported at startup:
+>
+> ```
+> Available KV cache memory: 8.07 GiB
+> GPU KV cache size: 143,599 tokens
+> Maximum concurrency for 131,072 tokens per request: 1.10x
+> ```
+>
+> Those are vLLM's own figures. At 16,384-token input plus 4,096 output, 32
+> streams need roughly 655,000 KV tokens against 143,599 available. Both limits
+> belong to that published profile, not to vLLM as an engine. The engines also
+> ran different contexts (vLLM `max_model_len=131,072` vs SGLang 774,656), so
+> the KV pools are not directly comparable.
 
 ## Cold prefill
 
