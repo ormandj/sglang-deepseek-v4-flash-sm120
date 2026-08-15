@@ -90,15 +90,13 @@ startup figures:
 | `--mem-fraction-static` | `--context-length` | `max_total_num_tokens` | Free after startup | 240k-token request |
 |---|---:|---:|---:|---|
 | 0.95 | 786,432 | 990,208 | 3.11 GB | passes |
-| 0.96 | 524,288 | 1,099,264 | 2.38 GB | not tested |
 | 0.96 | 774,656 | 1,099,264 | 2.21 GB | **crashes the server** |
 
-The third row is the important one. At 0.96/774,656 a single 240,269-token
-request killed the server with `c10::OutOfMemoryError` even though the KV pool
-was large enough to hold it and startup was clean. The same request returns 200
-at 0.95/786,432 -- a *larger* context with a *smaller* pool -- because the extra
-headroom covers the workspace. Do not choose this knob by maximising
-`max_total_num_tokens`.
+At 0.96/774,656, a single 240,269-token request killed the server with
+`c10::OutOfMemoryError` even though the KV pool was large enough to hold it and
+startup was clean. The same request returns 200 at 0.95/786,432 -- a *larger*
+context with a *smaller* pool -- because the extra headroom covers the
+workspace. Do not choose this knob by maximising `max_total_num_tokens`.
 
 `--context-length` is not only an input limit: it also sizes per-request
 workspace, so declaring more context than you serve costs memory on every
