@@ -12,7 +12,7 @@ IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 TP_SIZE=${TP_SIZE:-2}
-CONTEXT_LENGTH=${CONTEXT_LENGTH:-774656}
+CONTEXT_LENGTH=${CONTEXT_LENGTH:-786432}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
 SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=${SGLANG_ENABLE_PCIE_IPC_ALLREDUCE:-1}
 SGLANG_PCIE_IPC_MAX_NUMEL=${SGLANG_PCIE_IPC_MAX_NUMEL:-786432}
@@ -87,7 +87,7 @@ exec docker run --rm \
   --trust-remote-code \
   --tensor-parallel-size "$TP_SIZE" \
   --kv-cache-dtype fp8_e4m3 \
-  --mem-fraction-static 0.93 \
+  --mem-fraction-static 0.94 \
   --context-length "$CONTEXT_LENGTH" \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \

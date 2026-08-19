@@ -61,8 +61,8 @@ docker run --rm \
   --trust-remote-code \
   --tensor-parallel-size 2 \
   --kv-cache-dtype fp8_e4m3 \
-  --mem-fraction-static 0.93 \
-  --context-length 774656 \
+  --mem-fraction-static 0.94 \
+  --context-length 786432 \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
@@ -85,20 +85,27 @@ docker run --rm \
 
 `--mem-fraction-static` sets how much device memory is reserved for the static
 KV pool. It is the most consequential capacity knob and trades directly against
-per-request workspace. Measured on 2x RTX PRO 6000 Max-Q at TP2;
-`max_total_num_tokens` and the free-memory column are SGLang's own self-reported
-startup figures:
+per-request workspace. `max_total_num_tokens` is SGLang's own self-reported
+startup figure on 2x RTX PRO 6000 Max-Q at TP2. The validated v0.5.0-rc.1
+configuration is 0.94 with a 786,432-token context; the row below was measured
+on the live v0.5.0-rc.1 deployment:
 
 | `--mem-fraction-static` | `--context-length` | `max_total_num_tokens` | Free after startup | 240k-token request |
 |---|---:|---:|---:|---|
-| 0.95 | 786,432 | 990,208 | 3.11 GB | passes |
-| 0.96 | 774,656 | 1,099,264 | 2.21 GB | **crashes the server** |
+| 0.94 | 786,432 | 910,592 | ≈3.9 GB* | passes (256,038-token) |
 
-At 0.96/774,656, a single 240,269-token request killed the server with
-`c10::OutOfMemoryError` even though the KV pool was large enough to hold it and
-startup was clean. The same request returns 200 at 0.95/786,432 -- a *larger*
-context with a *smaller* pool -- because the extra headroom covers the
-workspace. Do not choose this knob by maximising `max_total_num_tokens`.
+* Free after startup is derived from the earlier 0.95/3.11 GB measurement plus
+  the 109,056-token pool returned by the 0.95 -> 0.94 step; the live deployment
+  was not restarted to re-measure at 0.94.
+
+Earlier v0.3.x-era capacity sweeps of this image line showed the same knob
+trading pool against per-request workspace: at 0.96/774,656 the pool measured
+1,099,264 with only 2.21 GB free, and a single 240,269-token request killed the
+server with `c10::OutOfMemoryError` even though the pool held it and startup
+was clean, while 0.95/786,432 returned 200. v0.5.0-rc.1 carries the page-split
+workspace allocation from SGLang #35116, so the workspace ceiling on this build
+should be re-measured on a planned restart. Do not choose this knob by
+maximising `max_total_num_tokens`.
 
 `--context-length` is not only an input limit: it also sizes per-request
 workspace, so declaring more context than you serve costs memory on every
@@ -120,12 +127,12 @@ MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
 
 The wrapper validates the local paths and runs the Docker command recorded in
 this repository. It defaults to GPUs `0,1`, TP2, port 8000, and the qualified
-774,656-token context limit. Override those values explicitly when needed:
+786,432-token context limit. Override those values explicitly when needed:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 TP_SIZE=4 \
-CONTEXT_LENGTH=774656 \
+CONTEXT_LENGTH=786432 \
 MODEL_DIR="$MODEL_DIR" \
 CACHE_DIR="$CACHE_DIR" \
   ./examples/serve-dsv4-0731.sh

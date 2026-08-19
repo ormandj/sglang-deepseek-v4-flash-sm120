@@ -17,6 +17,9 @@ digests are recorded in each release bundle and its OCI labels.
 - Included the current-main environment-registry compatibility correction for
   the DeepSeek-V4 integration.
 - Started the `v20` runtime compilation-cache namespace.
+- Documented the validated `--mem-fraction-static 0.94` / 786,432-token
+  context configuration; the TP2 KV pool measures 910,592 tokens and a
+  256,038-token near-limit request passes at this setting.
 - Reduced the decode measurement-window duration check to a one-second sanity
   floor while retaining the exact occupancy, empty-queue, no-prefill, monotonic
   counter, fixed-context, and 20-scrape requirements.

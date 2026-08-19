@@ -44,7 +44,7 @@ MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
   ./examples/serve-dsv4-0731.sh
 ```
 
-The script defaults to the candidate tag, GPUs 0 and 1, TP2, and a 774,656
+The script defaults to the candidate tag, GPUs 0 and 1, TP2, and a 786,432
 context length. `IMAGE`, `PORT`, `CUDA_VISIBLE_DEVICES`, `TP_SIZE`,
 `CONTEXT_LENGTH`, and `CONTAINER_NAME` may be overridden. The number of devices
 listed in `CUDA_VISIBLE_DEVICES` must equal `TP_SIZE`. Record all overrides with
@@ -99,7 +99,7 @@ behavior.
 
 ## Capacity
 
-The TP2 script uses `--context-length 774656`. Confirm the actual pool after
+The TP2 script uses `--context-length 786432`. Confirm the actual pool after
 every image, topology, memory-fraction, or graph change:
 
 ```bash
