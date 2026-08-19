@@ -18,7 +18,7 @@ Check GPU passthrough:
 ```bash
 docker run --rm --gpus all \
   --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1
 ```
 
 ## Model and cache
@@ -30,11 +30,11 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v15
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v20
 mkdir -p "$CACHE_DIR"
 ```
 
-`v15` is the cache schema for this source composition. Do not reuse a cache
+`v20` is the cache schema for this source composition. Do not reuse a cache
 directory from another image source tree.
 
 ## Start TP2
@@ -68,9 +68,10 @@ upstream SM120 default and is tracked rather than applied to this image.
 The script additionally sets `SGLANG_OPT_FP8_WO_A_GEMM=1` to select the
 SM120/SM121 target-model FP8 W_o_A path carried from upstream PR #34018.
 
-The first start compiles SM120 kernels into `$CACHE_DIR`. Reuse the same v15
-cache for subsequent starts of the identical image; do not time compilation as
-serving startup or inference.
+The first start compiles SM120 kernels into `$CACHE_DIR`. The server performs
+the qualified prefill and decode-path warmups before it reports ready. Reuse
+the same v20 cache for subsequent starts of the identical image; do not time
+compilation as serving startup or inference.
 
 ## Health and API
 
@@ -118,9 +119,8 @@ inside the selected serving pod against localhost. The frozen protocol uses:
 - five sequential fixed-seed repetitions at every published supported
   concurrency;
 - separate cache-cold prefill diagnostics;
-- full GSM8K correctness; and
-- targeted near-context or long-output diagnostics when requested.
+- full GSM8K correctness.
 
-The published `v0.3.3-rc.0` panel uses five measured repetitions at every
+The published `v0.5.0-rc.1` panel uses five measured repetitions at every
 supported concurrency and prefill length. All measured cells run sequentially
 on one unchanged process after one warmup per distinct shape.

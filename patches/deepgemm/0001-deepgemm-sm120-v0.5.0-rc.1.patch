@@ -81,13 +81,13 @@ index bb09f21a724adb81f150db4569435baa6fbbc05f..1ea62a2f996b6d8f57a402e93bfd5115
  static void major_check(const torch::Tensor& t) {
      const auto dim = t.dim();
 diff --git a/sgl_deep_gemm/VERSION b/sgl_deep_gemm/VERSION
-index d53ada0c4bd55e345ea5c5d56a78db0a6bd2d196..16a9f801e10c7ff6c007c0c26d4663c81277d1f8 100644
+index bd52db81d0cdfa45b8ccaf4e811f178160eb261e..802bbdd5c2891d284c8fd66550b2f509aef86118 100644
 --- a/sgl_deep_gemm/VERSION
 +++ b/sgl_deep_gemm/VERSION
 @@ -1 +1 @@
--0.1.5.post1
+-0.0.0
 \ No newline at end of file
-+0.1.5.post2+sm120jit2
++0.0.0+sm120jit3
 diff --git a/sgl_deep_gemm/run_tests.sh b/sgl_deep_gemm/run_tests.sh
 index 86dba4b4c910abf2fe5e28f5cf1c0a89c3323046..99c7164d97717330e917660c41684b12f638297d 100755
 --- a/sgl_deep_gemm/run_tests.sh
@@ -102,10 +102,10 @@ index 86dba4b4c910abf2fe5e28f5cf1c0a89c3323046..99c7164d97717330e917660c41684b12
    test_fp8_fp4.py
 diff --git a/sgl_deep_gemm/tests/test_runtime_compiled_dims.py b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb460a98c9
+index 0000000000000000000000000000000000000000..31ce742111551e9dda98d24ab26e399c66c95e7d
 --- /dev/null
 +++ b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,139 @@
 +import os
 +import subprocess
 +import sys
@@ -124,7 +124,9 @@ index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb
 +from deep_gemm.utils import ceil_div, per_token_cast_to_fp8
 +
 +
-+if get_arch_major() == 12:
++if get_arch_major() != 12:
++    print('SKIP: SM120 runtime compiled-dimension test requires compute capability 12.x')
++else:
 +    cache_dir = Path(os.environ['DG_JIT_CACHE_DIR']) / 'cache'
 +
 +    def kernel_dirs(name):
@@ -203,6 +205,28 @@ index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb
 +            gemm_kernels = current_kernels
 +        else:
 +            assert current_kernels == gemm_kernels
++
++    kernels_before_non_swap = kernel_dirs('sm120_fp8_fp4_gemm_1d1d')
++    tokens = 64
++    activation = torch.randn((tokens, k), device='cuda', dtype=torch.bfloat16)
++    reference = activation @ matrix_weight.T
++    activation_fp8 = per_token_cast_to_fp8(activation, use_ue8m0=True)
++    output = torch.empty((tokens, n), device='cuda', dtype=torch.bfloat16)
++
++    deep_gemm.fp8_fp4_gemm_nt(
++        activation_fp8,
++        matrix_weight_fp8,
++        output,
++        recipe=(1, 1, 128),
++        compiled_dims='nk',
++    )
++    assert calc_diff(output, reference) < 1e-3
++
++    non_swap_kernels = (
++        kernel_dirs('sm120_fp8_fp4_gemm_1d1d') - kernels_before_non_swap
++    )
++    assert len(non_swap_kernels) == 1
++    assert_compiled_shape(next(iter(non_swap_kernels)), (0, 1024, 4096))
 +'''
 +
 +
@@ -210,6 +234,7 @@ index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb
 +    with tempfile.TemporaryDirectory(prefix='deep-gemm-runtime-dim-') as cache_dir:
 +        env = os.environ.copy()
 +        env['DG_JIT_CACHE_DIR'] = cache_dir
++        env.pop('PYTHONOPTIMIZE', None)
 +        subprocess.run(
 +            [sys.executable, '-c', TEST_PROGRAM],
 +            check=True,
@@ -220,4 +245,3 @@ index 0000000000000000000000000000000000000000..3eeb644cafbbe5701e11af745602b0eb
 +
 +if __name__ == '__main__':
 +    test_sm120_swap_ab_runtime_token_dim()
-

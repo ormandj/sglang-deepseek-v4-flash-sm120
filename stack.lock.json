@@ -2,15 +2,15 @@
   "schema": 1,
   "release": {
     "manifest": "release.json",
-    "version": "0.3.3",
-    "candidate": 0,
-    "candidate_tag": "v0.3.3-rc.0",
-    "stable_tag": "v0.3.3",
-    "cache_schema": "v15"
+    "version": "0.5.0",
+    "candidate": 1,
+    "candidate_tag": "v0.5.0-rc.1",
+    "stable_tag": "v0.5.0",
+    "cache_schema": "v20"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.3.3-rc.0",
+    "tag": "v0.5.0-rc.1",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -28,58 +28,68 @@
   "pins": [
     {
       "arg": "DSV4_0731_RELEASE_VERSION",
-      "value": "0.3.3",
-      "description": "Stable SemVer target for the DeepGEMM SM120 runtime-dimension correction."
+      "value": "0.5.0",
+      "description": "Stable SemVer target for the refreshed upstream source line."
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
-      "value": "0",
-      "description": "First immutable candidate for the 0.3.3 line."
+      "value": "1",
+      "description": "Corrected private candidate of the refreshed source line."
     },
     {
       "arg": "DSV4_0731_CACHE_SCHEMA",
-      "value": "v15",
-      "description": "Fresh runtime compilation-cache namespace for the corrected DeepGEMM source tree."
+      "value": "v20",
+      "description": "Fresh compiled-kernel and PCIe-IPC tuning-cache namespace for the corrected candidate."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE",
-      "value": "lmsysorg/sglang:nightly-dev-cu13-20260813-273d978b@sha256:5e012cc3cfe06fd7718bab6f7b8183fad56df28a6b934058edb4d59afc42d440",
-      "description": "Official CUDA 13 / Torch 2.13 nightly base, pinned by manifest digest."
+      "value": "lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf",
+      "description": "Official CUDA 13 / Torch 2.13 SGLang nightly base, pinned by manifest digest."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE_HEAD",
-      "value": "273d978bedc89bc8cb1a5c4d57d9ea04aea2cc9c",
+      "value": "c0b6474b43363c2f4bc60fe3d7817d393fb51d32",
       "description": "SGLang source commit represented by the official nightly base."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_HEAD",
-      "value": "9d34c2809f58f3d84ef5dd343733e3f5e86395d5",
-      "description": "Fresh SGLang main commit checked out before applying the release patch."
+      "value": "87a09494fa3fbd685bd7c88d6a2dbdd3135de602",
+      "description": "SGLang main commit checked out before applying the release patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_MAIN_TREE",
-      "value": "c03a1221e78f29172f6a86a80be1497f201eafb5",
+      "value": "07c0bc4429cdaf7e1e2452a8c0172d9dd3f1486d",
       "description": "Tree of the pinned SGLang main commit."
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "2833e60bfdb9c17820095e2e1aa478bb2eb041ef",
+      "value": "dc71e9b9bb380e96bcb2c0cb4aed120f79478c3e",
       "description": "Final audited SGLang tree after the release patch."
     },
     {
       "arg": "DSV4_0731_SGLANG_INTEGRATION_HEAD",
-      "value": "684d1561e94b8868ec282a764814fee5338fc407",
-      "description": "Head of the linear local integration branch from which the patch was generated."
+      "value": "6e459bcded6e3812918bafa0a670bf1ea544278d",
+      "description": "Head of the linear local SGLang integration branch."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR29927_HEAD",
-      "value": "e5ea881c5dd487acef17d58ba1a9d2b7ecfeee91",
+      "value": "0e49a0a0ec13cbe927fcb697b14041ba046aec1d",
       "description": "SGLang PR #29927 source head: SM120 DeepSeek-V4 support."
     },
     {
+      "arg": "DSV4_0731_SGLANG_PR35116_HEAD",
+      "value": "65eef2612efba5759aaebbabfae37763cf56a277",
+      "description": "SGLang PR #35116 source head: inference-safe page-split workspace allocation."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR35118_HEAD",
+      "value": "23d2ac6f51f2696da42663b2160bc89754680ca9",
+      "description": "SGLang PR #35118 source head: fused hc-prenorm combine."
+    },
+    {
       "arg": "DSV4_0731_SGLANG_PR33614_HEAD",
-      "value": "fca0998feda2bfc2a735286d34d354b979850d72",
-      "description": "SGLang PR #33614 source head: DSpark TP state synchronization."
+      "value": "4c4e07cfa258cd5190a7257cb076dc7201fe2af6",
+      "description": "SGLang PR #33614 source head: DSpark and DFlash TP state synchronization."
     },
     {
       "arg": "DSV4_0731_SGLANG_PR32686_HEAD",
@@ -92,11 +102,6 @@
       "description": "SGLang PR #33568 source head: reference-compatible tool encoding."
     },
     {
-      "arg": "DSV4_0731_SGLANG_PR33805_HEAD",
-      "value": "26a2a3981798b8deb97d053d163fa3c48668e03f",
-      "description": "SGLang PR #33805 source head: DFLASH/DSPARK SWA eviction."
-    },
-    {
       "arg": "DSV4_0731_SGLANG_PR34018_HEAD",
       "value": "c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0",
       "description": "SGLang PR #34018 source head: SM120/SM121 FP8 W_o_A GEMM."
@@ -104,26 +109,26 @@
     {
       "arg": "DSV4_0731_SGLANG_PR34528_HEAD",
       "value": "f28d875d121a1ec0ab879ef54873220c2ed23c6a",
-      "description": "SGLang PR #34528 source head: optional FlashInfer PCIe-IPC all-reduce integration and fallback tests."
+      "description": "SGLang PR #34528 source head: optional FlashInfer PCIe-IPC all-reduce integration and fallbacks."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
-      "value": "ed6c709849fe1c02d4545b4e743a436405f6ca5b",
-      "description": "Fresh FlashInfer main commit used for the source wheel."
+      "value": "7aa0cd3b64f84c50c18ee958e24f708afb2103c1",
+      "description": "FlashInfer main commit used for the source wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_TREE",
-      "value": "767ee24272d9a686a0e720a6007ada2b38570fb7",
+      "value": "1641fa153cb9bc46156977fe70c41c89d6175c36",
       "description": "Tree of the pinned FlashInfer main commit."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_EFFECTIVE_TREE",
-      "value": "b68d15ef203d0e0e11b3734ade4ccf6dca1b6b4d",
+      "value": "489e9318e4d21d3ecddc8d2ec8f138dde93784b5",
       "description": "Final audited FlashInfer tree after the release patch."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_INTEGRATION_HEAD",
-      "value": "26804401d5c7700ead975d20bb29784adff66d66",
+      "value": "5a69c5894960f739c10590bbc349b845d3f0f98f",
       "description": "Head of the linear local FlashInfer integration branch."
     },
     {
@@ -133,197 +138,144 @@
     },
     {
       "arg": "DSV4_0731_FLASHINFER_PR4393_HEAD",
-      "value": "dca29052ac92789df4df95455170209a93b1ee73",
-      "description": "FlashInfer PR #4393 source head: PCIe-IPC all-reduce with machine-local launch tuning."
+      "value": "9936fd5fb95be4bb2abef70fa268d9b947c3225d",
+      "description": "FlashInfer PR #4393 source head: PCIe-IPC all-reduce, tuning, and CUDA-graph stream rebinding."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD",
-      "value": "28be41230a979ffdfd423706d1a4c7e82c6988eb",
-      "description": "Source commit for the exact CUDA-runtime filename matcher and collision tests."
+      "value": "b035b56e38c7a7e4b9dd0882e34cb85f0767564a",
+      "description": "Integration commit for the exact CUDA-runtime filename matcher and collision tests."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_OUTER_AUTOTUNE_FIX_HEAD",
-      "value": "26804401d5c7700ead975d20bb29784adff66d66",
-      "description": "Local fix that preserves explicit PCIe-IPC tuning under unrelated outer autotune contexts."
+      "value": "c8dcb719647fa9f1cfc44da2fdbf25233945b0ed",
+      "description": "Integration commit preserving explicit PCIe-IPC tuning under unrelated outer autotune contexts."
+    },
+    {
+      "arg": "DSV4_0731_FLASHINFER_TUNE_COVERAGE_HEAD",
+      "value": "5a69c5894960f739c10590bbc349b845d3f0f98f",
+      "description": "Integration commit exposing PCIe-IPC tune-cache workspace coverage."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_VERSION",
-      "value": "0.6.18.dev20260813",
-      "description": "Package version shared by the source-built Python wheel and matching current nightly cubin wheel."
+      "value": "0.6.18.dev20260818",
+      "description": "Package version shared by the source-built Python wheel and matching nightly cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_URL",
-      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260813/flashinfer_cubin-0.6.18.dev20260813-py3-none-any.whl",
-      "description": "Matching FlashInfer 0.6.18 nightly cubin wheel for 2026-08-13."
+      "value": "https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260818/flashinfer_cubin-0.6.18.dev20260818-py3-none-any.whl",
+      "description": "Matching FlashInfer 0.6.18 nightly cubin wheel."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_CUBIN_SHA256",
-      "value": "078d3a14267dcc24c75534e9d53beb6c639ab6ddde325c2de241fc96fcf509bb",
-      "description": "SHA256 of the pinned cubin wheel."
+      "value": "430eff3b305be5aabc7345b5c19b88f4dada61749e278bd801a6173728de157b",
+      "description": "SHA256 of the pinned FlashInfer cubin wheel."
     },
     {
       "arg": "DSV4_0731_DEEPGEMM_MAIN_HEAD",
-      "value": "7509acb3e261b5acba06087e91c70c409a43419c",
-      "description": "SGL DeepGEMM release commit used for the source-built test wheel."
+      "value": "75f60622bc6d317306a41c1f38dc9d888b3ec841",
+      "description": "Current SGL DeepGEMM dev commit used for the source-built wheel."
     },
     {
       "arg": "DSV4_0731_DEEPGEMM_MAIN_TREE",
-      "value": "c4f9e5af9ab88563caa2a100deb0fba7b1217504",
-      "description": "Tree of the pinned SGL DeepGEMM release commit."
+      "value": "042024366efc4e9fa94f4231c20eaa2d39438891",
+      "description": "Tree of the pinned SGL DeepGEMM dev commit."
     },
     {
       "arg": "DSV4_0731_DEEPGEMM_EFFECTIVE_TREE",
-      "value": "b166d085065d39155a8f745126d6db88597d268c",
-      "description": "Final DeepGEMM test tree after the SM120 split-K baseline and runtime-token-dimension fix."
+      "value": "ff371cf8cc7186c8dab8e07cc7cda6c28baa092f",
+      "description": "Final DeepGEMM tree after the reviewed SM120 carries."
     },
     {
       "arg": "DSV4_0731_DEEPGEMM_INTEGRATION_HEAD",
-      "value": "fad8fc7f27a681183a6648c85250cbca6241be27",
-      "description": "Head of the local linear DeepGEMM test integration branch."
+      "value": "0ba9c921b4e24e5527fbf96845302d6c323cc6a6",
+      "description": "Head of the linear local DeepGEMM integration branch."
     },
     {
       "arg": "DSV4_0731_DEEPGEMM_VERSION",
-      "value": "0.1.5.post2+sm120jit2",
-      "description": "Distinct package version for the isolated runtime-token-dimension test wheel."
+      "value": "0.0.0+sm120jit3",
+      "description": "Distinct package version for the reviewed SM120 DeepGEMM source wheel."
+    },
+    {
+      "arg": "DSV4_0731_DEEPGEMM_PR76_HEAD",
+      "value": "4900cbd750b4fb10bf756bd1be1f4357b66eac74",
+      "description": "DeepGEMM PR #76 source head: preserve SM120 runtime token dimensions across operand swaps."
+    },
+    {
+      "arg": "DSV4_0731_DEEPGEMM_PR77_HEAD",
+      "value": "c5dd8bfde3fb1ec8c8537e218e201dd0199189f1",
+      "description": "DeepGEMM PR #77 source head: skip split-K for single-token SM120 decode shapes."
     }
   ],
   "integration": {
     "sglang": {
-      "base": "9d34c2809f58f3d84ef5dd343733e3f5e86395d5",
-      "head": "684d1561e94b8868ec282a764814fee5338fc407",
+      "base": "87a09494fa3fbd685bd7c88d6a2dbdd3135de602",
+      "head": "6e459bcded6e3812918bafa0a670bf1ea544278d",
       "commits": [
-        {
-          "source": "sgl-project/sglang#29927",
-          "source_head": "e5ea881c5dd487acef17d58ba1a9d2b7ecfeee91",
-          "integration_commit": "fe346f55075eda808a330850d5c711247853d37a"
-        },
-        {
-          "source": "sgl-project/sglang#33614",
-          "source_head": "fca0998feda2bfc2a735286d34d354b979850d72",
-          "integration_commit": "65705bb51a44a7d6eb1bbfb503c3ffb09975c4f8"
-        },
-        {
-          "source": "sgl-project/sglang#32686",
-          "source_head": "15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b",
-          "integration_commit": "b28cedf7aca402645f5f24b0df25ec4690cf5716"
-        },
-        {
-          "source": "sgl-project/sglang#33568",
-          "source_head": "cab45a29997f8898e076e9253741a5119a401db0",
-          "integration_commit": "e640b4d6dc3ed3f74d5dda43e2df9df7258e870d"
-        },
-        {
-          "source": "sgl-project/sglang#33805",
-          "source_head": "26a2a3981798b8deb97d053d163fa3c48668e03f",
-          "integration_commit": "a78b0f6206e2256e246c5fe499a28fb1ed02e750"
-        },
-        {
-          "source": "local focused test adaptation for current runtime context",
-          "source_head": "f5356c7daec4565c2a0a06f9499b775545937db3",
-          "integration_commit": "06773af36f305d135c6575efc0bae2b4ddbc97cd"
-        },
-        {
-          "source": "sgl-project/sglang#34018",
-          "source_head": "c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0",
-          "integration_commit": "c0ddd0168e27813e9fecda9effab94ff0420355f"
-        },
-        {
-          "source": "sgl-project/sglang#34528 through 3894b9014b",
-          "source_head": "3894b9014b30549fe7749c8dfeb0eaedecfa3e8f",
-          "integration_commit": "e7b9ac737a1e773f432810d8e7fe218cb9871c33"
-        },
-        {
-          "source": "sgl-project/sglang#34528 fallback tests",
-          "source_head": "9798ea27ea1a211a8e7746a30e6e2db356a3d184",
-          "integration_commit": "0fc6111dbe8925f61912a8d0bfd488eaedf83014"
-        },
-        {
-          "source": "sgl-project/sglang#34528 environment cleanup",
-          "source_head": "8295ed5d4ea0fd6e820d5bb11b3fc0a7f92044d9",
-          "integration_commit": "1e4c6dc29eeef2f103a986fa54c0a9849a1608b2"
-        },
-        {
-          "source": "sgl-project/sglang#34528 formatting",
-          "source_head": "f28d875d121a1ec0ab879ef54873220c2ed23c6a",
-          "integration_commit": "684d1561e94b8868ec282a764814fee5338fc407"
-        }
+        {"source": "sgl-project/sglang#29927", "source_head": "0e49a0a0ec13cbe927fcb697b14041ba046aec1d", "integration_commit": "2359b1ecf4eb5aef3c2cb2d6aee509683f9093ff"},
+        {"source": "sgl-project/sglang#35116", "source_head": "65eef2612efba5759aaebbabfae37763cf56a277", "integration_commit": "ba9045c9e3f059ad745127223f7674e1f5eb5ebb"},
+        {"source": "sgl-project/sglang#35118", "source_head": "23d2ac6f51f2696da42663b2160bc89754680ca9", "integration_commit": "06dd582512118365a53a24bc28e7279e55c41cd4"},
+        {"source": "sgl-project/sglang#33614", "source_head": "4c4e07cfa258cd5190a7257cb076dc7201fe2af6", "integration_commit": "dd84fa60bf36afea8ca1f4c70f758a8a9fbd8ca6"},
+        {"source": "sgl-project/sglang#32686", "source_head": "15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b", "integration_commit": "eabf7367250a0800df853002f8e6cfe332307923"},
+        {"source": "sgl-project/sglang#33568", "source_head": "cab45a29997f8898e076e9253741a5119a401db0", "integration_commit": "849245551b732e5e2406e55df31bacc015289f0f"},
+        {"source": "sgl-project/sglang#34018", "source_head": "c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0", "integration_commit": "a554bbfe60ff7cf066d1a7c953136c5acdb0151f"},
+        {"source": "sgl-project/sglang#34528", "source_head": "f28d875d121a1ec0ab879ef54873220c2ed23c6a", "integration_commit": "93ca8f1f2cc0e07ed099ff8813badee12e4428e0"},
+        {"source": "local PCIe-IPC tune-cache consumer and speculative decode warmup", "source_head": "4720f1078cc469db1958211444b9f79d95e7bee0", "integration_commit": "4720f1078cc469db1958211444b9f79d95e7bee0"},
+        {"source": "local pre-readiness text-serving warmup coverage", "source_head": "56f05ada3725e1b4f0b2499a27ce2b1936ee96a0", "integration_commit": "56f05ada3725e1b4f0b2499a27ce2b1936ee96a0"},
+        {"source": "local #32686 no-GPU test adaptation for current main", "source_head": "d3850604c4c29eb633d8a22e8ec5d65ec9553a0f", "integration_commit": "d3850604c4c29eb633d8a22e8ec5d65ec9553a0f"},
+        {"source": "local #29927 current-main environment-registry compatibility fix", "source_head": "fb1a618597a7c913cef7e333e990b3d6c17ef9b6", "integration_commit": "fb1a618597a7c913cef7e333e990b3d6c17ef9b6"},
+        {"source": "local #32686 exact-module no-GPU test adaptation", "source_head": "6e459bcded6e3812918bafa0a670bf1ea544278d", "integration_commit": "6e459bcded6e3812918bafa0a670bf1ea544278d"}
       ]
     },
     "flashinfer": {
-      "base": "ed6c709849fe1c02d4545b4e743a436405f6ca5b",
-      "head": "26804401d5c7700ead975d20bb29784adff66d66",
+      "base": "7aa0cd3b64f84c50c18ee958e24f708afb2103c1",
+      "head": "5a69c5894960f739c10590bbc349b845d3f0f98f",
       "commits": [
-        {
-          "source": "flashinfer-ai/flashinfer#3930",
-          "source_head": "e855cc25993d11d4707678d68fbde108d0578bef",
-          "integration_commit": "6bf9368c21646a4117b85871590c1562df42277b"
-        },
-        {
-          "source": "local exact-name follow-up",
-          "source_head": "28be41230a979ffdfd423706d1a4c7e82c6988eb",
-          "integration_commit": "0a3fc6340db2776767fce81bd997ff30babc6f71"
-        },
-        {
-          "source": "flashinfer-ai/flashinfer#4393",
-          "source_head": "dca29052ac92789df4df95455170209a93b1ee73",
-          "integration_commit": "2544f935739feac629c8d908dcd917ebd8023102"
-        },
-        {
-          "source": "local outer-autotune cache-preservation fix",
-          "source_head": "5c88de50bdb7bc649beb962bc58264abae56b9c7",
-          "integration_commit": "26804401d5c7700ead975d20bb29784adff66d66"
-        }
+        {"source": "flashinfer-ai/flashinfer#3930", "source_head": "e855cc25993d11d4707678d68fbde108d0578bef", "integration_commit": "d4942d0dd68f7b4a3e4e9d1dc048ca0f1812f429"},
+        {"source": "local exact-name resolver follow-up", "source_head": "b035b56e38c7a7e4b9dd0882e34cb85f0767564a", "integration_commit": "b035b56e38c7a7e4b9dd0882e34cb85f0767564a"},
+        {"source": "flashinfer-ai/flashinfer#4393", "source_head": "9936fd5fb95be4bb2abef70fa268d9b947c3225d", "integration_commit": "00ae742c2e94ddfec1c765a7f99ded86957a8f8f"},
+        {"source": "local outer-autotune cache-preservation fix", "source_head": "c8dcb719647fa9f1cfc44da2fdbf25233945b0ed", "integration_commit": "c8dcb719647fa9f1cfc44da2fdbf25233945b0ed"},
+        {"source": "local PCIe-IPC tune-cache coverage property", "source_head": "5a69c5894960f739c10590bbc349b845d3f0f98f", "integration_commit": "5a69c5894960f739c10590bbc349b845d3f0f98f"}
       ]
     },
     "deepgemm": {
-      "base": "7509acb3e261b5acba06087e91c70c409a43419c",
-      "head": "fad8fc7f27a681183a6648c85250cbca6241be27",
+      "base": "75f60622bc6d317306a41c1f38dc9d888b3ec841",
+      "head": "0ba9c921b4e24e5527fbf96845302d6c323cc6a6",
       "commits": [
-        {
-          "source": "local SM120 single-token split-K baseline",
-          "source_head": "ce0eebc5e146dc309d8174013e227ef18140a3b2",
-          "integration_commit": "e7d65dfea1d788dbd48cce454beb4355f89d45a1"
-        },
-        {
-          "source": "local reviewed SM120 compiled-dimension fix for all AB swaps",
-          "source_head": "865f8f202b62a0bc8a6f32513fc33d2789c87031",
-          "integration_commit": "a7757c08356d29f8781f8a183ab0d87f81688fce"
-        },
-        {
-          "source": "reviewed test wheel version marker",
-          "source_head": "fad8fc7f27a681183a6648c85250cbca6241be27",
-          "integration_commit": "fad8fc7f27a681183a6648c85250cbca6241be27"
-        }
+        {"source": "sgl-project/DeepGEMM#76 implementation", "source_head": "865f8f202b62a0bc8a6f32513fc33d2789c87031", "integration_commit": "57c8f05893885e87123d57112e4e091c9c88924e"},
+        {"source": "sgl-project/DeepGEMM#76 test hardening", "source_head": "4900cbd750b4fb10bf756bd1be1f4357b66eac74", "integration_commit": "10ed675e288f6e95920b5995afdb2783150f1224"},
+        {"source": "sgl-project/DeepGEMM#77", "source_head": "c5dd8bfde3fb1ec8c8537e218e201dd0199189f1", "integration_commit": "0d3832b454a3da1da9e6f87cde746181bea2415a"},
+        {"source": "reviewed source-wheel version marker", "source_head": "0ba9c921b4e24e5527fbf96845302d6c323cc6a6", "integration_commit": "0ba9c921b4e24e5527fbf96845302d6c323cc6a6"}
       ]
     }
   },
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.3.2-rc.0.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.5.0-rc.1.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "3d64b7ab69b7fb85a8c301709e161f51bd17d06062bc9e824a48b2df7382aa7f",
-      "description": "Current SGLang main plus the reviewed DeepSeek-V4/SM120 carries and optional PCIe-IPC consumer."
+      "sha256": "050a3c760f8c489d3d6570290861696beb6c1a00afadbd8f72fa5bf33fd9f47f",
+      "description": "Current SGLang main plus the reviewed DeepSeek-V4/SM120 correctness and performance carries, optional PCIe-IPC consumer, pre-readiness warmups, and the current-main environment-registry compatibility correction."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.3.2-rc.0.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.5.0-rc.1.patch",
       "repository": "flashinfer",
       "order": 1,
-      "sha256": "4a22877c4414212e9fa68c216fc122cb2f02eae6e26dfbc5bfbb1a13c613ffa3",
-      "description": "Current FlashInfer main plus #3930, the exact CUDA-runtime filename follow-up, PCIe-IPC all-reduce #4393, and outer-autotune cache preservation."
+      "sha256": "f93b1d318bf503a640b851b1c7d8136c3157280614ead626000612718e7e1b6b",
+      "description": "Current FlashInfer main plus the exact CUDA-runtime resolver and current PCIe-IPC all-reduce stack with local cache correctness follow-ups."
     },
     {
-      "path": "patches/deepgemm/0001-sm120-preserve-runtime-einsum-token-dim.patch",
+      "path": "patches/deepgemm/0001-deepgemm-sm120-v0.5.0-rc.1.patch",
       "repository": "deepgemm",
       "order": 1,
-      "sha256": "2b76652c41a5502f64380c7b7416b7841e5a30754d9fa931122c9950226539f1",
-      "description": "Preserve the installed SM120 split-K baseline and apply the reviewed compiled-dimension fix and regression coverage for SM120 AB swaps."
+      "sha256": "5c06806deeb0fa0ef984b1503687326d0375c25eb09da4cc06e1ae0f87e48ee0",
+      "description": "Current DeepGEMM dev plus the reviewed SM120 split-K and runtime-dimension carries."
     }
   ],
   "verification": {
     "sglang_repository": "https://github.com/sgl-project/sglang.git",
     "flashinfer_repository": "https://github.com/flashinfer-ai/flashinfer.git",
     "deepgemm_repository": "https://github.com/sgl-project/DeepGEMM.git",
-    "note": "Each patch is generated from the recorded linear integration branch. Applying it to the pinned main commit reproduces the recorded effective tree."
+    "note": "Each patch is generated from the recorded linear integration branch. Applying it to the pinned upstream base reproduces the recorded effective tree."
   }
 }

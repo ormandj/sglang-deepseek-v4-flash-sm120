@@ -51,7 +51,7 @@ context interval. It requires:
 - an empty request queue;
 - no prefill counter change;
 - monotonic counters;
-- at least 6.5 seconds and 20 metric scrapes.
+- at least 1 second and 20 metric scrapes.
 
 Client throughput includes fill and drain and is therefore not used as the
 fixed-window engine clock. ITL is retained as the user-facing decode measure.

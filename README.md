@@ -10,7 +10,7 @@ you do not need to build SGLang, FlashInfer, DeepGEMM, or the image locally.
 The current candidate is:
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1
 ```
 
 Install Docker, the NVIDIA Container Toolkit, and `uv`, then download the
@@ -23,7 +23,7 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v15
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v20
 mkdir -p "$CACHE_DIR"
 ```
 
@@ -53,7 +53,8 @@ docker run --rm \
   --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
   --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=1 \
   --env SGLANG_PCIE_IPC_MAX_NUMEL=786432 \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.3.3-rc.0 \
+  --env SGLANG_PCIE_IPC_AUTOTUNE=1 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
@@ -74,6 +75,7 @@ docker run --rm \
   --tool-call-parser deepseekv4 \
   --enable-metrics \
   --enable-cache-report \
+  --warmups prefill_shapes,decode_paths \
   --sleep-on-idle \
   --host 0.0.0.0 \
   --port 8000
@@ -169,30 +171,30 @@ The qualified collective configuration is:
 - PCIe-IPC all-gather absent.
 
 The serving recipe also enables SM120 DeepGEMM HC prenorm, fused MHC
-post+pre, and the FP8 W_o_A target-model path. The new v0.3.3 correction keeps
-the logical runtime token dimension dynamic when SM120 GEMMs swap operands,
-preventing residual token counts from producing distinct W_o_A JIT kernels.
+post+pre, and the FP8 W_o_A target-model path. Pre-readiness warmups compile
+the qualified prefill and decode paths before the server reports ready.
 
 ### Source identity
 
 | Component | Pinned identity |
 |---|---|
-| Base image | `lmsysorg/sglang:nightly-dev-cu13-20260813-273d978b@sha256:5e012cc3cfe06fd7718bab6f7b8183fad56df28a6b934058edb4d59afc42d440` |
-| SGLang main | `9d34c2809f58f3d84ef5dd343733e3f5e86395d5` |
-| SGLang effective tree | `2833e60bfdb9c17820095e2e1aa478bb2eb041ef` |
-| FlashInfer main | `ed6c709849fe1c02d4545b4e743a436405f6ca5b` |
-| FlashInfer effective tree | `b68d15ef203d0e0e11b3734ade4ccf6dca1b6b4d` |
-| FlashInfer package | `0.6.18.dev20260813` |
-| DeepGEMM base | `7509acb3e261b5acba06087e91c70c409a43419c` |
-| DeepGEMM effective tree | `b166d085065d39155a8f745126d6db88597d268c` |
-| DeepGEMM package | `0.1.5.post2+sm120jit2` |
+| Base image | `lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf` |
+| SGLang main | `87a09494fa3fbd685bd7c88d6a2dbdd3135de602` |
+| SGLang effective tree | `dc71e9b9bb380e96bcb2c0cb4aed120f79478c3e` |
+| FlashInfer main | `7aa0cd3b64f84c50c18ee958e24f708afb2103c1` |
+| FlashInfer effective tree | `489e9318e4d21d3ecddc8d2ec8f138dde93784b5` |
+| FlashInfer package | `0.6.18.dev20260818` |
+| DeepGEMM base | `75f60622bc6d317306a41c1f38dc9d888b3ec841` |
+| DeepGEMM effective tree | `ff371cf8cc7186c8dab8e07cc7cda6c28baa092f` |
+| DeepGEMM package | `0.0.0+sm120jit3` |
 
 The SGLang patch contains the audited source heads of
 [`sgl-project/sglang#29927`](https://github.com/sgl-project/sglang/pull/29927),
+[`sgl-project/sglang#35116`](https://github.com/sgl-project/sglang/pull/35116),
+[`sgl-project/sglang#35118`](https://github.com/sgl-project/sglang/pull/35118),
 [`sgl-project/sglang#33614`](https://github.com/sgl-project/sglang/pull/33614),
 [`sgl-project/sglang#32686`](https://github.com/sgl-project/sglang/pull/32686),
 [`sgl-project/sglang#33568`](https://github.com/sgl-project/sglang/pull/33568),
-[`sgl-project/sglang#33805`](https://github.com/sgl-project/sglang/pull/33805),
 [`sgl-project/sglang#34018`](https://github.com/sgl-project/sglang/pull/34018),
 and [`sgl-project/sglang#34528`](https://github.com/sgl-project/sglang/pull/34528).
 The FlashInfer patch contains
@@ -207,9 +209,8 @@ submitted as
 [`sgl-project/DeepGEMM#77`](https://github.com/sgl-project/DeepGEMM/pull/77)
 and the production fix from
 [`sgl-project/DeepGEMM#76`](https://github.com/sgl-project/DeepGEMM/pull/76)
-at commit `865f8f202b62a0bc8a6f32513fc33d2789c87031`. The current PR head,
-`4900cbd750b4fb10bf756bd1be1f4357b66eac74`, adds test-only hardening and does
-not change the production code included in v0.3.3.
+at commit `865f8f202b62a0bc8a6f32513fc33d2789c87031`. The included PR head is
+`4900cbd750b4fb10bf756bd1be1f4357b66eac74`.
 Every source head, integration commit, patch checksum, and resulting tree is
 recorded in [stack.lock.json](stack.lock.json). Run
 [`scripts/verify-patches.sh`](scripts/verify-patches.sh) to reconstruct and
@@ -234,8 +235,8 @@ cache-preservation follow-up.
 The DeepGEMM split-K pull request records an isolated SM120 projection profile
 of approximately 22.4 microseconds with split-K plus reduction and 13.2
 microseconds with `split_k=1` for `M=4, N=8192, K=1024`. All three changes were
-also present in the source-equivalent stack that completed the v0.3.3 n=5
-decode and prefill panels, full GSM8K, and 8/8 long-output validation.
+also present in the source-equivalent stack that completed the v0.5.0-rc.1
+n=5 decode and prefill panels and full GSM8K validation.
 
 ## Current measurements
 
@@ -256,17 +257,17 @@ generated token.
 
 | Engine | C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token |
 |---|---:|---:|---:|---:|---:|
-| SGLang v0.3.3-rc.0 | 1 | 5 | 63.864 | 331.7 | 3.110 |
+| SGLang v0.5.0-rc.1 | 1 | 5 | 65.476 | 325.7 | 3.160 |
 | vLLM r33 | 1 | 5 | 66.580 | 255.2 | 3.890 |
-| SGLang v0.3.3-rc.0 | 2 | 5 | 47.737 | 488.6 | 4.321 |
+| SGLang v0.5.0-rc.1 | 2 | 5 | 48.699 | 480.3 | 4.337 |
 | vLLM r33 | 2 | 5 | 46.340 | 421.0 | 5.220 |
-| SGLang v0.3.3-rc.0 | 4 | 5 | 34.322 | 653.9 | 6.481 |
+| SGLang v0.5.0-rc.1 | 4 | 5 | 33.538 | 657.0 | 6.291 |
 | vLLM r33 | 4 | 5 | 33.070 | 616.0 | 7.060 |
-| SGLang v0.3.3-rc.0 | 8 | 5 | 22.968 | 912.3 | 9.911 |
+| SGLang v0.5.0-rc.1 | 8 | 5 | 23.330 | 917.8 | 9.478 |
 | vLLM r33 | 8 | 5 | 23.450 | 795.8 | 11.080 |
-| SGLang v0.3.3-rc.0 | 16 | 5 | 17.304 | 1,392.0 | 14.440 |
+| SGLang v0.5.0-rc.1 | 16 | 5 | 17.518 | 1,373.5 | 14.583 |
 | vLLM r33 | 16 | 5 | 15.860 | 1,097.2 | 17.590 |
-| SGLang v0.3.3-rc.0 | 32 | 5 | 12.722 | 2,036.8 | 22.085 |
+| SGLang v0.5.0-rc.1 | 32 | 5 | 13.013 | 2,047.9 | 22.349 |
 | vLLM r33 | 32 | 0 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — | — |
 
 ### DSpARK acceptance
@@ -276,17 +277,17 @@ it is not used as an engine-clock metric.
 
 | Engine | C | Median acceptance rate | Median output tokens/forward/request |
 |---|---:|---:|---:|
-| SGLang v0.3.3-rc.0 | 1 | 0.851 | 5.215 |
+| SGLang v0.5.0-rc.1 | 1 | 0.787 | 4.939 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.3.3-rc.0 | 2 | 0.807 | 5.001 |
+| SGLang v0.5.0-rc.1 | 2 | 0.813 | 4.977 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.3.3-rc.0 | 4 | 0.779 | 4.891 |
+| SGLang v0.5.0-rc.1 | 4 | 0.778 | 4.985 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.3.3-rc.0 | 8 | 0.775 | 4.872 |
+| SGLang v0.5.0-rc.1 | 8 | 0.798 | 5.016 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.3.3-rc.0 | 16 | 0.793 | 5.027 |
+| SGLang v0.5.0-rc.1 | 16 | 0.782 | 4.947 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.3.3-rc.0 | 32 | 0.790 | 4.984 |
+| SGLang v0.5.0-rc.1 | 32 | 0.765 | 4.881 |
 | vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — |
 
 > **On the missing vLLM C=32 rows.** The vLLM side runs the upstream-documented
@@ -321,21 +322,15 @@ separate headline metric.
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.3.3-rc.0 | 7,776.8 | 8,743.1 | 8,464.5 | 7,966.6 |
+| SGLang v0.5.0-rc.1 | 7,665.1 | 8,602.4 | 8,284.2 | 7,785.1 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ### Quality checks
 
 | Engine | GSM8K questions | Correct | Accuracy | Request errors |
 |---|---:|---:|---:|---:|
-| SGLang v0.3.3-rc.0 | 1,319 | 1,261 | 95.60% | 0 |
+| SGLang v0.5.0-rc.1 | 1,319 | 1,261 | 95.60% | 0 |
 | vLLM r33 | 1,319 | 1,243 | 94.24% | 0 |
-
-The requested release-specific long-output diagnostic completed 8/8 requests
-with `finish_reason=stop`; all eight passed the code-fence, closing-tag,
-placeholder, and JavaScript-parse checks. It used temperature 1.0, top-p 0.95,
-`reasoning_effort=max`, and a 131,072-token response cap. It is not part of the
-routine recurring benchmark protocol.
 
 [BENCHMARKS.md](BENCHMARKS.md) documents the exact method and every run-level
 value. The executable harness, scoring code, graders, and machine-readable

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verifies that stack.lock.json, the Containerfile, and the copied patch bytes
 # describe the same stack, then reproduces the image's source construction:
-# clone the pinned SGLang and FlashInfer commits, apply the patches in build
+# clone the pinned SGLang, FlashInfer, and DeepGEMM commits, apply the patches in build
 # order, and confirm the final tree hashes.
 set -euo pipefail
 

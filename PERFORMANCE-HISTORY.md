@@ -15,6 +15,39 @@ therefore driven in part by DSpARK acceptance. Different fixed prompt/seed
 paths produce different accepted-draft-length distributions, so this rate is
 more variable than verifier steps/s.
 
+## v0.5.0-rc.1
+
+| Field | Value |
+|---|---|
+| Public image tag | `ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1` |
+| SGLang effective tree | `dc71e9b9bb380e96bcb2c0cb4aed120f79478c3e` |
+| FlashInfer effective tree | `489e9318e4d21d3ecddc8d2ec8f138dde93784b5` |
+| DeepGEMM effective tree | `ff371cf8cc7186c8dab8e07cc7cda6c28baa092f` |
+| AIPerf revision | `6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23` |
+| Harness revision | `15f5dcc169f64b629523803a9c0d8ded1728aabf` |
+| Decode samples | five at every supported concurrency |
+| Prefill samples | five cache-cold requests per length |
+| Runtime selectors | HC prenorm, fused MHC post+pre, FP8 W_o_A, and PCIe-IPC all-reduce enabled; legacy custom all-reduce and TRT/MNNVL disabled |
+
+Hardware and decode shape matched v0.3.3-rc.0.
+
+| C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token | Acceptance rate |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 5 | 65.476 `[64.723, 67.402]` | 325.7 `[291.9, 404.4]` | 3.160 `[2.482, 3.415]` | 0.787 `[0.700, 1.000]` |
+| 2 | 5 | 48.699 `[47.477, 48.852]` | 480.3 `[469.5, 546.3]` | 4.337 `[4.103, 4.575]` | 0.813 `[0.739, 0.911]` |
+| 4 | 5 | 33.538 `[33.292, 34.900]` | 657.0 `[645.4, 749.5]` | 6.291 `[5.988, 6.617]` | 0.778 `[0.756, 0.829]` |
+| 8 | 5 | 23.330 `[22.879, 23.515]` | 917.8 `[879.6, 968.0]` | 9.478 `[9.186, 10.347]` | 0.798 `[0.736, 0.825]` |
+| 16 | 5 | 17.518 `[17.316, 17.728]` | 1,373.5 `[1,365.9, 1,460.6]` | 14.583 `[13.288, 14.803]` | 0.782 `[0.763, 0.820]` |
+| 32 | 5 | 13.013 `[12.919, 13.071]` | 2,047.9 `[1,970.7, 2,132.6]` | 22.349 `[21.959, 22.385]` | 0.765 `[0.747, 0.806]` |
+
+| 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
+|---:|---:|---:|---:|
+| 7,665.1 | 8,602.4 | 8,284.2 | 7,785.1 |
+
+| Gate | Questions | Correct | Accuracy | Request errors |
+|---|---:|---:|---:|---:|
+| GSM8K | 1,319 | 1,261 | 95.60% | 0 |
+
 ## v0.3.3-rc.0
 
 | Field | Value |

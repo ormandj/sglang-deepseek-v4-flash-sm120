@@ -4,6 +4,30 @@ This changelog records user-visible composition, runtime, and benchmark-tooling
 changes. Exact source revisions, effective trees, patch hashes, and image
 digests are recorded in each release bundle and its OCI labels.
 
+## v0.5.0-rc.1 - 2026-08-18
+
+### Changed
+
+- Refreshed SGLang, FlashInfer, and DeepGEMM to the pinned 2026-08-18 source
+  composition recorded in `stack.lock.json`.
+- Added the inference-safe page-split workspace allocation from SGLang #35116
+  and fused HC-prenorm combine from SGLang #35118.
+- Added pre-readiness prefill-shape and decode-path warmups and enabled the
+  persisted PCIe-IPC autotune cache in the documented launch recipe.
+- Included the current-main environment-registry compatibility correction for
+  the DeepSeek-V4 integration.
+- Started the `v20` runtime compilation-cache namespace.
+- Reduced the decode measurement-window duration check to a one-second sanity
+  floor while retaining the exact occupancy, empty-queue, no-prefill, monotonic
+  counter, fixed-context, and 20-scrape requirements.
+
+### Validation
+
+- Completed five decode repetitions at C1, C2, C4, C8, C16, and C32.
+- Completed five cache-cold prefill requests at 8K, 32K, 64K, and 128K.
+- Completed the full 1,319-question GSM8K set with 1,261 correct and zero
+  request errors.
+
 ## v0.3.3-rc.0 - 2026-08-14
 
 ### Changed

@@ -1,77 +1,5 @@
-diff --git a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
-index b52ab9ff14..f54e90bb86 100644
---- a/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
-+++ b/python/sglang/kernels/jit/csrc/deepseek_v4/paged_mqa_metadata.cuh
-@@ -7,6 +7,8 @@
- #include <dlpack/dlpack.h>
- #include <tvm/ffi/container/tensor.h>
- 
-+#include <utility>
-+
- namespace sglang {
- 
- constexpr uint32_t kBlockSize = 1024;
-@@ -72,14 +74,32 @@ __global__ __launch_bounds__(kBlockSize, 1)  //
-   }
- }
- 
-+// Opts into kMaxDynamicSMEM capped by the device budget (the per-block opt-in
-+// limit less the kernel's static smem) and returns what was granted.
- template <auto* f, size_t kMaxDynamicSMEM>
--void setup_kernel_smem_once(host::DebugInfo where = {}) {
--  [[maybe_unused]]
--  static const auto result = [] {
-+size_t setup_kernel_smem_once(host::DebugInfo where = {}) {
-+  static const auto granted = [] {
-     const auto fptr = std::bit_cast<const void*>(f);
--    return ::cudaFuncSetAttribute(fptr, ::cudaFuncAttributeMaxDynamicSharedMemorySize, kMaxDynamicSMEM);
-+    int device = 0;
-+    int device_max = 0;
-+    ::cudaFuncAttributes attr{};
-+    auto result = ::cudaGetDevice(&device);
-+    if (result == ::cudaSuccess) {
-+      result = ::cudaDeviceGetAttribute(&device_max, ::cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
-+    }
-+    if (result == ::cudaSuccess) {
-+      result = ::cudaFuncGetAttributes(&attr, fptr);
-+    }
-+    auto smem = kMaxDynamicSMEM;
-+    if (result == ::cudaSuccess) {
-+      const auto budget = static_cast<size_t>(device_max) - attr.sharedSizeBytes;
-+      if (budget < smem) smem = budget;
-+      result = ::cudaFuncSetAttribute(fptr, ::cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
-+    }
-+    return std::pair{result, smem};
-   }();
--  host::RuntimeDeviceCheck(result, where);
-+  host::RuntimeDeviceCheck(granted.first, where);
-+  return granted.second;
- }
- 
- struct IndexerMetadataKernel {
-@@ -101,7 +121,10 @@ struct IndexerMetadataKernel {
-     const auto batch_size = static_cast<uint32_t>(N.unwrap());
-     const auto num_sm = static_cast<uint32_t>(M.unwrap()) - 1;
-     RuntimeCheck(num_sm <= 1024);
--    const auto use_smem = batch_size <= kMaxBatchSizeInSmem;
-+    constexpr auto kernel = smxx_paged_mqa_logits_metadata;
-+    const auto max_smem = setup_kernel_smem_once<kernel, (kMaxBatchSizeInSmem + 1) * sizeof(uint32_t)>();
-+    // Batches that no longer fit read context_lens from global memory instead.
-+    const auto use_smem = (batch_size + 1) * sizeof(uint32_t) <= max_smem;
-     const auto params = MetadataParams{
-         .batch_size = batch_size,
-         .num_sm = num_sm,
-@@ -109,8 +132,6 @@ struct IndexerMetadataKernel {
-         .schedule_metadata = static_cast<uint32_t*>(metadata.data_ptr()),
-         .use_smem = use_smem,
-     };
--    constexpr auto kernel = smxx_paged_mqa_logits_metadata;
--    setup_kernel_smem_once<kernel, (kMaxBatchSizeInSmem + 1) * sizeof(uint32_t)>();
-     const auto smem = use_smem ? (batch_size + 1) * sizeof(uint32_t) : 0;
-     LaunchKernel(1, kBlockSize, device.unwrap(), smem)(kernel, params);
-   }
 diff --git a/python/sglang/kernels/ops/attention/flash_mla_sm120.py b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
-index ec43c55089..5ad6e13d09 100644
+index ec43c55089ddcd24ec48cd4d2b60d5e052fc68c1..5ad6e13d09fe26e6af343a9f7f8f3e044811154a 100644
 --- a/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 +++ b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 @@ -210,6 +210,64 @@ def _sm120_sparse_decode_fwd(
@@ -234,7 +162,7 @@ index ec43c55089..5ad6e13d09 100644
      _page_split_kernel[grid](
          src_2d,
 diff --git a/python/sglang/kernels/ops/layernorm/mhc.py b/python/sglang/kernels/ops/layernorm/mhc.py
-index 1f310d82a5..e9edbf11f5 100644
+index 1f310d82a58e1602aff781021a94002ef799b05f..e9edbf11f517216d1cc01fe24549aa70fad5813a 100644
 --- a/python/sglang/kernels/ops/layernorm/mhc.py
 +++ b/python/sglang/kernels/ops/layernorm/mhc.py
 @@ -6,6 +6,8 @@ import threading
@@ -356,7 +284,7 @@ index 1f310d82a5..e9edbf11f5 100644
 +    )
 +    return y
 diff --git a/python/sglang/srt/distributed/bootstrap.py b/python/sglang/srt/distributed/bootstrap.py
-index 173b5ee619..c50b7d2e68 100644
+index c69628391e5adfd24ea7ba5e140096efcaecf0f4..1dc11b5a18d7b07574739eab32b664ffd9febbaa 100644
 --- a/python/sglang/srt/distributed/bootstrap.py
 +++ b/python/sglang/srt/distributed/bootstrap.py
 @@ -26,6 +26,7 @@ from sglang.srt.distributed.parallel_state import (
@@ -367,7 +295,7 @@ index 173b5ee619..c50b7d2e68 100644
  from sglang.srt.platforms import current_platform
  from sglang.srt.runtime_context import get_parallel
  from sglang.srt.server_args import ServerArgs
-@@ -190,6 +191,22 @@ def _init_cpu_threads_env(
+@@ -210,6 +211,22 @@ def _init_cpu_threads_env(
          )
  
  
@@ -390,7 +318,7 @@ index 173b5ee619..c50b7d2e68 100644
  def _init_parallel_groups(
      *,
      backend: str,
-@@ -239,6 +256,7 @@ def _init_parallel_groups(
+@@ -264,6 +281,7 @@ def _init_parallel_groups(
          recovered_rank=is_ep_joiner,
          rank_offset=rank_offset,
          max_world_size=server_args.max_ep_size,
@@ -400,10 +328,10 @@ index 173b5ee619..c50b7d2e68 100644
      initialize_dp_attention(
 diff --git a/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py b/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py
 new file mode 100644
-index 0000000000..1f0342c513
+index 0000000000000000000000000000000000000000..47f2e49b72d91f0b50bc43d9e486cb3893fc4014
 --- /dev/null
 +++ b/python/sglang/srt/distributed/device_communicators/pcie_ipc_ar.py
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,252 @@
 +# SPDX-License-Identifier: Apache-2.0
 +"""FlashInfer PCIe-IPC all-reduce for switch-free intra-node machines.
 +
@@ -580,6 +508,37 @@ index 0000000000..1f0342c513
 +            self.disabled = True
 +            return False
 +
++        if envs.SGLANG_PCIE_IPC_AUTOTUNE.get():
++            try:
++                has_tuned_configs = self._workspace.has_tuned_configs
++                if not has_tuned_configs:
++                    hidden = inp.shape[-1]
++                    logger.info(
++                        "Tuning FlashInfer PCIe-IPC all-reduce "
++                        "(world=%d, max_numel=%d, hidden=%d)",
++                        self._world_size,
++                        max_numel,
++                        hidden,
++                    )
++                    configs = self._workspace.tune(
++                        [hidden], dtype=torch.bfloat16
++                    )
++                    logger.info(
++                        "FlashInfer PCIe-IPC autotune completed (%d shapes)",
++                        len(configs),
++                    )
++            except Exception as e:
++                logger.warning(
++                    "FlashInfer PCIe-IPC autotune failed: %s; reductions stay "
++                    "on NCCL",
++                    e,
++                )
++                self._workspace.destroy()
++                self._workspace = None
++                self._build_failed = True
++                self.disabled = True
++                return False
++
 +        self.max_numel = max_numel
 +        logger.info(
 +            "FlashInfer PCIe-IPC workspace built (world=%d, max_numel=%d, "
@@ -626,7 +585,7 @@ index 0000000000..1f0342c513
 +            self._workspace = None
 +            self.disabled = True
 diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
-index 903fdff793..29518095f5 100644
+index b131a48e6d269a18558a5a4719435fc2daf445ba..367fefa06200fd1acb4bd743260007f29a2488ae 100644
 --- a/python/sglang/srt/distributed/parallel_state.py
 +++ b/python/sglang/srt/distributed/parallel_state.py
 @@ -467,6 +467,26 @@ class GroupCoordinator:
@@ -656,7 +615,7 @@ index 903fdff793..29518095f5 100644
          if use_custom_allreduce and self.world_size > 1:
              # Initialize a custom fast all-reduce implementation.
              try:
-@@ -926,6 +946,16 @@ class GroupCoordinator:
+@@ -920,6 +940,16 @@ class GroupCoordinator:
              and self.ca_comm.should_custom_ar(input_)
          ):
              return "ca"
@@ -673,7 +632,7 @@ index 903fdff793..29518095f5 100644
          if (
              self.qr_comm is not None
              and not self.qr_comm.disabled
-@@ -1007,6 +1037,8 @@ class GroupCoordinator:
+@@ -1001,6 +1031,8 @@ class GroupCoordinator:
          elif outplace_all_reduce_method == "pymscclpp":
              assert not pymscclpp_comm.disabled
              out = pymscclpp_comm.all_reduce(input_)
@@ -682,7 +641,7 @@ index 903fdff793..29518095f5 100644
          elif outplace_all_reduce_method == "pynccl":
              with pynccl_comm.change_state(enable=True):
                  out = pynccl_comm.outplace_all_reduce(input_)
-@@ -1469,6 +1501,24 @@ class GroupCoordinator:
+@@ -1463,6 +1495,24 @@ class GroupCoordinator:
          )
          return input_
  
@@ -707,7 +666,7 @@ index 903fdff793..29518095f5 100644
      def broadcast_object(self, obj: Optional[Any] = None, src: int = 0):
          """Broadcast the input object.
          NOTE: `src` is the local rank of the source rank.
-@@ -2296,6 +2346,7 @@ def initialize_model_parallel(
+@@ -2338,6 +2388,7 @@ def initialize_model_parallel(
      recovered_rank: bool = False,
      rank_offset: int = 0,
      max_world_size: Optional[int] = None,
@@ -715,7 +674,7 @@ index 903fdff793..29518095f5 100644
  ) -> None:
      """
      Initialize model parallel groups.
-@@ -2318,6 +2369,9 @@ def initialize_model_parallel(
+@@ -2360,6 +2411,9 @@ def initialize_model_parallel(
              tensor-parallel group during decoding. Must be a divisor of
              tensor_model_parallel_size and is currently only supported on the
              AMD HIP platform.
@@ -725,7 +684,7 @@ index 903fdff793..29518095f5 100644
  
      Let's say we have a total of 8 GPUs denoted by g0 ... g7 and we
      use 2 GPUs to parallelize the model tensor, and 4 GPUs to parallelize
-@@ -2513,7 +2567,9 @@ def initialize_model_parallel(
+@@ -2566,7 +2620,9 @@ def initialize_model_parallel(
              group_ranks,
              get_world_group().local_rank,
              backend,
@@ -737,10 +696,10 @@ index 903fdff793..29518095f5 100644
              use_torch_symm_mem_allreduce=False,
              use_message_queue_broadcaster=envs.SGLANG_USE_MESSAGE_QUEUE_BROADCASTER.get(),
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index dd0e3ab55c..c752153820 100644
+index f572e63601a779744c86530270a205907de21b11..6a7440256a6927d2e8b855a79c24f79d2f042639 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
-@@ -1228,7 +1228,13 @@ class OpenAIServingChat(OpenAIServingBase):
+@@ -1238,7 +1238,13 @@ class OpenAIServingChat(OpenAIServingBase):
                  # insert an empty system prompt to help render tool system prompt
                  messages.insert(0, {"role": "system", "content": ""})
              if request.tools:
@@ -755,19 +714,71 @@ index dd0e3ab55c..c752153820 100644
  
              # Default encoding (dsv4/dsv32)
              if self.chat_encoding_spec == "dsv4":
+diff --git a/python/sglang/srt/entrypoints/warmup.py b/python/sglang/srt/entrypoints/warmup.py
+index 2608621f6ab5af5ebb6a019e34db882a4f230f19..a52dc5945823ba60862b0bbec6dc4326f231bf04 100644
+--- a/python/sglang/srt/entrypoints/warmup.py
++++ b/python/sglang/srt/entrypoints/warmup.py
+@@ -159,3 +159,43 @@ async def prefill_shapes(disaggregation_mode: str, tokenizer_manager: TokenizerM
+             generate_req_input.bootstrap_host = FAKE_BOOTSTRAP_HOST
+ 
+         await tokenizer_manager.generate_request(generate_req_input, None).__anext__()
++
++
++@warmup("decode_paths")
++async def decode_paths(disaggregation_mode: str, tokenizer_manager: TokenizerManager):
++    """Warm text, greedy, and sampled multi-token paths before HTTP readiness.
++
++    A one-token prefill warmup does not enter every speculative sampling,
++    acceptance, and request-pool bookkeeping path.  An input-ID-only warmup also
++    misses metadata specializations reached by the normal text-serving path.
++    Drain one deterministic text request and one sampled input-ID request far
++    enough to cross multiple DSPARK proposal blocks.
++    """
++    rng = np.random.default_rng(0)
++    requests = (
++        GenerateReqInput(
++            text="The capital city of France is",
++            sampling_params={
++                "max_new_tokens": 16,
++                "temperature": 0.0,
++                "top_p": 1.0,
++                "ignore_eos": True,
++            },
++        ),
++        GenerateReqInput(
++            input_ids=rng.integers(2**16, size=256).tolist(),
++            sampling_params={
++                "max_new_tokens": 16,
++                "temperature": 1.0,
++                "top_p": 1.0,
++                "ignore_eos": True,
++            },
++        ),
++    )
++    for generate_req_input in requests:
++        if disaggregation_mode != "null":
++            generate_req_input.bootstrap_room = 0
++            generate_req_input.bootstrap_host = FAKE_BOOTSTRAP_HOST
++
++        async for _ in tokenizer_manager.generate_request(generate_req_input, None):
++            pass
 diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
-index 09c4065842..b77b851d07 100644
+index e9acf9578384fda7dd2cd4d0b03177d6c256d409..c180161c6290bf34afe95b1364a2161f16d58b95 100644
 --- a/python/sglang/srt/environ.py
 +++ b/python/sglang/srt/environ.py
-@@ -1074,6 +1074,17 @@ class Envs:
-     # MNNVL-fabric devices (GB200/GB300) when nnodes > 1; set 0/1 to
-     # override in either direction.
-     SGLANG_ENABLE_CUSTOM_ALL_REDUCE_V2_MULTINODE = EnvBool(False)
+@@ -1107,6 +1107,21 @@ class Envs:
+     SGLANG_CUSTOM_ALL_REDUCE_V2_MAX_SIZE_KB = EnvInt(16 * 1024)
+     SGLANG_FORCE_CUSTOM_ALL_REDUCE_V2_PULL_SIZE_KB = EnvInt(None)
+     SGLANG_FORCE_CUSTOM_ALL_REDUCE_V2_PUSH_SIZE_KB = EnvInt(None)
 +    # FlashInfer PCIe-IPC all-reduce, for switch-free intra-node hosts (no
 +    # NVLink, no multicast) where the backends above do not apply. Which shapes
 +    # the kernels take is FlashInfer's own decision, not a size knob here: an
 +    # unsupported shape is reported as such and the caller keeps its NCCL path.
 +    SGLANG_ENABLE_PCIE_IPC_ALLREDUCE = EnvBool(False)
++    # Measure and persist machine-specific PCIe-IPC launch configurations when
++    # the loaded cache does not cover the workspace. Disabled by default because
++    # tuning adds one-time startup work and should run on an otherwise idle host.
++    SGLANG_PCIE_IPC_AUTOTUNE = EnvBool(False)
 +    # Elements its workspace is sized for. It cannot grow after construction, so
 +    # 0 sizes it for the widest decode (cuda_graph_config[decode].max_bs *
 +    # hidden), leaving prefill chunks on NCCL -- measured faster than routing
@@ -777,11 +788,19 @@ index 09c4065842..b77b851d07 100644
  
      # ===================================================================
      # RoPE cache
+@@ -1276,6 +1291,7 @@ class Envs:
+     SGLANG_EXPERIMENTAL_ONLINE_C128_MTP = EnvBool(False)
+     SGLANG_DSV4_COMPRESS_STATE_DTYPE = EnvStr("float32")
+     SGLANG_FP8_PAGED_MQA_LOGITS_TORCH = EnvBool(False)
++    SGLANG_TOPK_TRANSFORM_512_TORCH = EnvBool(False)
+     SGLANG_OPT_FLASHMLA_SPARSE_PREFILL = EnvBool(True)
+ 
+     # cache, GEMM, and distributed
 diff --git a/python/sglang/srt/layers/attention/deepseek_v4_backend.py b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-index eff734c6ca..b39bffd4bd 100644
+index 37081e06e7aa92995b5ada23fe622f323ed8088e..1782dee6a7e2fb3e8e29b3b3f7f76ef2b68e9056 100644
 --- a/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 +++ b/python/sglang/srt/layers/attention/deepseek_v4_backend.py
-@@ -1751,9 +1751,21 @@ class DeepseekV4AttnBackend(
+@@ -1685,9 +1685,21 @@ class DeepseekV4AttnBackend(
  
              if _is_sm120:
                  from sglang.kernels.ops.attention.flash_mla_sm120 import (
@@ -804,7 +823,7 @@ index eff734c6ca..b39bffd4bd 100644
                      q=q,
                      k_cache=swa_k_cache,
 diff --git a/python/sglang/srt/layers/attention/dsa/dsa_indexer.py b/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
-index 05eb1819e8..c2d367b4c0 100644
+index eaa5cc6044bdb5617b578785cdd666b70c251b98..20851c0502e923d9a2c2b7d35221c900b8a0d367 100644
 --- a/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
 +++ b/python/sglang/srt/layers/attention/dsa/dsa_indexer.py
 @@ -151,19 +151,7 @@ if _is_cuda:
@@ -829,7 +848,7 @@ index 05eb1819e8..c2d367b4c0 100644
  
  def _broadcast_indexer_topk_from_rank0(
 diff --git a/python/sglang/srt/layers/attention/dsv4/indexer.py b/python/sglang/srt/layers/attention/dsv4/indexer.py
-index 7e473b71f3..31caf0d5fa 100644
+index 983171efbac36c411762faf6eabace52881946ff..a946f35bef02efc867cf58af56a59b43df60d6c1 100644
 --- a/python/sglang/srt/layers/attention/dsv4/indexer.py
 +++ b/python/sglang/srt/layers/attention/dsv4/indexer.py
 @@ -29,6 +29,7 @@ from sglang.srt.layers.attention.dsa.dsa_topk_backend import DSATopKBackend
@@ -840,7 +859,7 @@ index 7e473b71f3..31caf0d5fa 100644
      NonPagedIndexerPlan,
      PagedIndexerMetadata,
  )
-@@ -760,35 +761,6 @@ class C4IndexerBackendMixin:
+@@ -757,35 +758,6 @@ class C4IndexerBackendMixin:
              c4_seq_lens=c4_seq_lens,
              query_rows=query_rows,
          )
@@ -876,14 +895,11 @@ index 7e473b71f3..31caf0d5fa 100644
          assert indexer_metadata.page_table is core_metadata.page_table
          if self.debug_use_external_c4_sparse_indices:
              return
-@@ -811,45 +783,96 @@ class C4IndexerBackendMixin:
+@@ -808,42 +780,96 @@ class C4IndexerBackendMixin:
          elif core_metadata.c4_sparse_raw_indices is not None:
              raw_indices = core_metadata.c4_sparse_raw_indices
  
--        if (
--            envs.SGLANG_TOPK_TRANSFORM_512_TORCH.get()
--            or self.dsa_topk_backend.is_torch()
--        ):
+-        if self.dsa_topk_backend.is_torch():
 -            topk_transform_512_pytorch_vectorized(
 -                logits,
 -                c4_seq_lens,
@@ -973,12 +989,12 @@ index 7e473b71f3..31caf0d5fa 100644
 -                raw_indices,
 +            c4_indexer_kv_cache = token_to_kv_pool.get_index_k_with_scale_buffer(
 +                layer_id=c4_indexer.layer_id,
-+            )
+             )
 +            assert c4_indexer_kv_cache.dim() == 2
 +            head_dim_with_sf = 68 if use_fp4_indexer else 132
 +            c4_indexer_kv_cache = c4_indexer_kv_cache.view(
 +                c4_indexer_kv_cache.shape[0], 64, 1, head_dim_with_sf
-             )
++            )
 +
 +            def run_paged_indexer(rows: slice, metadata: torch.Tensor) -> None:
 +                row_q = (q[0][rows], q[1][rows]) if isinstance(q, tuple) else q[rows]
@@ -1010,7 +1026,7 @@ index 7e473b71f3..31caf0d5fa 100644
              if hisparse_decode:
                  compress_layer_id = token_to_kv_pool.layer_mapping[
 diff --git a/python/sglang/srt/layers/attention/dsv4/metadata.py b/python/sglang/srt/layers/attention/dsv4/metadata.py
-index d245ddce3c..0f2a8d735a 100644
+index d245ddce3c01a940d54348efaa8dac02265a0c75..0f2a8d735afebab6c8339087cf5f00f769663bbe 100644
 --- a/python/sglang/srt/layers/attention/dsv4/metadata.py
 +++ b/python/sglang/srt/layers/attention/dsv4/metadata.py
 @@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, List, Optional
@@ -1067,7 +1083,7 @@ index d245ddce3c..0f2a8d735a 100644
          from sglang.kernels.ops.attention.dsv4 import plan_topk_v2
  
 diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
-index 5f06cdafce..d9db697651 100644
+index 518adf56532a0a43c3d5bc9f359078240cc2bed7..f6a52c6dcb1c49a7dc87eb64a0e1c298916fd2ee 100644
 --- a/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
 +++ b/python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py
 @@ -4,7 +4,7 @@ import os
@@ -1079,7 +1095,7 @@ index 5f06cdafce..d9db697651 100644
  
  import torch
  from tqdm import tqdm
-@@ -154,6 +154,28 @@ def _maybe_compile_deep_gemm_one_type_all(
+@@ -156,6 +156,28 @@ def _maybe_compile_deep_gemm_one_type_all(
          )
  
  
@@ -1108,7 +1124,7 @@ index 5f06cdafce..d9db697651 100644
  # NOTE(alcanderian): get_num_sms should be change when 2-batch-overlap is introduced
  def _compile_deep_gemm_one_type_all(
      kernel_type: DeepGemmKernelType,
-@@ -185,15 +207,20 @@ def _compile_deep_gemm_one_type_all(
+@@ -189,15 +211,20 @@ def _compile_deep_gemm_one_type_all(
              f"Required memory for warmup: {required_memory}GB, Available memory: {memory_budget}GB"
          )
          if memory_budget < required_memory:
@@ -1130,7 +1146,7 @@ index 5f06cdafce..d9db697651 100644
 +                    f"skipping warmup for <{kernel_type.name}> N={n}, K={k}, num_groups={num_groups}"
                  )
 -                > memory_budget
--                and max_m > 4096
+-                and max_m > 2048
 -            ):
 -                max_m = max_m // 2
 +                return
@@ -1138,7 +1154,7 @@ index 5f06cdafce..d9db697651 100644
                  f"Available memory {memory_budget}GB is less than required memory {required_memory}GB for warmup, reducing max_m to {max_m} to avoid out of memory"
              )
 diff --git a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
-index 09e14f69df..c81a1002a2 100644
+index 09e14f69df833d7c1468733052065f56ee859c1a..c81a1002a23679819ff656773d0c46a3d027d292 100644
 --- a/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
 +++ b/python/sglang/srt/layers/deep_gemm_wrapper/configurer.py
 @@ -18,9 +18,13 @@ def _compute_enable_deep_gemm():
@@ -1167,10 +1183,10 @@ index 09e14f69df..c81a1002a2 100644
 +)
  DEEPGEMM_NEED_TMA_ALIGNED_SCALES = not (DEEPGEMM_SCALE_UE8M0 or _is_musa)
 diff --git a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
-index 67bdb5ea8b..7964217599 100644
+index fd9c0211aa2aaff019c72d7af8af4ec6451c85cd..a85d8318e0aea9c34aae81430393b7dc1f1aa0dd 100644
 --- a/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
 +++ b/python/sglang/srt/layers/moe/moe_runner/deep_gemm.py
-@@ -21,6 +21,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+@@ -20,6 +20,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
  from sglang.srt.environ import envs
  from sglang.srt.layers import deep_gemm_wrapper
  from sglang.srt.layers.dp_attention import is_allocation_symmetric
@@ -1178,16 +1194,7 @@ index 67bdb5ea8b..7964217599 100644
  from sglang.srt.layers.moe.moe_runner.base import (
      MoeQuantInfo,
      MoeRunnerConfig,
-@@ -257,7 +258,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
-         if envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
-             assert envs.SGLANG_OPT_SWIGLU_CLAMP_FUSION.get()
-             assert envs.SGLANG_OPT_USE_JIT_EP_ACTIVATION.get()
--            self.use_swizzle = True
-+            self.use_swizzle = deep_gemm_sm120.use_swizzle()
- 
-     def run(
-         self,
-@@ -848,6 +849,19 @@ def pre_permute_standard_to_deep_gemm(
+@@ -822,6 +823,19 @@ def pre_permute_standard_to_deep_gemm(
          dispatch_output.topk_output,
      )
      topk_weights, topk_ids, _ = topk_output
@@ -1207,7 +1214,7 @@ index 67bdb5ea8b..7964217599 100644
  
      hidden_states_shape = hidden_states.shape
      hidden_states_dtype = hidden_states.dtype
-@@ -856,7 +870,10 @@ def pre_permute_standard_to_deep_gemm(
+@@ -830,7 +844,10 @@ def pre_permute_standard_to_deep_gemm(
  
      topk_weights, topk_ids = topk_weights, topk_ids
  
@@ -1219,7 +1226,7 @@ index 67bdb5ea8b..7964217599 100644
          output_dtype = (
              torch.bfloat16
              if quant_info.w13_weight.dtype == torch.bfloat16
-@@ -1031,6 +1048,12 @@ def post_permute_deep_gemm_to_standard(
+@@ -1005,6 +1022,12 @@ def post_permute_deep_gemm_to_standard(
      from sglang.kernels.ops.moe.ep_moe_kernels import post_reorder_deepgemm
      from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
  
@@ -1234,7 +1241,7 @@ index 67bdb5ea8b..7964217599 100644
      hidden_states_device = running_state["hidden_states_device"]
 diff --git a/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py b/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py
 new file mode 100644
-index 0000000000..d5f2be56f9
+index 0000000000000000000000000000000000000000..d5f2be56f9d437681ae77adf92dbe42216a02f63
 --- /dev/null
 +++ b/python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py
 @@ -0,0 +1,198 @@
@@ -1437,7 +1444,7 @@ index 0000000000..d5f2be56f9
 +        m_indices=m_indices,
 +    )
 diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
-index 1996033216..c82e5d60fb 100644
+index 19960332169b132d1ed86af3048f296f990bada9..c82e5d60fb31a4ad13bb31320785e7865cf5ed86 100644
 --- a/python/sglang/srt/model_loader/utils.py
 +++ b/python/sglang/srt/model_loader/utils.py
 @@ -16,6 +16,7 @@ from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -1460,7 +1467,7 @@ index 1996033216..c82e5d60fb 100644
          return False
      if weight_shape is not None and (
 diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
-index 292aa5bfe8..db3944344c 100644
+index d29aee96399a1865da82a40da206bfdd5f2920d8..b57ba85678418ed722a584c83bf67d1f30a29b40 100644
 --- a/python/sglang/srt/models/deepseek_v4.py
 +++ b/python/sglang/srt/models/deepseek_v4.py
 @@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
@@ -1471,7 +1478,7 @@ index 292aa5bfe8..db3944344c 100644
  from sglang.kernels.ops.quantization.fp8_kernel import (
      sglang_per_token_group_quant_fp8,
  )
-@@ -206,7 +207,22 @@ def _get_mhc_ops() -> MhcOps:
+@@ -211,7 +212,22 @@ def _get_mhc_ops() -> MhcOps:
  logger = logging.getLogger(__name__)
  
  _FP8_WO_A_GEMM = envs.SGLANG_OPT_FP8_WO_A_GEMM.get()
@@ -1494,7 +1501,7 @@ index 292aa5bfe8..db3944344c 100644
  
  DEEPSEEK_V4_STACKED_PARAMS_MAPPING: List[Tuple[str, str, int]] = [
      ("gate_up_proj", "gate_proj", 0),
-@@ -591,7 +607,7 @@ class MqaAttentionBase(nn.Module):
+@@ -596,7 +612,7 @@ class MqaAttentionBase(nn.Module):
                  self.wo_a, "weight_scale_inv"
              ), "FP8 quant_config must create weight_scale_inv"
              self.wo_a.weight_scale_inv.format_ue8m0 = (
@@ -1503,7 +1510,7 @@ index 292aa5bfe8..db3944344c 100644
              )
          self.wo_b = RowParallelLinear(
              self.n_groups * self.o_lora_rank,
-@@ -1271,12 +1287,19 @@ class MQALayer(MqaAttentionBase):
+@@ -1421,12 +1437,19 @@ class MQALayer(MqaAttentionBase):
          )
  
          tp_slice, q_padded, q_out = slice(None), None, None
@@ -1524,7 +1531,7 @@ index 292aa5bfe8..db3944344c 100644
              # Only [0:n_local_heads] is written below. Uninitialized padded TP
              # heads inject NaN into attention on gfx942 (fnuz), so zero-init
              # there; other archs tolerate new_empty and skip the per-forward
-@@ -1398,8 +1421,9 @@ class MQALayer(MqaAttentionBase):
+@@ -1557,8 +1580,9 @@ class MQALayer(MqaAttentionBase):
  
              T, G, D = o.shape
              R = self.o_lora_rank
@@ -1536,7 +1543,7 @@ index 292aa5bfe8..db3944344c 100644
                  o_fp8, o_s = sglang_per_token_group_quant_fp8_dsv4_wo_a(o)
                  recipe = (1, 1, 128)
              else:
-@@ -1637,7 +1661,12 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1796,7 +1820,12 @@ class DeepseekV4DecoderLayer(nn.Module):
              )
              return y, post.squeeze(-1), comb, False
  
@@ -1550,7 +1557,7 @@ index 292aa5bfe8..db3944344c 100644
              from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
                  tf32_hc_prenorm_gemm,
              )
-@@ -1664,6 +1693,8 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1823,6 +1852,8 @@ class DeepseekV4DecoderLayer(nn.Module):
              self.hc_sinkhorn_iters,
              self.hc_eps,
          )
@@ -1559,7 +1566,7 @@ index 292aa5bfe8..db3944344c 100644
          # y is the post-norm activation fed into the MoE. Allocate it in the
          # symmetric memory pool so the downstream all-reduce uses the low-latency
          # NCCL symmetric path: the Triton inplace MoE runner writes the expert
-@@ -1673,7 +1704,7 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1832,7 +1863,7 @@ class DeepseekV4DecoderLayer(nn.Module):
          with use_symmetric_memory(
              get_tp_group(), disabled=not is_allocation_symmetric()
          ):
@@ -1568,7 +1575,7 @@ index 292aa5bfe8..db3944344c 100644
          return y, post.squeeze(1), comb.squeeze(1), False
  
      def hc_post(
-@@ -2736,7 +2767,7 @@ class DeepseekV4ForCausalLM(nn.Module):
+@@ -3094,7 +3125,7 @@ class DeepseekV4ForCausalLM(nn.Module):
      def _setup_fp8_wo_a_scales(self, is_nextn: bool) -> None:
          from sglang.srt.layers import deep_gemm_wrapper
  
@@ -1577,7 +1584,7 @@ index 292aa5bfe8..db3944344c 100644
              from deep_gemm import transform_sf_into_required_layout
  
          if is_nextn:
-@@ -2753,7 +2784,7 @@ class DeepseekV4ForCausalLM(nn.Module):
+@@ -3111,7 +3142,7 @@ class DeepseekV4ForCausalLM(nn.Module):
              D = attn.wo_a.weight.shape[1]
  
              raw_scale = attn.wo_a.weight_scale_inv.data.view(G, R // 128, D // 128)
@@ -1587,10 +1594,10 @@ index 292aa5bfe8..db3944344c 100644
                      raw_scale,
                      mn=R,
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index afad543b1d..20cec3f739 100644
+index b6956a95de6e61fbe90379bc66f06ac2a1926706..67f2dd2d275f12203ad9096fa30f7c5a18221372 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
-@@ -5445,13 +5445,21 @@ class ServerArgs:
+@@ -5515,15 +5515,23 @@ class ServerArgs:
              if is_sm120_supported():
                  # SM120 lacks tcgen05/TMEM: disable features that depend on
                  # DeepGEMM or require >99KB SMEM (topk_v2).
@@ -1599,12 +1606,14 @@ index afad543b1d..20cec3f739 100644
 +                    envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
                  envs.SGLANG_OPT_USE_TOPK_V2.set(False)
 -                envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
++                if not envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.is_set():
++                    envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
+                 if not envs.SGLANG_OPT_FUSE_MHC_POST_PRE.is_set():
+                     envs.SGLANG_OPT_FUSE_MHC_POST_PRE.set(True)
 -                envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
 -                envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.set(True)
 -                # Prefer TileLang over the Torch fallback.
 -                envs.SGLANG_OPT_USE_TILELANG_INDEXER.set(True)
-+                if not envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.is_set():
-+                    envs.SGLANG_OPT_USE_TILELANG_MHC_PRE.set(False)
 +                if not envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.is_set():
 +                    envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
 +                # Out of the box the indexer runs the TileLang kernel (works on
@@ -1617,8 +1626,8 @@ index afad543b1d..20cec3f739 100644
 +                    envs.SGLANG_OPT_USE_TILELANG_INDEXER.set(True)
              elif is_hip():
                  envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
-                 envs.SGLANG_OPT_USE_FUSED_COMPRESS.set(True)
-@@ -8024,7 +8032,7 @@ class ServerArgs:
+                 envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
+@@ -8070,7 +8078,7 @@ class ServerArgs:
              explicit = envs.SGLANG_OPT_FP8_WO_A_GEMM.is_set()
              supported = deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0 or (
                  deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
@@ -1627,8 +1636,260 @@ index afad543b1d..20cec3f739 100644
                  and explicit
              )
              if not supported and explicit:
+diff --git a/python/sglang/srt/speculative/dflash_worker_v2.py b/python/sglang/srt/speculative/dflash_worker_v2.py
+index 0cd27723b1f2ab55adb51a1227cb912fec784014..25f09dfde873258c4bd60b721b90bf51fb057c8f 100644
+--- a/python/sglang/srt/speculative/dflash_worker_v2.py
++++ b/python/sglang/srt/speculative/dflash_worker_v2.py
+@@ -199,6 +199,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+ 
+         self._warned_sampling_fallback = False
+         self._logged_first_verify = False
++        self._tp_group = get_tp_group()
+ 
+         bundle = build_draft_tp_worker(
+             server_args=server_args,
+@@ -359,7 +360,14 @@ class DFlashWorkerV2(BaseSpecWorker):
+             get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
+         )
+         if is_cuda() and capture_decode_cuda_graph:
+-            available_mem = get_available_gpu_memory(self.device, self.gpu_id)
++            available_mem = get_available_gpu_memory(
++                self.device,
++                self.gpu_id,
++                distributed=self._tp_group.world_size > 1,
++                cpu_group=(
++                    self._tp_group.cpu_group if self._tp_group.world_size > 1 else None
++                ),
++            )
+             if available_mem < 1.0:
+                 capture_decode_cuda_graph = False
+                 logger.warning(
+@@ -1404,6 +1412,106 @@ class DFlashWorkerV2(BaseSpecWorker):
+             self._new_seq_lens_bufs[slot][:bs],
+         )
+ 
++    def _accept_block(
++        self,
++        *,
++        candidates: torch.Tensor,
++        next_token_logits: torch.Tensor,
++        sampling_info,
++        draft_input,
++        prefix_lens: torch.Tensor,
++        bs: int,
++        device,
++    ):
++        new_seq_lens = None
++        target_predict = None
++        if (
++            sampling_info is not None
++            and not sampling_info.is_all_greedy
++            and is_dflash_sampling_verify_available()
++        ):
++            accept_len, bonus = compute_dflash_sampling_correct_drafts_and_bonus(
++                candidates=candidates,
++                next_token_logits=next_token_logits,
++                sampling_info=sampling_info,
++                max_top_k=draft_input.max_top_k,
++                uniform_top_k_value=draft_input.uniform_top_k_value,
++            )
++            self._tp_group.broadcast_capture_safe(accept_len, src=0)
++            self._tp_group.broadcast_capture_safe(bonus, src=0)
++            commit_lens = accept_len.to(torch.int32) + 1  # [bs]
++            out_tokens = torch.empty(
++                (bs, int(self.block_size)), dtype=torch.int64, device=device
++            )
++            if int(self.block_size) > 1:
++                out_tokens[:, : int(self.block_size) - 1].copy_(candidates[:, 1:])
++            out_tokens[:, int(self.block_size) - 1].fill_(0)
++            out_tokens.scatter_(1, accept_len.to(torch.int64)[:, None], bonus[:, None])
++        else:
++            target_predict = torch.argmax(next_token_logits, dim=-1).view(
++                bs, int(self.block_size)
++            )
++            self._tp_group.broadcast_capture_safe(target_predict, src=0)
++            if self._use_triton_accept_bonus:
++                try:
++                    (
++                        accept_len,
++                        commit_lens,
++                        bonus,
++                        out_tokens,
++                        new_seq_lens,
++                    ) = self._next_accept_bonus_buffers(bs)
++                    _compute_dflash_accept_bonus_triton_unchecked(
++                        candidates=candidates,
++                        target_top1=target_predict,
++                        accept_lens_out=accept_len,
++                        commit_lens_out=commit_lens,
++                        bonus_ids_out=bonus,
++                        out_tokens_out=out_tokens,
++                        prefix_lens=prefix_lens,
++                        new_seq_lens_out=new_seq_lens,
++                    )
++                except Exception as e:
++                    self._use_triton_accept_bonus = False
++                    logger.warning(
++                        "DFLASH Triton accept/bonus failed; falling back to eager path: %s",
++                        e,
++                    )
++                    accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
++                        candidates=candidates,
++                        target_predict=target_predict,
++                    )
++                    commit_lens = accept_len.to(torch.int32) + 1  # [bs]
++                    out_tokens = torch.empty(
++                        (bs, int(self.block_size)),
++                        dtype=torch.int64,
++                        device=device,
++                    )
++                    if int(self.block_size) > 1:
++                        out_tokens[:, : int(self.block_size) - 1].copy_(
++                            candidates[:, 1:]
++                        )
++                    out_tokens[:, int(self.block_size) - 1].fill_(0)
++                    out_tokens.scatter_(
++                        1, accept_len.to(torch.int64)[:, None], bonus[:, None]
++                    )
++            else:
++                accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
++                    candidates=candidates,
++                    target_predict=target_predict,
++                )
++                commit_lens = accept_len.to(torch.int32) + 1  # [bs]
++                out_tokens = torch.empty(
++                    (bs, int(self.block_size)), dtype=torch.int64, device=device
++                )
++                if int(self.block_size) > 1:
++                    out_tokens[:, : int(self.block_size) - 1].copy_(candidates[:, 1:])
++                out_tokens[:, int(self.block_size) - 1].fill_(0)
++                out_tokens.scatter_(
++                    1, accept_len.to(torch.int64)[:, None], bonus[:, None]
++                )
++        return accept_len, commit_lens, bonus, out_tokens, new_seq_lens, target_predict
++
+     def _validate_phase1_sampling_support(self, batch: ScheduleBatch) -> None:
+         sampling_info = batch.sampling_info
+         if sampling_info is None or sampling_info.is_all_greedy:
+@@ -1454,6 +1562,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+                 batch_output.logits_output,
+                 batch_output.next_token_ids,
+             )
++            self._tp_group.broadcast_capture_safe(next_token_ids, src=0)
+             batch_output.new_seq_lens = batch.seq_lens
+             if on_publish is not None:
+                 on_publish(batch_output.new_seq_lens)
+@@ -1781,92 +1890,22 @@ class DFlashWorkerV2(BaseSpecWorker):
+             grammar_mask.apply(logits_output.next_token_logits)
+ 
+         candidates = draft_tokens
+-        new_seq_lens = None
+-        # Only the greedy branch sets target_predict; the simulated-acceptance
+-        # override below checks for it.
+-        target_predict = None
+-        if (
+-            sampling_info is not None
+-            and not sampling_info.is_all_greedy
+-            and is_dflash_sampling_verify_available()
+-        ):
+-            accept_len, bonus = compute_dflash_sampling_correct_drafts_and_bonus(
+-                candidates=candidates,
+-                next_token_logits=logits_output.next_token_logits,
+-                sampling_info=sampling_info,
+-                max_top_k=draft_input.max_top_k,
+-                uniform_top_k_value=draft_input.uniform_top_k_value,
+-            )
+-            commit_lens = accept_len.to(torch.int32) + 1  # [bs]
+-            out_tokens = torch.empty(
+-                (bs, int(self.block_size)), dtype=torch.int64, device=device
+-            )
+-            if int(self.block_size) > 1:
+-                out_tokens[:, : int(self.block_size) - 1].copy_(candidates[:, 1:])
+-            out_tokens[:, int(self.block_size) - 1].fill_(0)
+-            out_tokens.scatter_(1, accept_len.to(torch.int64)[:, None], bonus[:, None])
+-        else:
+-            target_predict = torch.argmax(logits_output.next_token_logits, dim=-1).view(
+-                bs, int(self.block_size)
+-            )
+-            if self._use_triton_accept_bonus:
+-                try:
+-                    (
+-                        accept_len,
+-                        commit_lens,
+-                        bonus,
+-                        out_tokens,
+-                        new_seq_lens,
+-                    ) = self._next_accept_bonus_buffers(bs)
+-                    _compute_dflash_accept_bonus_triton_unchecked(
+-                        candidates=candidates,
+-                        target_top1=target_predict,
+-                        accept_lens_out=accept_len,
+-                        commit_lens_out=commit_lens,
+-                        bonus_ids_out=bonus,
+-                        out_tokens_out=out_tokens,
+-                        prefix_lens=prefix_lens,
+-                        new_seq_lens_out=new_seq_lens,
+-                    )
+-                except Exception as e:
+-                    self._use_triton_accept_bonus = False
+-                    logger.warning(
+-                        "DFLASH Triton accept/bonus failed; falling back to eager path: %s",
+-                        e,
+-                    )
+-                    accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
+-                        candidates=candidates,
+-                        target_predict=target_predict,
+-                    )
+-                    commit_lens = accept_len.to(torch.int32) + 1  # [bs]
+-                    out_tokens = torch.empty(
+-                        (bs, int(self.block_size)),
+-                        dtype=torch.int64,
+-                        device=device,
+-                    )
+-                    if int(self.block_size) > 1:
+-                        out_tokens[:, : int(self.block_size) - 1].copy_(
+-                            candidates[:, 1:]
+-                        )
+-                    out_tokens[:, int(self.block_size) - 1].fill_(0)
+-                    out_tokens.scatter_(
+-                        1, accept_len.to(torch.int64)[:, None], bonus[:, None]
+-                    )
+-            else:
+-                accept_len, bonus = compute_dflash_correct_drafts_and_bonus(
+-                    candidates=candidates,
+-                    target_predict=target_predict,
+-                )
+-                commit_lens = accept_len.to(torch.int32) + 1  # [bs]
+-                out_tokens = torch.empty(
+-                    (bs, int(self.block_size)), dtype=torch.int64, device=device
+-                )
+-                if int(self.block_size) > 1:
+-                    out_tokens[:, : int(self.block_size) - 1].copy_(candidates[:, 1:])
+-                out_tokens[:, int(self.block_size) - 1].fill_(0)
+-                out_tokens.scatter_(
+-                    1, accept_len.to(torch.int64)[:, None], bonus[:, None]
+-                )
++        (
++            accept_len,
++            commit_lens,
++            bonus,
++            out_tokens,
++            new_seq_lens,
++            target_predict,
++        ) = self._accept_block(
++            candidates=candidates,
++            next_token_logits=logits_output.next_token_logits,
++            sampling_info=sampling_info,
++            draft_input=draft_input,
++            prefix_lens=prefix_lens,
++            bs=bs,
++            device=device,
++        )
+ 
+         if SIMULATE_ACC_LEN > 0:
+             if SIMULATE_ACC_TOKEN_MODE not in ("fixed", "real-draft-token"):
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft.py b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
-index 87af5b7d83..7bfd61d2de 100644
+index da261b9e854d16cea42d869a045fd6c6d1eb0a66..01daa4872adcd9137026dfe7832b3a2b871ae1a0 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 @@ -22,6 +22,7 @@ from sglang.srt.runtime_context import get_parallel
@@ -1711,7 +1972,7 @@ index 87af5b7d83..7bfd61d2de 100644
          return DraftProposal(
              draft_block_ids=draft_block_ids,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
-index a01c93a7a8..e9385d5f33 100644
+index 4ecce20b63f054f1cead9370ce789d08cad7df01..efe1c3469e9cd83f4f852cf0586508f01ad9d745 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py
 @@ -9,6 +9,7 @@ from sglang.kernels.ops.speculative.dspark.dspark_draft_model import (
@@ -1779,21 +2040,23 @@ index a01c93a7a8..e9385d5f33 100644
      mode = envs.SGLANG_DSPARK_FOLDED_SAMPLING.get()
      if mode == DsparkFoldedSampling.OFF:
          return False
-@@ -146,8 +156,11 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
+@@ -146,10 +156,11 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
      noise_bytes = max_bs * vocab * 4
      logits_bytes = max_bs * gamma * vocab * model.lm_head.weight.dtype.itemsize
      need_gb = (noise_bytes + logits_bytes) / (1 << 30)
--    available_gb = get_available_gpu_memory(device, torch.cuda.current_device())
+-    available_gb = get_available_gpu_memory(
+-        device, torch.get_device_module().current_device()
+-    )
 -    if available_gb - need_gb >= _CAPTURE_HEADROOM_GB:
 +    if available_memory_gb is None:
 +        available_memory_gb = get_available_gpu_memory(
-+            device, torch.cuda.current_device()
++            device, torch.get_device_module().current_device()
 +        )
 +    if available_memory_gb - need_gb >= _CAPTURE_HEADROOM_GB:
          return True
      if tp_rank == 0:
          logger.warning(
-@@ -156,7 +169,7 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
+@@ -158,7 +169,7 @@ def _resolve_folded_sampling(*, model, gamma, max_bs, device, tp_rank) -> bool:
              "the eager proposal path. Set SGLANG_DSPARK_FOLDED_SAMPLING=%d "
              "to force.",
              need_gb,
@@ -1802,7 +2065,7 @@ index a01c93a7a8..e9385d5f33 100644
              int(DsparkFoldedSampling.FORCE),
          )
      return False
-@@ -169,6 +182,8 @@ def maybe_build_draft_sampler(
+@@ -171,6 +182,8 @@ def maybe_build_draft_sampler(
      max_bs: int,
      device,
      tp_rank: int,
@@ -1811,7 +2074,7 @@ index a01c93a7a8..e9385d5f33 100644
      confidence_fn=None,
      out=None,
  ) -> Optional[DsparkDraftSampler]:
-@@ -187,7 +202,12 @@ def maybe_build_draft_sampler(
+@@ -189,7 +202,12 @@ def maybe_build_draft_sampler(
      if getattr(draft_model, "markov_head", None) is None:
          return _eager("no markov head")
      folded_sampling = _resolve_folded_sampling(
@@ -1825,7 +2088,7 @@ index a01c93a7a8..e9385d5f33 100644
      )
      if tp_rank == 0:
          logger.info(
-@@ -199,6 +219,7 @@ def maybe_build_draft_sampler(
+@@ -201,6 +219,7 @@ def maybe_build_draft_sampler(
          gamma=gamma,
          max_bs=max_bs,
          device=device,
@@ -1834,7 +2097,7 @@ index a01c93a7a8..e9385d5f33 100644
          out=out,
          folded_sampling=folded_sampling,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_planner.py b/python/sglang/srt/speculative/dspark_components/dspark_planner.py
-index 2d38ab0b80..2568759b40 100644
+index 1bdfa7c4a203c5ce3edb5ac1bedb0a55f6cf8281..8a981d51ae7d63b77d187358c328b0faf1069391 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_planner.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_planner.py
 @@ -35,6 +35,7 @@ from sglang.srt.speculative.dspark_components.dspark_sps import (
@@ -1861,7 +2124,7 @@ index 2d38ab0b80..2568759b40 100644
          self._align_verify_tokens_to_graph_tier = (
              server_args.speculative_dspark_align_verify_tokens_to_graph_tier
          )
-@@ -308,9 +311,12 @@ class DSparkVerifyPlanner:
+@@ -297,9 +300,12 @@ class DSparkVerifyPlanner:
              self._maybe_gather_dp_verify_tier(batch=batch, local_tier_num_tokens=0)
              return
          resolved = future_map.resolve_confidence_cpu(batch)
@@ -1875,7 +2138,7 @@ index 2d38ab0b80..2568759b40 100644
          batch.spec_verify_tier_num_tokens = local_verify_tier_num_tokens(
              bs=batch.batch_size(),
              verify_token_budget=draft_input.verify_token_budget,
-@@ -377,17 +383,22 @@ class DSparkVerifyPlanner:
+@@ -366,17 +372,22 @@ class DSparkVerifyPlanner:
          prefix_lens: torch.Tensor,
          req_pool_indices: torch.Tensor,
      ) -> Optional[int]:
@@ -1901,7 +2164,7 @@ index 2d38ab0b80..2568759b40 100644
  
      def confidence_budget_prepare(self):
          if not self.schedules_verify_budget:
-@@ -589,6 +600,7 @@ class DSparkVerifyPlanner:
+@@ -578,6 +589,7 @@ class DSparkVerifyPlanner:
              budget=budget,
              cfg=self._schedule_cfg,
          ).to(device=device, dtype=torch.int32)
@@ -1909,7 +2172,7 @@ index 2d38ab0b80..2568759b40 100644
  
          if resolve_level() >= InvariantCheckLevel.WARN:
              verify_lens_64 = verify_lens.to(torch.int64)
-@@ -608,12 +620,6 @@ class DSparkVerifyPlanner:
+@@ -597,12 +609,6 @@ class DSparkVerifyPlanner:
                  verify_lens=verify_lens,
              )
  
@@ -1922,7 +2185,7 @@ index 2d38ab0b80..2568759b40 100644
          return verify_lens
  
      def _log_verify_lens_decision(
-@@ -766,12 +772,6 @@ def uniform_ragged_layout(
+@@ -755,12 +761,6 @@ def uniform_ragged_layout(
      )
  
  
@@ -1937,7 +2200,7 @@ index 2d38ab0b80..2568759b40 100644
      verify_lens_cpu: list[int],
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_tp.py b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
 new file mode 100644
-index 0000000000..36ec231ac1
+index 0000000000000000000000000000000000000000..36ec231ac1feb5d74aee4c7cb87c9420d9721c07
 --- /dev/null
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
 @@ -0,0 +1,51 @@
@@ -1993,7 +2256,7 @@ index 0000000000..36ec231ac1
 +            )
 +        return None if received == _OPTIONAL_INT_NONE else received
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_verify.py b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
-index 281937848a..be99f2470a 100644
+index f486400c83cb348d3cf49d0a332292286766a2f0..7509a9a2df0507e698ad9ac0cecc7f86a377a153 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_verify.py
 @@ -40,6 +40,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
@@ -2004,7 +2267,7 @@ index 281937848a..be99f2470a 100644
  from sglang.srt.speculative.ragged_verify import RaggedVerifyLayout
  from sglang.srt.speculative.spec_utils import (
      SIMULATE_ACC_METHOD,
-@@ -83,6 +84,7 @@ class TargetVerifyExecutor:
+@@ -86,6 +87,7 @@ class TargetVerifyExecutor:
          verify_num_draft_tokens: int,
          model_runner,
          kv_injector: TargetHiddenKvInjector,
@@ -2012,7 +2275,7 @@ index 281937848a..be99f2470a 100644
          verify_epilogue=None,
          simulate_acc_len: float = 0.0,
      ) -> None:
-@@ -91,6 +93,7 @@ class TargetVerifyExecutor:
+@@ -94,6 +96,7 @@ class TargetVerifyExecutor:
          self.verify_num_draft_tokens = verify_num_draft_tokens
          self.model_runner = model_runner
          self.kv_injector = kv_injector
@@ -2020,7 +2283,7 @@ index 281937848a..be99f2470a 100644
          self.verify_epilogue = verify_epilogue
          self._verify_backend_self_adds_seq_lens_cache: Optional[bool] = None
          self._simulate_acc_len = float(simulate_acc_len)
-@@ -135,6 +138,10 @@ class TargetVerifyExecutor:
+@@ -138,6 +141,10 @@ class TargetVerifyExecutor:
                  bs=bs, dtype=correct_len.dtype, device=correct_len.device
              )
  
@@ -2031,7 +2294,7 @@ index 281937848a..be99f2470a 100644
          finalized = FinalizeAcceptLens.execute(
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
-@@ -481,12 +488,14 @@ class DsparkVerifyEpilogue:
+@@ -487,12 +494,14 @@ class DsparkVerifyEpilogue:
          max_bs: int,
          verify_num_draft_tokens: int,
          device,
@@ -2046,7 +2309,7 @@ index 281937848a..be99f2470a 100644
          self.inject_gate_buf = torch.zeros((1,), dtype=torch.int32, device=device)
          self.verify_lens_buf = torch.zeros(
              (self.max_bs,), dtype=torch.int64, device=device
-@@ -631,6 +640,9 @@ class DsparkVerifyEpilogue:
+@@ -637,6 +646,9 @@ class DsparkVerifyEpilogue:
              verify_num_draft_tokens=self.stride,
              cutoff_verify_lens=verify_lens,
          )
@@ -2057,18 +2320,10 @@ index 281937848a..be99f2470a 100644
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-index 3394197413..a6f54f3173 100644
+index 666cfd8c0b1df31c0a8abdecf725e8f1c9c2e11d..bcc486b008668d257d266ff95e78e7e9d29666ca 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-@@ -14,6 +14,7 @@ from sglang.srt.environ import envs
- from sglang.srt.managers.schedule_batch import ScheduleBatch
- from sglang.srt.managers.scheduler import GenerationBatchResult
- from sglang.srt.managers.tp_worker import TpModelWorker
-+from sglang.srt.model_executor.cuda_graph_config import Backend
- from sglang.srt.model_executor.forward_batch_info import (
-     CaptureHiddenMode,
-     compute_position,
-@@ -53,6 +54,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
+@@ -54,6 +54,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
      dp_global_verify_tier_num_tokens,
      idle_ragged_layout,
  )
@@ -2076,26 +2331,16 @@ index 3394197413..a6f54f3173 100644
  from sglang.srt.speculative.dspark_components.dspark_verify import (
      CommitInjectCtx,
      DsparkVerifyEpilogue,
-@@ -65,7 +67,7 @@ from sglang.srt.speculative.spec_utils import (
+@@ -66,7 +67,7 @@ from sglang.srt.speculative.spec_utils import (
      draft_tp_context,
      prepare_mamba_track_for_verify,
  )
--from sglang.srt.utils import get_available_gpu_memory, is_cuda
-+from sglang.srt.utils import get_available_gpu_memory, is_cuda, is_cuda_alike
+-from sglang.srt.utils import get_available_gpu_memory, is_cuda, is_npu
++from sglang.srt.utils import get_available_gpu_memory, is_cuda, is_cuda_alike, is_npu
  
  logger = logging.getLogger(__name__)
  
-@@ -97,7 +99,8 @@ class DSparkWorkerV2(BaseSpecWorker):
-         )
-         self._is_pd_prefill = server_args.disaggregation_mode == "prefill"
-         self._decode_graph_allowed = (
--            not server_args.disable_cuda_graph and not self._is_pd_prefill
-+            get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
-+            and not self._is_pd_prefill
-         )
-         if (
-             server_args.enable_dp_attention
-@@ -153,6 +156,18 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -155,6 +156,18 @@ class DSparkWorkerV2(BaseSpecWorker):
          self.speculative_num_draft_tokens = self.verify_num_draft_tokens
          self._mask_token_id = runtime_config.mask_token_id
  
@@ -2114,31 +2359,31 @@ index 3394197413..a6f54f3173 100644
          if self.ps.tp_rank == 0:
              logger.info(
                  "Initialized DSpark draft runner. attention_backend=%s, model=%s, "
-@@ -192,6 +207,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -200,6 +213,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              tp_rank=self.ps.tp_rank,
              server_args=self.server_args,
              verify_num_draft_tokens=self.verify_num_draft_tokens,
 +            tp_sync=self._tp_sync,
          )
          if (
-             server_args.enable_dp_attention
-@@ -220,6 +236,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+             get_parallel().enable_dp_attention
+@@ -228,6 +242,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              gamma=self.gamma,
              mask_token_id=self._mask_token_id,
              draft_block_spec_info=self._draft_block_spec_info,
 +            tp_sync=self._tp_sync,
-             dp_moe_sync=self._draft_is_moe and server_args.enable_dp_attention,
+             dp_moe_sync=self._draft_is_moe and get_parallel().enable_dp_attention,
          )
          self._verify_epilogue = None
-@@ -232,6 +249,7 @@ class DSparkWorkerV2(BaseSpecWorker):
-                 max_bs=max(server_args.cuda_graph_config.decode.bs),
+@@ -240,6 +255,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+                 max_bs=max(get_exec().graph.cuda_graph_config.decode.bs),
                  verify_num_draft_tokens=self.verify_num_draft_tokens,
                  device=self.device,
 +                tp_sync=self._tp_sync,
                  commit_ctx=CommitInjectCtx(
                      draft_model=self.draft_model,
                      block_pos_offsets=self._block_pos_offsets,
-@@ -270,6 +288,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -278,6 +294,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              verify_num_draft_tokens=self.verify_num_draft_tokens,
              model_runner=self.model_runner,
              kv_injector=self._kv_injector,
@@ -2146,7 +2391,7 @@ index 3394197413..a6f54f3173 100644
              verify_epilogue=self._verify_epilogue,
              simulate_acc_len=self._simulate_acc_len,
          )
-@@ -339,8 +358,17 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -353,8 +370,17 @@ class DSparkWorkerV2(BaseSpecWorker):
  
      def init_cuda_graphs(self):
          capture_decode_cuda_graph = self._decode_graph_allowed
@@ -2166,7 +2411,7 @@ index 3394197413..a6f54f3173 100644
              if available_mem < 1.0:
                  capture_decode_cuda_graph = False
                  logger.warning(
-@@ -357,7 +385,9 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -371,7 +397,9 @@ class DSparkWorkerV2(BaseSpecWorker):
                  # from being the intended precision fallback, skipping the
                  # unused hook avoids paying for two proposal computations.
                  if envs.SGLANG_DSPARK_FOLDED_PROPOSAL.get():
@@ -2177,7 +2422,7 @@ index 3394197413..a6f54f3173 100644
                      if self._draft_sampler is not None:
                          self.draft_model_runner.capture_tail_hooks.append(
                              make_draft_sampler_capture_hook(self._draft_sampler)
-@@ -367,13 +397,15 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -381,13 +409,15 @@ class DSparkWorkerV2(BaseSpecWorker):
                  capture_decode_cuda_graph=capture_decode_cuda_graph
              )
  
@@ -2194,7 +2439,7 @@ index 3394197413..a6f54f3173 100644
              confidence_fn=(
                  self._verify_planner.compute_confidence_tensor
                  if self._verify_planner.carries_confidence
-@@ -438,6 +470,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -447,6 +477,7 @@ class DSparkWorkerV2(BaseSpecWorker):
          )
          logits_output = batch_output.logits_output
          next_token_ids = batch_output.next_token_ids
@@ -2202,31 +2447,9 @@ index 3394197413..a6f54f3173 100644
          batch_output.new_seq_lens = batch.seq_lens
          if on_publish is not None:
              on_publish(batch_output.new_seq_lens)
-diff --git a/python/sglang/srt/speculative/spec_utils.py b/python/sglang/srt/speculative/spec_utils.py
-index 19a35c66b4..287efd9656 100644
---- a/python/sglang/srt/speculative/spec_utils.py
-+++ b/python/sglang/srt/speculative/spec_utils.py
-@@ -1037,6 +1037,17 @@ def spec_prepare_for_decode(batch: ScheduleBatch) -> None:
-             max_speculative_num_draft_tokens(),
-         )
-     if batch.spec_algorithm.is_dflash_family():
-+        # Mirror eagle_prepare_for_decode: evict out-of-window SWA KV and
-+        # advance decode_batch_idx (the eviction gate requires >= 1). Without
-+        # this, hybrid-SWA models retain SWA KV for every generated token and
-+        # a single request exhausts the SWA pool after
-+        # swa_full_tokens_ratio * max_total_num_tokens generated tokens, at
-+        # which point the scheduler retracts it. Pool sizing already assumes
-+        # this eviction runs (pool_configurator: trailing_tokens =
-+        # window + eviction_interval * draft_tokens + page_size).
-+        batch.maybe_evict_swa()
-+        for r in batch.reqs:
-+            r.decode_batch_idx += 1
-         batch.spec_info.prepare_for_decode(batch)
-     else:
-         from sglang.srt.speculative.eagle_utils import eagle_prepare_for_decode
 diff --git a/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 new file mode 100644
-index 0000000000..5aee3f4dcc
+index 0000000000000000000000000000000000000000..5aee3f4dccbd9acd2494711ff4985d4bfc093a01
 --- /dev/null
 +++ b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 @@ -0,0 +1,145 @@
@@ -2375,12 +2598,69 @@ index 0000000000..5aee3f4dcc
 +        f"({swz_match:.4f}) — if the kernel changed, revisit use_swizzle in "
 +        "DeepGemmRunnerCore"
 +    )
+diff --git a/test/registered/kernels/ops/layernorm/test_hc_combine.py b/test/registered/kernels/ops/layernorm/test_hc_combine.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..82b070ac0f0e5aa0c26d3f63b17f5d6c5e5f7a78
+--- /dev/null
++++ b/test/registered/kernels/ops/layernorm/test_hc_combine.py
+@@ -0,0 +1,51 @@
++import pytest
++import torch
++
++from sglang.kernels.ops.layernorm.mhc import hc_combine
++from sglang.test.ci.ci_register import register_cuda_ci
++
++register_cuda_ci(est_time=30, stage="base-b-kernel-unit", runner_config="1-gpu-large")
++
++pytestmark = pytest.mark.skipif(
++    not torch.cuda.is_available() or torch.version.cuda is None,
++    reason="hc_combine requires CUDA",
++)
++
++
++def _reference(
++    x_flat: torch.Tensor, pre: torch.Tensor, hc: int, out_dtype: torch.dtype
++) -> torch.Tensor:
++    m, h = x_flat.shape[0], x_flat.shape[1] // hc
++    return (pre.unsqueeze(-1) * x_flat.view(m, hc, h)).sum(dim=1).to(out_dtype)
++
++
++@pytest.mark.parametrize("m", [1, 7, 64, 1024, 2048])
++@pytest.mark.parametrize("hc,h", [(4, 128), (4, 512), (8, 256)])
++@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
++def test_hc_combine_matches_reference(m: int, hc: int, h: int, dtype: torch.dtype):
++    torch.manual_seed(0)
++    x_flat = torch.randn(m, hc * h, device="cuda", dtype=dtype)
++    pre = torch.randn(m, hc, device="cuda", dtype=dtype).contiguous()
++
++    got = hc_combine(x_flat, pre, hc, dtype)
++    ref = _reference(x_flat, pre, hc, dtype)
++
++    assert got.shape == (m, h)
++    assert got.dtype == dtype
++    # hc_combine accumulates in fp32 while the reference accumulates in `dtype`,
++    # so compare against the fp32 result the kernel is approximating.
++    ref_fp32 = _reference(x_flat.float(), pre.float(), hc, torch.float32)
++    scale = ref_fp32.abs().max().clamp(min=1e-6)
++    assert (got.float() - ref_fp32).abs().max() / scale < 5e-2
++    assert (ref.float() - got.float()).abs().max() / scale < 5e-2
++
++
++def test_hc_combine_non_contiguous_pre_is_rejected_or_handled():
++    torch.manual_seed(0)
++    m, hc, h = 32, 4, 128
++    x_flat = torch.randn(m, hc * h, device="cuda", dtype=torch.bfloat16)
++    pre = torch.randn(m, hc, device="cuda", dtype=torch.bfloat16)
++    got = hc_combine(x_flat, pre.contiguous(), hc, torch.bfloat16)
++    ref = _reference(x_flat, pre, hc, torch.bfloat16)
++    scale = ref.float().abs().max().clamp(min=1e-6)
++    assert (got.float() - ref.float()).abs().max() / scale < 5e-2
 diff --git a/test/registered/unit/distributed/test_pcie_ipc_ar.py b/test/registered/unit/distributed/test_pcie_ipc_ar.py
 new file mode 100644
-index 0000000000..eb27a376ca
+index 0000000000000000000000000000000000000000..3073b38c7e191183b250dd6434f59b5eadbc6cf8
 --- /dev/null
 +++ b/test/registered/unit/distributed/test_pcie_ipc_ar.py
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,181 @@
 +"""Unit tests for the FlashInfer PCIe-IPC all-reduce adapter.
 +
 +These cover the parts that decide whether a reduction reaches the kernels at
@@ -2487,6 +2767,50 @@ index 0000000000..eb27a376ca
 +        self.assertTrue(comm.disabled)
 +        self.assertEqual(cls.call_count, 1)
 +
++    def test_autotunes_only_when_cache_does_not_cover_workspace(self):
++        workspace = MagicMock()
++        workspace.has_tuned_configs = False
++        workspace.tune.return_value = {(HIDDEN, 1): MagicMock()}
++        cls = MagicMock(return_value=workspace)
++        comm = _make_comm(world_size=2, workspace_cls=cls)
++
++        with envs.SGLANG_PCIE_IPC_AUTOTUNE.override(True), patch.object(
++            pcie_ipc_ar, "_decode_width", return_value=64
++        ):
++            self.assertTrue(comm._ensure_workspace(torch.empty(1, HIDDEN)))
++
++        workspace.tune.assert_called_once_with([HIDDEN], dtype=torch.bfloat16)
++
++        cached_workspace = MagicMock()
++        cached_workspace.has_tuned_configs = True
++        cached_comm = _make_comm(
++            world_size=2, workspace_cls=MagicMock(return_value=cached_workspace)
++        )
++        with envs.SGLANG_PCIE_IPC_AUTOTUNE.override(True), patch.object(
++            pcie_ipc_ar, "_decode_width", return_value=64
++        ):
++            self.assertTrue(
++                cached_comm._ensure_workspace(torch.empty(1, HIDDEN))
++            )
++        cached_workspace.tune.assert_not_called()
++
++    def test_autotune_failure_disables_pcie_ipc(self):
++        workspace = MagicMock()
++        workspace.has_tuned_configs = False
++        workspace.tune.side_effect = RuntimeError("tuning failed")
++        comm = _make_comm(
++            world_size=2, workspace_cls=MagicMock(return_value=workspace)
++        )
++
++        with envs.SGLANG_PCIE_IPC_AUTOTUNE.override(True), patch.object(
++            pcie_ipc_ar, "_decode_width", return_value=64
++        ):
++            self.assertFalse(comm._ensure_workspace(torch.empty(1, HIDDEN)))
++
++        workspace.destroy.assert_called_once_with()
++        self.assertTrue(comm.disabled)
++        self.assertTrue(comm._build_failed)
++
 +
 +class TestShapeGuard(CustomTestCase):
 +    def _ready_comm(self):
@@ -2519,10 +2843,10 @@ index 0000000000..eb27a376ca
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-index 0875c0a307..b2628096d1 100644
+index 0e7861a13f9c979efec530bfb2bf0abdebdab4f2..8b7cf971a99888800c1f40f6edab996acf6014b1 100644
 --- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
 +++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-@@ -1160,6 +1160,39 @@ class ServingChatTestCase(unittest.TestCase):
+@@ -1223,6 +1223,39 @@ class ServingChatTestCase(unittest.TestCase):
  
                  self.chat._process_messages(req, is_multimodal=False)
  
@@ -2562,12 +2886,62 @@ index 0875c0a307..b2628096d1 100644
      def test_stop_str_isolation_between_requests(self):
          """Test that stop strings from one request don't affect subsequent requests.
  
+diff --git a/test/registered/unit/entrypoints/test_warmup.py b/test/registered/unit/entrypoints/test_warmup.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f874e2c7c694d484229142edc268456134ea6c10
+--- /dev/null
++++ b/test/registered/unit/entrypoints/test_warmup.py
+@@ -0,0 +1,44 @@
++import asyncio
++import unittest
++
++from sglang.srt.entrypoints.warmup import decode_paths
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=1, suite="base-c-test-cpu")
++
++
++class _TokenizerManager:
++    def __init__(self):
++        self.requests = []
++        self.drained = 0
++
++    async def generate_request(self, request, _raw_request):
++        self.requests.append(request)
++        yield {"step": 1}
++        yield {"step": 2}
++        self.drained += 1
++
++
++class TestDecodePathsWarmup(unittest.TestCase):
++    def test_drains_text_greedy_and_input_id_sampled_requests(self):
++        manager = _TokenizerManager()
++
++        asyncio.run(decode_paths("null", manager))
++
++        self.assertEqual(manager.drained, 2)
++        self.assertEqual(len(manager.requests), 2)
++        self.assertEqual(
++            [request.sampling_params["temperature"] for request in manager.requests],
++            [0.0, 1.0],
++        )
++        for request in manager.requests:
++            self.assertEqual(request.sampling_params["max_new_tokens"], 16)
++            self.assertTrue(request.sampling_params["ignore_eos"])
++        self.assertEqual(manager.requests[0].text, "The capital city of France is")
++        self.assertIsNone(manager.requests[0].input_ids)
++        self.assertIsNone(manager.requests[1].text)
++        self.assertEqual(len(manager.requests[1].input_ids), 256)
++
++
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
 new file mode 100644
-index 0000000000..7ef29c2ab4
+index 0000000000000000000000000000000000000000..e4968d2b7fbfa62dd710fc657bf62d8be21fd499
 --- /dev/null
 +++ b/test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,141 @@
 +"""Tests for DeepGEMM warmup memory-budget selection."""
 +
 +import unittest
@@ -2648,6 +3022,9 @@ index 0000000000..7ef29c2ab4
 +                compile_utils, "get_available_gpu_memory", return_value=available_memory
 +            )
 +        )
++        stack.enter_context(
++            patch.object(compile_utils.torch.cuda, "current_device", return_value=0)
++        )
 +        return saved_context, restore
 +
 +    def test_skips_warmup_when_min_m_does_not_fit(self):
@@ -2706,105 +3083,17 @@ index 0000000000..7ef29c2ab4
 +
 +if __name__ == "__main__":
 +    unittest.main()
-diff --git a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
-index 90a52cea5d..4a63229219 100644
---- a/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
-+++ b/test/registered/unit/spec/test_decode_bookkeeping_ownership.py
-@@ -56,6 +56,9 @@ _OWNER_SITES = {
-     ("mem_cache/allocation.py", "alloc_for_extend", "evict"): 1,
-     ("mem_cache/allocation.py", "alloc_for_extend", "kv_allocated_len"): 1,
-     ("mem_cache/allocation.py", "alloc_for_decode", "evict"): 1,
-+    # spec: the dflash-family branch mirrors eagle_prepare_for_decode.
-+    ("speculative/spec_utils.py", "spec_prepare_for_decode", "decode_batch_idx"): 1,
-+    ("speculative/spec_utils.py", "spec_prepare_for_decode", "evict"): 1,
-     ("mem_cache/allocation.py", "alloc_for_decode", "kv_allocated_len"): 1,
-     # spec v2: no pre-claim; resolve commits the full accepted run uniformly.
-     # kv_allocated_len for spec v2 draft decode (eagle + dflash) is settled
-diff --git a/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
-new file mode 100644
-index 0000000000..5b792acc56
---- /dev/null
-+++ b/test/registered/unit/speculative/test_spec_prepare_swa_eviction.py
-@@ -0,0 +1,82 @@
-+"""spec_prepare_for_decode must run SWA eviction on the dflash-family path.
+diff --git a/test/registered/unit/layers/test_dsv4_nonpaged_indexer.py b/test/registered/unit/layers/test_dsv4_nonpaged_indexer.py
+index e73e9a99251e8a18b8214483a6e8876b2d46d459..c943fc3c4c1d847e6133a16619705bff944b3153 100644
+--- a/test/registered/unit/layers/test_dsv4_nonpaged_indexer.py
++++ b/test/registered/unit/layers/test_dsv4_nonpaged_indexer.py
+@@ -22,6 +22,9 @@ _INDEXER = "sglang.srt.layers.attention.dsv4.indexer"
+ 
+ 
+ class TestDSV4PagedIndexerMetadata(CustomTestCase):
++    def test_topk_torch_fallback_env_is_registered(self):
++        self.assertIs(envs.SGLANG_TOPK_TRANSFORM_512_TORCH.default, False)
 +
-+The dflash-family branch (DFLASH, DSPARK) historically skipped both
-+``maybe_evict_swa`` and the ``decode_batch_idx`` tick that
-+``eagle_prepare_for_decode`` performs. On hybrid-SWA models that retained
-+SWA KV for every generated token, so a single request exhausted the SWA pool
-+after ``swa_full_tokens_ratio * max_total_num_tokens`` generated tokens and
-+was retracted by the scheduler. Pool sizing assumes the eviction runs
-+(``pool_configurator``: ``trailing_tokens = sliding_window +
-+eviction_interval * draft_tokens + page_size``).
-+"""
-+
-+import unittest
-+from types import SimpleNamespace
-+from unittest.mock import MagicMock, patch
-+
-+from sglang.test.ci.ci_register import register_cpu_ci
-+from sglang.test.test_utils import CustomTestCase
-+
-+register_cpu_ci(est_time=1, suite="base-a-test-cpu")
-+
-+
-+def _make_batch(spec_is_dflash_family: bool):
-+    batch = MagicMock()
-+    batch.spec_algorithm.is_dflash_family.return_value = spec_is_dflash_family
-+    req = SimpleNamespace(decode_batch_idx=0)
-+    batch.reqs = [req]
-+    return batch, req
-+
-+
-+class TestSpecPrepareSwaEviction(CustomTestCase):
-+    def _run(self, batch):
-+        from sglang.srt.speculative import spec_utils
-+
-+        with patch.object(
-+            spec_utils, "mamba_extra_buffer_lazy_enabled", return_value=False
-+        ):
-+            spec_utils.spec_prepare_for_decode(batch)
-+
-+    def test_dflash_family_evicts_and_ticks(self):
-+        batch, req = _make_batch(spec_is_dflash_family=True)
-+        self._run(batch)
-+        batch.maybe_evict_swa.assert_called_once_with()
-+        self.assertEqual(req.decode_batch_idx, 1)
-+        batch.spec_info.prepare_for_decode.assert_called_once_with(batch)
-+
-+    def test_tick_advances_every_iteration(self):
-+        """decode_batch_idx is a clock, not a flag: it must keep advancing so
-+        the SWA leaf-lock release gate (decode_batch_idx >= sliding_window_size)
-+        can fire."""
-+        batch, req = _make_batch(spec_is_dflash_family=True)
-+        self._run(batch)
-+        self._run(batch)
-+        self.assertEqual(req.decode_batch_idx, 2)
-+        self.assertEqual(batch.maybe_evict_swa.call_count, 2)
-+
-+    def test_dflash_family_evicts_before_tick(self):
-+        """The overlap-scheduler gate (decode_batch_idx >= 1) must see the
-+        pre-tick value, exactly as in eagle_prepare_for_decode."""
-+        batch, req = _make_batch(spec_is_dflash_family=True)
-+        seen_idx = []
-+        batch.maybe_evict_swa.side_effect = lambda: seen_idx.append(
-+            req.decode_batch_idx
-+        )
-+        self._run(batch)
-+        self.assertEqual(seen_idx, [0])
-+        self.assertEqual(req.decode_batch_idx, 1)
-+
-+    def test_eagle_path_unchanged(self):
-+        batch, req = _make_batch(spec_is_dflash_family=False)
-+        with patch(
-+            "sglang.srt.speculative.eagle_utils.eagle_prepare_for_decode"
-+        ) as eagle_prep:
-+            self._run(batch)
-+        eagle_prep.assert_called_once_with(batch)
-+        # The dflash-branch tick must not run on the eagle path.
-+        self.assertEqual(req.decode_batch_idx, 0)
-+        batch.spec_info.prepare_for_decode.assert_not_called()
-+
-+
-+if __name__ == "__main__":
-+    unittest.main()
+     def test_sm120_fp4_forces_deep_gemm_metadata(self):
+         expected = torch.tensor([[0, 0], [1, 0]], dtype=torch.int32)
+         deep_gemm = SimpleNamespace(

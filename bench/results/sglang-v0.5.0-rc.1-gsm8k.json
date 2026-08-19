@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "engine": "sglang",
-  "image_tag": "v0.3.3-rc.0",
+  "image_tag": "v0.5.0-rc.1",
   "benchmark": "gsm8k",
   "questions": 1319,
   "correct": 1261,
