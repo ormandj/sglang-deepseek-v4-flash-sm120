@@ -29,10 +29,17 @@ more variable than verifier steps/s.
 | Capacity envelope | `--mem-fraction-static 0.93`, `--context-length 786432`, `--chunked-prefill-size 8192` |
 | Runtime selectors | HC prenorm, fused MHC post+pre, FP8 W_o_A, and PCIe-IPC all-reduce enabled; legacy custom all-reduce and TRT/MNNVL disabled |
 
-Hardware and decode shape matched v0.5.0-rc.1. The capacity envelope did not:
-this panel was measured at `--mem-fraction-static 0.93`, a smaller KV pool than
-the preceding release used, so the two panels are not a controlled comparison of
-source composition alone.
+Hardware and decode shape matched the preceding releases. The capacity envelope
+did not: this panel was measured at `--mem-fraction-static 0.93`, a smaller KV
+pool than the preceding release used, so no panel pair here is a controlled
+comparison of source composition alone.
+
+Against `v0.3.3-rc.0`, the last qualified public release, decode forward
+passes/s moved +0.80%, +3.75%, -3.11%, +2.07%, +3.23%, and +4.89% at C1 through
+C32, and prefill moved +1.79%, +0.86%, +0.27%, and -0.22% at 8K through 128K.
+The C4 loss sits inside the baseline's own spread for that cell: its five runs
+ranged `[32.950, 37.119]` against `[32.943, 33.833]` here, so C4 is unresolved
+rather than a regression.
 
 | C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token | Acceptance rate |
 |---:|---:|---:|---:|---:|---:|
