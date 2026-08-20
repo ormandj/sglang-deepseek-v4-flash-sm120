@@ -122,7 +122,14 @@ context is bounded by the pool, not by `--max-running-requests`.
 
 `SGLANG_MAX_NEW_TOKENS_LIMIT` in the recipe above caps any single generation at
 393,216 tokens. It never truncates a request that follows the model card, and it
-stops one unbounded client from holding the pool for hours.
+bounds how long one unbounded client can occupy the pool.
+
+Both long-context shapes were measured at the shipped envelope. A 400,000-token
+prompt generating 32,768 tokens completed in 87.3 s at 375 tok/s with the
+free-memory floor unchanged at 1,746 MiB, and a batch mixing that request with
+three 4,096-token requests completed with no failures at the same floor. KV for
+a long sequence is drawn from the pre-allocated pool, so a long generation does
+not move the free-memory floor the way a long prompt's workspace does.
 
 A configuration can boot cleanly and still fail later on a large request, so
 validate with a near-limit request rather than trusting startup:

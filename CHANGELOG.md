@@ -54,6 +54,9 @@ digests are recorded in each release bundle and its OCI labels.
   request errors.
 - Confirmed a 780,000-token request and four concurrent 250,000-token requests
   both complete at the shipped envelope.
+- Confirmed a 400,000-token prompt generating 32,768 tokens completes at
+  375 tok/s, and that a batch mixing it with three short requests completes
+  with no failures.
 
 ## v0.5.0-rc.1 - 2026-08-18
 
