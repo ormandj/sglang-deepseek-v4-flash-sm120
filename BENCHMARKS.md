@@ -1,8 +1,8 @@
-# v0.5.0-rc.1 and vLLM r33 measurements
+# v0.6.0-rc.3 and vLLM r33 measurements
 
-Last updated: 2026-08-18 CDT.
+Last updated: 2026-08-20 CDT.
 
-This document presents the current SGLang `v0.5.0-rc.1` publication panel and
+This document presents the current SGLang `v0.6.0-rc.3` publication panel and
 the retained vLLM r33 panel. It reports the two engines' values without a
 winner/loser interpretation. The executable harness, analyzers, scoring logic,
 quality graders, and machine-readable summaries are under [`bench/`](bench/).
@@ -25,15 +25,15 @@ quality graders, and machine-readable summaries are under [`bench/`](bench/).
 The qualified SGLang source identity is:
 
 ```text
-SGLang main                  87a09494fa3fbd685bd7c88d6a2dbdd3135de602
-SGLang effective tree        dc71e9b9bb380e96bcb2c0cb4aed120f79478c3e
-FlashInfer main              7aa0cd3b64f84c50c18ee958e24f708afb2103c1
-FlashInfer effective tree    489e9318e4d21d3ecddc8d2ec8f138dde93784b5
-FlashInfer version           0.6.18.dev20260818
-DeepGEMM base                75f60622bc6d317306a41c1f38dc9d888b3ec841
-DeepGEMM effective tree      ff371cf8cc7186c8dab8e07cc7cda6c28baa092f
-DeepGEMM version             0.0.0+sm120jit3
-cache schema                 v20
+SGLang main                  5f128395910dafb98c34083dc26cb790c7674d34
+SGLang effective tree        3d6254585f7baf4aa4c78db37c50d90e63156342
+FlashInfer main              05e5d927399d62a2479c430ad3e167738254d760
+FlashInfer effective tree    06cbd9e30d319454ecca57bf51bed915d86c9d52
+FlashInfer version           0.6.18.dev20260819
+DeepGEMM base                80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f
+DeepGEMM effective tree      ed1efbc5588a673b39a78cfdfafaac4eb282365a
+DeepGEMM version             0.0.0+sm120jit4
+cache schema                 v24
 ```
 
 The performance and quality measurements used an image built from those exact
@@ -123,28 +123,28 @@ capacity to admit that workload. No value is imputed.
 
 | C | Forward passes/s, five runs | Median | Sample CV | Synthetic output tok/s, five runs | Median | Median ITL |
 |---:|---|---:|---:|---|---:|---:|
-| 1 | 64.723, 67.402, 65.719, 65.476, 64.840 | 65.476 | 1.64% | 291.9, 404.4, 325.7, 320.0, 334.3 | 325.7 | 3.160 ms |
-| 2 | 47.477, 48.199, 48.848, 48.699, 48.852 | 48.699 | 1.22% | 486.8, 480.3, 469.5, 546.3, 472.3 | 480.3 | 4.337 ms |
-| 4 | 33.538, 33.292, 33.389, 34.900, 33.627 | 33.538 | 1.94% | 645.4, 657.0, 680.6, 749.5, 653.3 | 657.0 | 6.291 ms |
-| 8 | 23.389, 22.879, 23.330, 23.515, 23.037 | 23.330 | 1.13% | 939.0, 917.8, 879.6, 968.0, 904.3 | 917.8 | 9.478 ms |
-| 16 | 17.587, 17.728, 17.392, 17.518, 17.316 | 17.518 | 0.92% | 1,399.1, 1,460.6, 1,373.5, 1,368.7, 1,365.9 | 1,373.5 | 14.583 ms |
-| 32 | 12.919, 13.062, 13.012, 13.071, 13.013 | 13.013 | 0.46% | 1,970.7, 2,132.6, 2,048.0, 2,033.4, 2,047.9 | 2,047.9 | 22.349 ms |
+| 1 | 63.426, 66.942, 66.505, 64.372, 63.511 | 64.372 | 2.57% | 355.9, 401.7, 295.5, 373.7, 352.6 | 355.9 | 2.967 ms |
+| 2 | 48.533, 50.103, 49.042, 53.849, 49.527 | 49.527 | 4.21% | 459.5, 524.0, 410.9, 614.6, 450.1 | 459.5 | 4.392 ms |
+| 4 | 32.943, 33.353, 33.253, 33.833, 33.199 | 33.253 | 0.98% | 635.8, 668.5, 540.6, 670.7, 646.5 | 646.5 | 6.668 ms |
+| 8 | 23.443, 23.184, 23.045, 23.508, 23.467 | 23.443 | 0.87% | 943.2, 928.8, 856.7, 861.3, 870.3 | 870.3 | 9.849 ms |
+| 16 | 18.429, 17.863, 17.987, 17.792, 17.823 | 17.863 | 1.46% | 1,389.6, 1,384.6, 1,433.7, 1,436.4, 1,301.6 | 1,389.6 | 14.065 ms |
+| 32 | 13.438, 13.328, 13.344, 13.376, 13.243 | 13.344 | 0.53% | 2,033.5, 2,049.6, 2,092.4, 2,097.5, 2,043.2 | 2,049.6 | 21.899 ms |
 
 ### Current engine table
 
 | Engine | C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token |
 |---|---:|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1 | 5 | 65.476 | 325.7 | 3.160 |
+| SGLang v0.6.0-rc.3 | 1 | 5 | 64.372 | 355.9 | 2.967 |
 | vLLM r33 | 1 | 5 | 66.580 | 255.2 | 3.890 |
-| SGLang v0.5.0-rc.1 | 2 | 5 | 48.699 | 480.3 | 4.337 |
+| SGLang v0.6.0-rc.3 | 2 | 5 | 49.527 | 459.5 | 4.392 |
 | vLLM r33 | 2 | 5 | 46.340 | 421.0 | 5.220 |
-| SGLang v0.5.0-rc.1 | 4 | 5 | 33.538 | 657.0 | 6.291 |
+| SGLang v0.6.0-rc.3 | 4 | 5 | 33.253 | 646.5 | 6.668 |
 | vLLM r33 | 4 | 5 | 33.070 | 616.0 | 7.060 |
-| SGLang v0.5.0-rc.1 | 8 | 5 | 23.330 | 917.8 | 9.478 |
+| SGLang v0.6.0-rc.3 | 8 | 5 | 23.443 | 870.3 | 9.849 |
 | vLLM r33 | 8 | 5 | 23.450 | 795.8 | 11.080 |
-| SGLang v0.5.0-rc.1 | 16 | 5 | 17.518 | 1,373.5 | 14.583 |
+| SGLang v0.6.0-rc.3 | 16 | 5 | 17.863 | 1,389.6 | 14.065 |
 | vLLM r33 | 16 | 5 | 15.860 | 1,097.2 | 17.590 |
-| SGLang v0.5.0-rc.1 | 32 | 5 | 13.013 | 2,047.9 | 22.349 |
+| SGLang v0.6.0-rc.3 | 32 | 5 | 13.344 | 2,049.6 | 21.899 |
 | vLLM r33 | 32 | 0 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — | — |
 
 ## DSpARK acceptance
@@ -154,17 +154,17 @@ synthetic output-rate variation; it is not used as an engine-speed result.
 
 | Engine | C | Acceptance rate | Output tokens/forward/request |
 |---|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1 | 0.787 | 4.939 |
+| SGLang v0.6.0-rc.3 | 1 | 0.940 | 5.614 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.5.0-rc.1 | 2 | 0.813 | 4.977 |
+| SGLang v0.6.0-rc.3 | 2 | 0.750 | 4.702 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.5.0-rc.1 | 4 | 0.778 | 4.985 |
+| SGLang v0.6.0-rc.3 | 4 | 0.769 | 4.885 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.5.0-rc.1 | 8 | 0.798 | 5.016 |
+| SGLang v0.6.0-rc.3 | 8 | 0.729 | 4.598 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.5.0-rc.1 | 16 | 0.782 | 4.947 |
+| SGLang v0.6.0-rc.3 | 16 | 0.769 | 4.837 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.5.0-rc.1 | 32 | 0.765 | 4.881 |
+| SGLang v0.6.0-rc.3 | 32 | 0.765 | 4.806 |
 | vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — |
 
 > **vLLM C=32 capacity.** The vLLM side runs the upstream-documented TP2 profile
@@ -185,16 +185,16 @@ synthetic output-rate variation; it is not used as an engine-speed result.
 
 | Target | Prompt tok/s, five requests | Aggregate prompt tok/s |
 |---:|---|---:|
-| 8K | 7,415.1, 7,679.3, 7,740.8, 7,800.7, 7,766.2 | 7,665.1 |
-| 32K | 8,647.9, 8,649.3, 8,640.1, 8,564.0, 8,540.3 | 8,602.4 |
-| 64K | 8,409.8, 8,368.0, 8,267.4, 8,214.0, 8,181.9 | 8,284.2 |
-| 128K | 7,980.2, 7,824.8, 7,710.3, 7,713.1, 7,714.4 | 7,785.1 |
+| 8K | 7,674.2, 8,055.2, 7,956.3, 7,988.3, 7,983.0 | 7,916.2 |
+| 32K | 8,839.8, 8,890.8, 8,832.7, 8,771.8, 8,782.6 | 8,818.5 |
+| 64K | 8,655.5, 8,577.4, 8,488.9, 8,380.3, 8,359.7 | 8,487.6 |
+| 128K | 8,154.4, 7,998.4, 7,883.0, 7,859.1, 7,869.4 | 7,949.3 |
 
 ### Current engine table
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 7,665.1 | 8,602.4 | 8,284.2 | 7,785.1 |
+| SGLang v0.6.0-rc.3 | 7,916.2 | 8,818.5 | 8,487.6 | 7,949.3 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ## Quality results
@@ -204,7 +204,7 @@ seed 42, and a 16,384-token response cap.
 
 | Engine | Questions | Correct | Accuracy | Request errors |
 |---|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1,319 | 1,261 | 95.60% | 0 |
+| SGLang v0.6.0-rc.3 | 1,319 | 1,263 | 95.75% | 0 |
 | vLLM r33 | 1,319 | 1,243 | 94.24% | 0 |
 
 All 1,319 SGLang responses used the grader's documented last-number fallback
@@ -213,8 +213,8 @@ fallback counts are separate facts.
 
 ## Machine-readable results
 
-- [`sglang-v0.5.0-rc.1-publication-summary.json`](bench/results/sglang-v0.5.0-rc.1-publication-summary.json)
-- [`sglang-v0.5.0-rc.1-gsm8k.json`](bench/results/sglang-v0.5.0-rc.1-gsm8k.json)
+- [`sglang-v0.6.0-rc.3-publication-summary.json`](bench/results/sglang-v0.6.0-rc.3-publication-summary.json)
+- [`sglang-v0.6.0-rc.3-gsm8k.json`](bench/results/sglang-v0.6.0-rc.3-gsm8k.json)
 - [`vllm-r33-publication-summary.json`](bench/results/vllm-r33-publication-summary.json)
 - [`vllm-r33-gsm8k.json`](bench/results/vllm-r33-gsm8k.json)
 

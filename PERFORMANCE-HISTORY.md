@@ -15,6 +15,42 @@ therefore driven in part by DSpARK acceptance. Different fixed prompt/seed
 paths produce different accepted-draft-length distributions, so this rate is
 more variable than verifier steps/s.
 
+## v0.6.0-rc.3
+
+| Field | Value |
+|---|---|
+| Public image tag | `ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3` |
+| SGLang effective tree | `3d6254585f7baf4aa4c78db37c50d90e63156342` |
+| FlashInfer effective tree | `06cbd9e30d319454ecca57bf51bed915d86c9d52` |
+| DeepGEMM effective tree | `ed1efbc5588a673b39a78cfdfafaac4eb282365a` |
+| AIPerf revision | `6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23` |
+| Decode samples | five at every supported concurrency |
+| Prefill samples | five cache-cold requests per length |
+| Capacity envelope | `--mem-fraction-static 0.93`, `--context-length 786432`, `--chunked-prefill-size 8192` |
+| Runtime selectors | HC prenorm, fused MHC post+pre, FP8 W_o_A, and PCIe-IPC all-reduce enabled; legacy custom all-reduce and TRT/MNNVL disabled |
+
+Hardware and decode shape matched v0.5.0-rc.1. The capacity envelope did not:
+this panel was measured at `--mem-fraction-static 0.93`, a smaller KV pool than
+the preceding release used, so the two panels are not a controlled comparison of
+source composition alone.
+
+| C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token | Acceptance rate |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 5 | 64.372 `[63.426, 66.942]` | 355.9 `[295.5, 401.7]` | 2.967 `[2.710, 3.311]` | 0.940 `[0.720, 1.000]` |
+| 2 | 5 | 49.527 `[48.533, 53.849]` | 459.5 `[410.9, 614.6]` | 4.392 `[3.676, 5.396]` | 0.750 `[0.700, 1.000]` |
+| 4 | 5 | 33.253 `[32.943, 33.833]` | 646.5 `[540.6, 670.7]` | 6.668 `[6.281, 6.954]` | 0.769 `[0.647, 0.801]` |
+| 8 | 5 | 23.443 `[23.045, 23.508]` | 870.3 `[856.7, 943.2]` | 9.849 `[9.177, 10.329]` | 0.729 `[0.713, 0.797]` |
+| 16 | 5 | 17.863 `[17.792, 18.429]` | 1,389.6 `[1,301.6, 1,436.4]` | 14.065 `[13.728, 14.906]` | 0.769 `[0.728, 0.819]` |
+| 32 | 5 | 13.344 `[13.243, 13.438]` | 2,049.6 `[2,033.5, 2,097.5]` | 21.899 `[21.529, 22.074]` | 0.765 `[0.742, 0.777]` |
+
+| 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
+|---:|---:|---:|---:|
+| 7,916.2 | 8,818.5 | 8,487.6 | 7,949.3 |
+
+| Gate | Questions | Correct | Accuracy | Request errors |
+|---|---:|---:|---:|---:|
+| GSM8K | 1,319 | 1,263 | 95.75% | 0 |
+
 ## v0.5.0-rc.1
 
 | Field | Value |

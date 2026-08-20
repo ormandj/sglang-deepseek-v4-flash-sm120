@@ -45,6 +45,22 @@ digests are recorded in each release bundle and its OCI labels.
   current context setting it exhausts per-request workspace and kills a
   scheduler rank.
 
+### Benchmark tooling
+
+- Added the missing `api_key` binding to `bench/aiperf/configs/gsm8k.yaml`. The
+  GSM8K gate could not authenticate against an endpoint started with
+  `--api-key`, and failed its readiness probe instead of running.
+
+### Validation
+
+- Completed five decode repetitions at C1, C2, C4, C8, C16, and C32, and five
+  cache-cold prefill requests at 8K, 32K, 64K, and 128K, all at the shipped
+  0.93 capacity envelope.
+- Completed the full 1,319-question GSM8K set with 1,263 correct and zero
+  request errors.
+- Confirmed a 780,000-token request and four concurrent 250,000-token requests
+  both complete at the shipped envelope.
+
 ## v0.5.0-rc.1 - 2026-08-18
 
 ### Changed

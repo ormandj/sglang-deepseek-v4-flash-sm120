@@ -85,11 +85,9 @@ docker run --rm \
 
 `--mem-fraction-static` sets how much device memory is reserved for the static
 KV pool. It is the most consequential capacity knob and trades directly against
-per-request workspace. Measured on 2x RTX PRO 6000 Max-Q at TP2;
-`max_total_num_tokens` and the free-memory column are SGLang's own self-reported
-startup figures:
-
-All rows below were measured at `--context-length 786432` on this hardware:
+per-request workspace. Every row below was measured on 2x RTX PRO 6000 Max-Q at
+TP2 with `--context-length 786432`; `max_total_num_tokens` and the free-memory
+column are SGLang's own self-reported startup figures:
 
 | `--mem-fraction-static` | `max_total_num_tokens` | Free after startup | Near-limit request | 4 x 250k concurrent |
 |---|---:|---:|---|---|
@@ -259,15 +257,10 @@ cache-preservation follow-up.
 The DeepGEMM split-K pull request records an isolated SM120 projection profile
 of approximately 22.4 microseconds with split-K plus reduction and 13.2
 microseconds with `split_k=1` for `M=4, N=8192, K=1024`. All three changes were
-also present in the source-equivalent stack that completed the v0.5.0-rc.1
+also present in the source-equivalent stack that completed the v0.6.0-rc.3
 n=5 decode and prefill panels and full GSM8K validation.
 
 ## Current measurements
-
-> The panel below is the completed `v0.5.0-rc.1` qualification. The
-> `v0.6.0-rc.3` panel is being re-measured at the shipped 0.93 capacity
-> envelope and will replace these tables; they are not relabelled in the
-> meantime.
 
 The current SGLang candidate and the retained vLLM r33 measurements used the
 same two RTX PRO 6000 Blackwell Max-Q GPUs at TP2 over PCIe Gen 4 x16, with a
@@ -286,17 +279,17 @@ generated token.
 
 | Engine | C | n | Forward passes/s | Synthetic output tok/s | ITL ms/token |
 |---|---:|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1 | 5 | 65.476 | 325.7 | 3.160 |
+| SGLang v0.6.0-rc.3 | 1 | 5 | 64.372 | 355.9 | 2.967 |
 | vLLM r33 | 1 | 5 | 66.580 | 255.2 | 3.890 |
-| SGLang v0.5.0-rc.1 | 2 | 5 | 48.699 | 480.3 | 4.337 |
+| SGLang v0.6.0-rc.3 | 2 | 5 | 49.527 | 459.5 | 4.392 |
 | vLLM r33 | 2 | 5 | 46.340 | 421.0 | 5.220 |
-| SGLang v0.5.0-rc.1 | 4 | 5 | 33.538 | 657.0 | 6.291 |
+| SGLang v0.6.0-rc.3 | 4 | 5 | 33.253 | 646.5 | 6.668 |
 | vLLM r33 | 4 | 5 | 33.070 | 616.0 | 7.060 |
-| SGLang v0.5.0-rc.1 | 8 | 5 | 23.330 | 917.8 | 9.478 |
+| SGLang v0.6.0-rc.3 | 8 | 5 | 23.443 | 870.3 | 9.849 |
 | vLLM r33 | 8 | 5 | 23.450 | 795.8 | 11.080 |
-| SGLang v0.5.0-rc.1 | 16 | 5 | 17.518 | 1,373.5 | 14.583 |
+| SGLang v0.6.0-rc.3 | 16 | 5 | 17.863 | 1,389.6 | 14.065 |
 | vLLM r33 | 16 | 5 | 15.860 | 1,097.2 | 17.590 |
-| SGLang v0.5.0-rc.1 | 32 | 5 | 13.013 | 2,047.9 | 22.349 |
+| SGLang v0.6.0-rc.3 | 32 | 5 | 13.344 | 2,049.6 | 21.899 |
 | vLLM r33 | 32 | 0 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — | — |
 
 ### DSpARK acceptance
@@ -306,17 +299,17 @@ it is not used as an engine-clock metric.
 
 | Engine | C | Median acceptance rate | Median output tokens/forward/request |
 |---|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1 | 0.787 | 4.939 |
+| SGLang v0.6.0-rc.3 | 1 | 0.940 | 5.614 |
 | vLLM r33 | 1 | 0.588 | 3.938 |
-| SGLang v0.5.0-rc.1 | 2 | 0.813 | 4.977 |
+| SGLang v0.6.0-rc.3 | 2 | 0.750 | 4.702 |
 | vLLM r33 | 2 | 0.731 | 4.655 |
-| SGLang v0.5.0-rc.1 | 4 | 0.778 | 4.985 |
+| SGLang v0.6.0-rc.3 | 4 | 0.769 | 4.885 |
 | vLLM r33 | 4 | 0.764 | 4.821 |
-| SGLang v0.5.0-rc.1 | 8 | 0.798 | 5.016 |
+| SGLang v0.6.0-rc.3 | 8 | 0.729 | 4.598 |
 | vLLM r33 | 8 | 0.649 | 4.245 |
-| SGLang v0.5.0-rc.1 | 16 | 0.782 | 4.947 |
+| SGLang v0.6.0-rc.3 | 16 | 0.769 | 4.837 |
 | vLLM r33 | 16 | 0.672 | 4.359 |
-| SGLang v0.5.0-rc.1 | 32 | 0.765 | 4.881 |
+| SGLang v0.6.0-rc.3 | 32 | 0.765 | 4.806 |
 | vLLM r33 | 32 | not reachable: vLLM-reported KV 143,599 tok, `max_num_seqs=16` (upstream TP2 recipe) | — |
 
 > **On the missing vLLM C=32 rows.** The vLLM side runs the upstream-documented
@@ -351,14 +344,14 @@ separate headline metric.
 
 | Engine | 8K prompt tok/s | 32K prompt tok/s | 64K prompt tok/s | 128K prompt tok/s |
 |---|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 7,665.1 | 8,602.4 | 8,284.2 | 7,785.1 |
+| SGLang v0.6.0-rc.3 | 7,916.2 | 8,818.5 | 8,487.6 | 7,949.3 |
 | vLLM r33 | 7,689.8 | 8,784.7 | 8,518.7 | 7,953.6 |
 
 ### Quality checks
 
 | Engine | GSM8K questions | Correct | Accuracy | Request errors |
 |---|---:|---:|---:|---:|
-| SGLang v0.5.0-rc.1 | 1,319 | 1,261 | 95.60% | 0 |
+| SGLang v0.6.0-rc.3 | 1,319 | 1,263 | 95.75% | 0 |
 | vLLM r33 | 1,319 | 1,243 | 94.24% | 0 |
 
 [BENCHMARKS.md](BENCHMARKS.md) documents the exact method and every run-level
