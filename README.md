@@ -10,7 +10,7 @@ you do not need to build SGLang, FlashInfer, DeepGEMM, or the image locally.
 The current candidate is:
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3
 ```
 
 Install Docker, the NVIDIA Container Toolkit, and `uv`, then download the
@@ -23,7 +23,7 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v20
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24
 mkdir -p "$CACHE_DIR"
 ```
 
@@ -44,8 +44,8 @@ docker run --rm \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
-  --env TVM_CACHE_DIR=/root/.cache/tvm \
   --env TRITON_CACHE_DIR=/root/.cache/triton \
+  --env SGLANG_MAX_NEW_TOKENS_LIMIT=393216 \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
@@ -54,7 +54,7 @@ docker run --rm \
   --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=1 \
   --env SGLANG_PCIE_IPC_MAX_NUMEL=786432 \
   --env SGLANG_PCIE_IPC_AUTOTUNE=1 \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
@@ -62,7 +62,7 @@ docker run --rm \
   --tensor-parallel-size 2 \
   --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.93 \
-  --context-length 774656 \
+  --context-length 786432 \
   --chunked-prefill-size 8192 \
   --cuda-graph-max-bs-decode 32 \
   --max-running-requests 48 \
@@ -89,21 +89,45 @@ per-request workspace. Measured on 2x RTX PRO 6000 Max-Q at TP2;
 `max_total_num_tokens` and the free-memory column are SGLang's own self-reported
 startup figures:
 
-| `--mem-fraction-static` | `--context-length` | `max_total_num_tokens` | Free after startup | 240k-token request |
-|---|---:|---:|---:|---|
-| 0.95 | 786,432 | 990,208 | 3.11 GB | passes |
-| 0.96 | 774,656 | 1,099,264 | 2.21 GB | **crashes the server** |
+All rows below were measured at `--context-length 786432` on this hardware:
 
-At 0.96/774,656, a single 240,269-token request killed the server with
-`c10::OutOfMemoryError` even though the KV pool was large enough to hold it and
-startup was clean. The same request returns 200 at 0.95/786,432 -- a *larger*
-context with a *smaller* pool -- because the extra headroom covers the
-workspace. Do not choose this knob by maximising `max_total_num_tokens`.
+| `--mem-fraction-static` | `max_total_num_tokens` | Free after startup | Near-limit request | 4 x 250k concurrent |
+|---|---:|---:|---|---|
+| 0.90 | 474,624 | 5,488 MiB | 470k passes (floor 4,322 MiB) | passes |
+| **0.93 (shipped)** | **801,536** | **2,628 MiB** | **780k passes (floor 120 MiB)** | **passes (floor 120 MiB)** |
+| 0.95 | 1,019,648 | 440 MiB | **crashes a scheduler rank** | not reached |
 
-`--context-length` is not only an input limit: it also sizes per-request
-workspace, so declaring more context than you serve costs memory on every
-request. A configuration can boot cleanly and still fail later on a large
-request, so validate with a near-limit request rather than trusting startup:
+At 0.95 the KV pool is the largest of the three and the server still starts
+cleanly, but a single 550,000-token request exhausts the workspace and kills a
+TP rank. The pool is not the binding constraint -- per-request workspace is, and
+it grows at roughly **3.2 MiB per 1,000 tokens** of request context. Do not
+choose this knob by maximising `max_total_num_tokens`.
+
+0.93 is shipped because it is the largest pool that still survives a request at
+the declared context limit. Its 120 MiB floor is genuinely tight; it is a
+measured pass, not a comfortable margin.
+
+`--context-length` is not an input limit. It is the **total** per-request
+budget: prompt tokens plus generated tokens. A request is rejected up front when
+`input + max_tokens` exceeds it, and when `max_tokens` is omitted the server
+treats the request as unbounded and clamps it to the context you have left after
+the prompt. It also sizes per-request workspace, so declaring more context than
+you serve costs memory on every request.
+
+This matters for reasoning workloads. The model card recommends a maximum output
+length of 384K tokens at the `high` and `max` reasoning effort levels, and that
+output is charged to the same 786,432-token budget as the prompt. A session
+holding 400K of context that then produces 300K of thinking and 30K of answer
+totals roughly 740K tokens -- it fits, with about 46K to spare, but the
+801,536-token pool holds exactly one such request at a time. Concurrency at long
+context is bounded by the pool, not by `--max-running-requests`.
+
+`SGLANG_MAX_NEW_TOKENS_LIMIT` in the recipe above caps any single generation at
+393,216 tokens. It never truncates a request that follows the model card, and it
+stops one unbounded client from holding the pool for hours.
+
+A configuration can boot cleanly and still fail later on a large request, so
+validate with a near-limit request rather than trusting startup:
 
 ```bash
 curl -fsS http://localhost:8000/get_server_info \
@@ -120,12 +144,12 @@ MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
 
 The wrapper validates the local paths and runs the Docker command recorded in
 this repository. It defaults to GPUs `0,1`, TP2, port 8000, and the qualified
-774,656-token context limit. Override those values explicitly when needed:
+786,432-token context limit. Override those values explicitly when needed:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 TP_SIZE=4 \
-CONTEXT_LENGTH=774656 \
+CONTEXT_LENGTH=786432 \
 MODEL_DIR="$MODEL_DIR" \
 CACHE_DIR="$CACHE_DIR" \
   ./examples/serve-dsv4-0731.sh
@@ -179,14 +203,14 @@ the qualified prefill and decode paths before the server reports ready.
 | Component | Pinned identity |
 |---|---|
 | Base image | `lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf` |
-| SGLang main | `87a09494fa3fbd685bd7c88d6a2dbdd3135de602` |
-| SGLang effective tree | `dc71e9b9bb380e96bcb2c0cb4aed120f79478c3e` |
-| FlashInfer main | `7aa0cd3b64f84c50c18ee958e24f708afb2103c1` |
-| FlashInfer effective tree | `489e9318e4d21d3ecddc8d2ec8f138dde93784b5` |
-| FlashInfer package | `0.6.18.dev20260818` |
-| DeepGEMM base | `75f60622bc6d317306a41c1f38dc9d888b3ec841` |
-| DeepGEMM effective tree | `ff371cf8cc7186c8dab8e07cc7cda6c28baa092f` |
-| DeepGEMM package | `0.0.0+sm120jit3` |
+| SGLang main | `5f128395910dafb98c34083dc26cb790c7674d34` |
+| SGLang effective tree | `3d6254585f7baf4aa4c78db37c50d90e63156342` |
+| FlashInfer main | `05e5d927399d62a2479c430ad3e167738254d760` |
+| FlashInfer effective tree | `06cbd9e30d319454ecca57bf51bed915d86c9d52` |
+| FlashInfer package | `0.6.18.dev20260819` |
+| DeepGEMM base | `80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f` |
+| DeepGEMM effective tree | `ed1efbc5588a673b39a78cfdfafaac4eb282365a` |
+| DeepGEMM package | `0.0.0+sm120jit4` |
 
 The SGLang patch contains the audited source heads of
 [`sgl-project/sglang#29927`](https://github.com/sgl-project/sglang/pull/29927),
@@ -239,6 +263,11 @@ also present in the source-equivalent stack that completed the v0.5.0-rc.1
 n=5 decode and prefill panels and full GSM8K validation.
 
 ## Current measurements
+
+> The panel below is the completed `v0.5.0-rc.1` qualification. The
+> `v0.6.0-rc.3` panel is being re-measured at the shipped 0.93 capacity
+> envelope and will replace these tables; they are not relabelled in the
+> meantime.
 
 The current SGLang candidate and the retained vLLM r33 measurements used the
 same two RTX PRO 6000 Blackwell Max-Q GPUs at TP2 over PCIe Gen 4 x16, with a

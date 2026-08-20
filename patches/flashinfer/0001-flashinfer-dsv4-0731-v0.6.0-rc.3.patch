@@ -1,5 +1,5 @@
 diff --git a/CLAUDE.md b/CLAUDE.md
-index 019a0961763d9e8eac58296b301485c41ffc2024..1b05fbec8447dd67071ca7556c10635ea5b96415 100644
+index 019a0961..3f0e86bc 100644
 --- a/CLAUDE.md
 +++ b/CLAUDE.md
 @@ -580,7 +580,7 @@ Used by `flashinfer.trace` / `fi_trace`.
@@ -7,13 +7,13 @@ index 019a0961763d9e8eac58296b301485c41ffc2024..1b05fbec8447dd67071ca7556c10635e
  | `FLASHINFER_DIST_AWARE_AUTOTUNE` | `0` | `flashinfer/fused_moe/da_config.py` | `1` enables experimental distribution-aware autotune and kernel dispatch (TRT-LLM MoE only). |
  | `FLASHINFER_DA_DISTRIBUTIONS` | built-in distribution catalog | `flashinfer/fused_moe/da_config.py` | Comma-separated training distributions used by the experimental TRT-LLM distribution-aware MoE autotuner. |
 -| `FLASHINFER_AUTOTUNE_DIR` | unset | `flashinfer/mla/_sparse_mla_sm120.py` | Override the disk path for MLA AutoTuner cache files. Falls back to `FLASHINFER_WORKSPACE_DIR` when unset. |
-+| `FLASHINFER_AUTOTUNE_DIR` | unset | `flashinfer/mla/_sparse_mla_sm120.py`, `flashinfer/comm/pcie_ipc_tuning.py` | Override the disk path for AutoTuner cache files (MLA and the PCIe IPC all-reduce). Falls back to `FLASHINFER_WORKSPACE_DIR` when unset. |
++| `FLASHINFER_AUTOTUNE_DIR` | unset | `flashinfer/mla/_sparse_mla_sm120.py`, `flashinfer/comm/pcie_ipc_tuning.py` | Override the disk path for AutoTuner cache files (MLA, and the PCIe IPC all-reduce). Falls back to `FLASHINFER_WORKSPACE_DIR` when unset. |
  | `FLASHINFER_AUTOTUNE_TIMER` | unset (auto) | `flashinfer/autotuner/autotuner.py` | Selects the autotuner's per-tactic timer: `globaltimer` forces the GPU `%globaltimer` register, `cuda_event` forces `cudaEvent`, unset/anything-else auto-detects (uses `%globaltimer` only when Confidential Computing is detected). Under CC `cudaEventElapsedTime` is unreliable (can go negative), so the globaltimer path keeps tactic ranking stable. |
  | `FLASHINFER_CUTILE_AUTOTUNE_DISABLED` | `0` | `flashinfer/quantization/kernels/cutile/rope_quantize_fp8_cutile.py` | Non-zero skips exhaustive cuTile RoPE-FP8 tuning and uses the built-in token-count heuristic. |
  | `FLASHINFER_CONFIDENTIAL_COMPUTE` | unset | `flashinfer/utils.py` | Override NVIDIA Confidential Computing (CC) auto-detection used by `is_confidential_compute()` (which drives the autotuner timer above): `1` forces CC, `0` forces non-CC. Useful for CI or hosts without `pynvml`. |
 diff --git a/benchmarks/comm/bench_pcie_ipc_all_reduce.py b/benchmarks/comm/bench_pcie_ipc_all_reduce.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7a5296fed602fb340557612ec2ff5ed4d9a70425
+index 00000000..7a5296fe
 --- /dev/null
 +++ b/benchmarks/comm/bench_pcie_ipc_all_reduce.py
 @@ -0,0 +1,686 @@
@@ -705,7 +705,7 @@ index 0000000000000000000000000000000000000000..7a5296fed602fb340557612ec2ff5ed4
 +    main()
 diff --git a/csrc/pcie_ipc_all_reduce.cu b/csrc/pcie_ipc_all_reduce.cu
 new file mode 100644
-index 0000000000000000000000000000000000000000..bdbf102c88d10a55e44377c5591bfee99960464c
+index 00000000..bdbf102c
 --- /dev/null
 +++ b/csrc/pcie_ipc_all_reduce.cu
 @@ -0,0 +1,206 @@
@@ -916,7 +916,7 @@ index 0000000000000000000000000000000000000000..bdbf102c88d10a55e44377c5591bfee9
 +TVM_FFI_DLL_EXPORT_TYPED_FUNC(pcie_ipc_dispose, pcie_ipc_dispose);
 +TVM_FFI_DLL_EXPORT_TYPED_FUNC(pcie_ipc_all_reduce, pcie_ipc_all_reduce);
 diff --git a/docs/api/comm.rst b/docs/api/comm.rst
-index 103c0e82453210310d12bd97f4676726a235167a..63a83e58bb406e1c18b84b51493256788407cfc8 100644
+index 103c0e82..63a83e58 100644
 --- a/docs/api/comm.rst
 +++ b/docs/api/comm.rst
 @@ -143,6 +143,55 @@ vLLM AllReduce
@@ -976,10 +976,10 @@ index 103c0e82453210310d12bd97f4676726a235167a..63a83e58bb406e1c18b84b5149325678
  -----------------------------------
  
 diff --git a/flashinfer/aot.py b/flashinfer/aot.py
-index e49c4567329ef2f9541e08f44e8c30126fafb348..292ced9ae54f4af21d2bd898beba19a0fe0c80a5 100644
+index 20349956..ec8660b2 100644
 --- a/flashinfer/aot.py
 +++ b/flashinfer/aot.py
-@@ -688,6 +688,7 @@ def gen_all_modules(
+@@ -702,6 +702,7 @@ def gen_all_modules(
              gen_comm_alltoall_module,
              gen_dcp_alltoall_module,
              gen_moe_alltoall_module,
@@ -987,7 +987,7 @@ index e49c4567329ef2f9541e08f44e8c30126fafb348..292ced9ae54f4af21d2bd898beba19a0
              gen_trtllm_comm_module,
              gen_trtllm_mnnvl_comm_module,
              gen_vllm_comm_module,
-@@ -713,6 +714,10 @@ def gen_all_modules(
+@@ -727,6 +728,10 @@ def gen_all_modules(
              # SM90/SM12x users still get this via JIT.
              jit_specs.append(gen_dcp_alltoall_module())
          jit_specs.append(gen_vllm_comm_module())
@@ -998,7 +998,7 @@ index e49c4567329ef2f9541e08f44e8c30126fafb348..292ced9ae54f4af21d2bd898beba19a0
  
      if add_misc:
          jit_specs += [
-@@ -1163,7 +1168,7 @@ def main():
+@@ -1177,7 +1182,7 @@ def main():
      parser.add_argument(
          "--add-comm",
          type=parse_bool,
@@ -1008,7 +1008,7 @@ index e49c4567329ef2f9541e08f44e8c30126fafb348..292ced9ae54f4af21d2bd898beba19a0
      parser.add_argument(
          "--add-gemma",
 diff --git a/flashinfer/comm/__init__.py b/flashinfer/comm/__init__.py
-index b763156bbb104395646994c1d09f459522efc870..9b9eaef7b6b49425776b27d2d6b3d1c5ada6a91d 100644
+index b763156b..9b9eaef7 100644
 --- a/flashinfer/comm/__init__.py
 +++ b/flashinfer/comm/__init__.py
 @@ -38,6 +38,24 @@ from .vllm_ar import init_custom_ar as vllm_init_custom_ar
@@ -1037,7 +1037,7 @@ index b763156bbb104395646994c1d09f459522efc870..9b9eaef7b6b49425776b27d2d6b3d1c5
  from .ulysses import dispose_ulysses_a2a as dispose_ulysses_a2a
  from .ulysses import gen_ulysses_a2a_module as gen_ulysses_a2a_module
 diff --git a/flashinfer/comm/cuda_ipc.py b/flashinfer/comm/cuda_ipc.py
-index d66c3fa63c36031281132cb0158423d6fe3ebf5d..66aa9df0cc4ebf99bba20ad002ebe8fb3d9364e2 100644
+index d66c3fa6..66aa9df0 100644
 --- a/flashinfer/comm/cuda_ipc.py
 +++ b/flashinfer/comm/cuda_ipc.py
 @@ -15,6 +15,7 @@ limitations under the License.
@@ -1092,10 +1092,10 @@ index d66c3fa63c36031281132cb0158423d6fe3ebf5d..66aa9df0cc4ebf99bba20ad002ebe8fb
  class CudaRTLibrary:
 diff --git a/flashinfer/comm/pcie_ipc_ar.py b/flashinfer/comm/pcie_ipc_ar.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..bf0e8575b80b79a429a1499732360a434a1cc607
+index 00000000..fc35358f
 --- /dev/null
 +++ b/flashinfer/comm/pcie_ipc_ar.py
-@@ -0,0 +1,1006 @@
+@@ -0,0 +1,1013 @@
 +"""
 +Copyright (c) 2026 by FlashInfer team.
 +
@@ -1142,6 +1142,7 @@ index 0000000000000000000000000000000000000000..bf0e8575b80b79a429a1499732360a43
 +    pcie_ipc_tuning_config,
 +    resolve_tuned_config,
 +    tuned_batches_for,
++    warn_no_tune_group,
 +)
 +
 +_SUPPORTED_WORLD_SIZES = (2, 4, 8)
@@ -1694,8 +1695,14 @@ index 0000000000000000000000000000000000000000..bf0e8575b80b79a429a1499732360a43
 +            # distributed tune group, profiling this collective is unsafe.
 +            # Restore the workspace's explicit tune cache and perform a lookup
 +            # with its own bucket policy instead of retaining the seed tactic.
-+            if tuner.is_tuning_mode and self._tune_cache_exists:
-+                tuner.load_configs(self._tune_cache)
++            if tuner.is_tuning_mode:
++                # The runner would have said this had it been asked for
++                # candidates; short-circuiting before ``choose_one`` is what
++                # would otherwise swallow it. It is the actionable half of the
++                # diagnosis -- the caller is tuning, so "go tune" is not.
++                warn_no_tune_group(stacklevel=4)
++                if self._tune_cache_exists:
++                    tuner.load_configs(self._tune_cache)
 +            _, _, tactic, _ = tuner.search_cache(
 +                PCIE_IPC_CUSTOM_OP,
 +                [self._runner],
@@ -1724,7 +1731,7 @@ index 0000000000000000000000000000000000000000..bf0e8575b80b79a429a1499732360a43
 +                stacklevel=3,
 +            )
 +            return seed
-+        if not can_profile:
++        if not tuner.is_tuning_mode:
 +            self._warn_if_untuned()
 +        return config
 +
@@ -2104,7 +2111,7 @@ index 0000000000000000000000000000000000000000..bf0e8575b80b79a429a1499732360a43
 +        self.destroy()
 diff --git a/flashinfer/comm/pcie_ipc_policy.py b/flashinfer/comm/pcie_ipc_policy.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..da181fb1f62e98ae2afbc6133ae17146245e651b
+index 00000000..da181fb1
 --- /dev/null
 +++ b/flashinfer/comm/pcie_ipc_policy.py
 @@ -0,0 +1,188 @@
@@ -2298,7 +2305,7 @@ index 0000000000000000000000000000000000000000..da181fb1f62e98ae2afbc6133ae17146
 +    return config if _is_launchable(world_size, config, max_blocks) else None
 diff --git a/flashinfer/comm/pcie_ipc_topology.py b/flashinfer/comm/pcie_ipc_topology.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..1bb869afcb9c1773b53643f7cdc2c1e04d6aaac1
+index 00000000..1bb869af
 --- /dev/null
 +++ b/flashinfer/comm/pcie_ipc_topology.py
 @@ -0,0 +1,210 @@
@@ -2514,10 +2521,10 @@ index 0000000000000000000000000000000000000000..1bb869afcb9c1773b53643f7cdc2c1e0
 +    return decide_pcie_ipc_profile(requested, [t for t in gathered if t is not None])
 diff --git a/flashinfer/comm/pcie_ipc_tuning.py b/flashinfer/comm/pcie_ipc_tuning.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..cd5346fbd8c0fe2cde52db134d56ebc104810789
+index 00000000..ba4bf66b
 --- /dev/null
 +++ b/flashinfer/comm/pcie_ipc_tuning.py
-@@ -0,0 +1,518 @@
+@@ -0,0 +1,530 @@
 +"""
 +Copyright (c) 2026 by FlashInfer team.
 +
@@ -2854,6 +2861,25 @@ index 0000000000000000000000000000000000000000..cd5346fbd8c0fe2cde52db134d56ebc1
 +    return tuple(b for b in batches if b * hidden <= max_numel)
 +
 +
++def warn_no_tune_group(stacklevel: int = 2) -> None:
++    """Say why a tuning session left this collective untuned.
++
++    Raised from two places that reach the same dead end -- the runner, when the
++    autotuner does ask it for candidates, and the workspace, when it declines
++    to ask at all. The generic "nothing is tuned" advice does not fit here: the
++    caller *is* tuning, so telling them to tune is a dead end. What they are
++    missing is the reduction group, and that is what this names.
++    """
++    warnings.warn(
++        "PCIe IPC all-reduce skipped autotuning: no matching "
++        "autotune process group is installed on every rank. Call "
++        "PcieIpcAllReduceWorkspace.tune(), or install one with "
++        "set_autotune_process_group() before entering autotune().",
++        RuntimeWarning,
++        stacklevel=stacklevel,
++    )
++
++
 +class PcieIpcAllReduceRunner(TunableRunner):
 +    """Adapts the all-reduce to the autotuner, and screens candidates first.
 +
@@ -2951,14 +2977,7 @@ index 0000000000000000000000000000000000000000..cd5346fbd8c0fe2cde52db134d56ebc1
 +            # over the candidate timings the ranks would argmin independently
 +            # and pick different kernels, which this protocol does not survive.
 +            # Offering only the seed degrades that into a no-op.
-+            warnings.warn(
-+                "PCIe IPC all-reduce skipped autotuning: no matching "
-+                "autotune process group is installed on every rank. Call "
-+                "PcieIpcAllReduceWorkspace.tune(), or install one with "
-+                "set_autotune_process_group() before entering autotune().",
-+                RuntimeWarning,
-+                stacklevel=2,
-+            )
++            warn_no_tune_group(stacklevel=3)
 +            return [TABLE_TACTIC]
 +
 +        tactics = candidate_tactics(ws.world_size, ws.max_blocks)
@@ -3037,7 +3056,7 @@ index 0000000000000000000000000000000000000000..cd5346fbd8c0fe2cde52db134d56ebc1
 +    "tuned_batches_for",
 +]
 diff --git a/flashinfer/jit/__init__.py b/flashinfer/jit/__init__.py
-index b2ed55bfd28fbfa0e656f22f923ca24347142a16..aa28cedf43c287734310e54c66ca1f44756e2f98 100644
+index b2ed55bf..aa28cedf 100644
 --- a/flashinfer/jit/__init__.py
 +++ b/flashinfer/jit/__init__.py
 @@ -84,6 +84,7 @@ from .comm import gen_comm_alltoall_module as gen_comm_alltoall_module
@@ -3049,7 +3068,7 @@ index b2ed55bfd28fbfa0e656f22f923ca24347142a16..aa28cedf43c287734310e54c66ca1f44
  from .comm import gen_dcp_alltoall_module as gen_dcp_alltoall_module
  from .dsv3_optimizations import (
 diff --git a/flashinfer/jit/comm.py b/flashinfer/jit/comm.py
-index 3facecf44ad7516af031db34d6572f7cbf2d7249..4aeb49134dbb470eaf130391ea54d312043a4477 100644
+index 3facecf4..4aeb4913 100644
 --- a/flashinfer/jit/comm.py
 +++ b/flashinfer/jit/comm.py
 @@ -211,6 +211,66 @@ def gen_vllm_comm_module() -> JitSpec:
@@ -3120,7 +3139,7 @@ index 3facecf44ad7516af031db34d6572f7cbf2d7249..4aeb49134dbb470eaf130391ea54d312
      return gen_jit_spec(
          "ulysses_a2a",
 diff --git a/flashinfer/trace/templates/comm.py b/flashinfer/trace/templates/comm.py
-index 4a4ea6b7752994c6a764a747ff63714d2bc8b195..7bfaf537f2646cef9ba8f34c2a98951870b7f7d3 100644
+index 4a4ea6b7..7bfaf537 100644
 --- a/flashinfer/trace/templates/comm.py
 +++ b/flashinfer/trace/templates/comm.py
 @@ -282,3 +282,81 @@ decode_cp_a2a_alltoall_trace = TraceTemplate(
@@ -3207,7 +3226,7 @@ index 4a4ea6b7752994c6a764a747ff63714d2bc8b195..7bfaf537f2646cef9ba8f34c2a989518
 +)
 diff --git a/include/flashinfer/comm/pcie_ipc_all_reduce.cuh b/include/flashinfer/comm/pcie_ipc_all_reduce.cuh
 new file mode 100644
-index 0000000000000000000000000000000000000000..0f989d83c6bfebf3a35a5c010cc6fdfae95941ca
+index 00000000..0f989d83
 --- /dev/null
 +++ b/include/flashinfer/comm/pcie_ipc_all_reduce.cuh
 @@ -0,0 +1,2247 @@
@@ -5459,7 +5478,7 @@ index 0000000000000000000000000000000000000000..0f989d83c6bfebf3a35a5c010cc6fdfa
 +
 +#endif  // FLASHINFER_COMM_PCIE_IPC_ALL_REDUCE_CUH_
 diff --git a/scripts/task_test_single_node_comm_kernels.sh b/scripts/task_test_single_node_comm_kernels.sh
-index 071a4e45cb472506c572dba81609e54acc4b138f..daea0d8a1e6b03084966fcc3dfe2c0909419f846 100644
+index 12d9aa3d..438292e6 100644
 --- a/scripts/task_test_single_node_comm_kernels.sh
 +++ b/scripts/task_test_single_node_comm_kernels.sh
 @@ -28,6 +28,20 @@ python -c "import nvshmem.core" 2>/dev/null || pip install --no-deps nvshmem4py-
@@ -5485,7 +5504,7 @@ index 071a4e45cb472506c572dba81609e54acc4b138f..daea0d8a1e6b03084966fcc3dfe2c090
  pytest -s tests/comm/test_trtllm_allreduce_fusion.py
 diff --git a/tests/comm/test_cuda_ipc.py b/tests/comm/test_cuda_ipc.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..f133df39df897147164fd7d177011d4fabfe955c
+index 00000000..f133df39
 --- /dev/null
 +++ b/tests/comm/test_cuda_ipc.py
 @@ -0,0 +1,97 @@
@@ -5588,7 +5607,7 @@ index 0000000000000000000000000000000000000000..f133df39df897147164fd7d177011d4f
 +        assert cuda_ipc.find_loaded_library("libcudart") == expected
 diff --git a/tests/comm/test_pcie_ipc_all_reduce.py b/tests/comm/test_pcie_ipc_all_reduce.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..ea895600fcb77f3b1294ebe98eccce112c6c1ae1
+index 00000000..ea895600
 --- /dev/null
 +++ b/tests/comm/test_pcie_ipc_all_reduce.py
 @@ -0,0 +1,1373 @@
@@ -6967,7 +6986,7 @@ index 0000000000000000000000000000000000000000..ea895600fcb77f3b1294ebe98eccce11
 +    multi_process_parallel(world_size, _graph_capture_worker, timeout_s=300)
 diff --git a/tests/comm/test_pcie_ipc_cross_island_race.py b/tests/comm/test_pcie_ipc_cross_island_race.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..e43c3edaf2443ccd7d166e1a05f032db036869ac
+index 00000000..e43c3eda
 --- /dev/null
 +++ b/tests/comm/test_pcie_ipc_cross_island_race.py
 @@ -0,0 +1,212 @@
@@ -7185,7 +7204,7 @@ index 0000000000000000000000000000000000000000..e43c3edaf2443ccd7d166e1a05f032db
 +        multi_process_parallel(4, _grid_change_worker, timeout_s=90)
 diff --git a/tests/comm/test_pcie_ipc_policy.py b/tests/comm/test_pcie_ipc_policy.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..59dd0f00699fa8661b6f78075c8968ff3626420a
+index 00000000..59dd0f00
 --- /dev/null
 +++ b/tests/comm/test_pcie_ipc_policy.py
 @@ -0,0 +1,522 @@
@@ -7713,7 +7732,7 @@ index 0000000000000000000000000000000000000000..59dd0f00699fa8661b6f78075c8968ff
 +    )
 diff --git a/tests/comm/test_pcie_ipc_tuning.py b/tests/comm/test_pcie_ipc_tuning.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..b4fabc4500377ded6abd6d0a79c961b49cc62b8c
+index 00000000..b4fabc45
 --- /dev/null
 +++ b/tests/comm/test_pcie_ipc_tuning.py
 @@ -0,0 +1,520 @@
@@ -8237,3 +8256,15 @@ index 0000000000000000000000000000000000000000..b4fabc4500377ded6abd6d0a79c961b4
 +    assert tuner.loaded == [workspace._tune_cache]
 +    assert tuner.lookups == 1
 +    assert result == IpcLaunchConfig(16, 256, IpcVariant.STAGED)
+diff --git a/tests/trace/template_registry.py b/tests/trace/template_registry.py
+index d2f7c253..999468a2 100644
+--- a/tests/trace/template_registry.py
++++ b/tests/trace/template_registry.py
+@@ -42,6 +42,7 @@ _TRACE_REGISTRATION_MODULES = (
+     "flashinfer.cascade",
+     "flashinfer.comm.allreduce",
+     "flashinfer.comm.dcp_alltoall",
++    "flashinfer.comm.pcie_ipc_ar",
+     "flashinfer.concat_ops",
+     "flashinfer.cudnn.decode",
+     "flashinfer.cudnn.prefill",

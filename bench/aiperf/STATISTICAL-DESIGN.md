@@ -53,6 +53,20 @@ context interval. It requires:
 - monotonic counters;
 - at least 1 second and 20 metric scrapes.
 
+The scrape-count requirement is authoritative for sampling density, so the
+duration floor is a backstop only. Successive floors of 7.0, 6.5, and 6.0
+seconds each rejected otherwise valid equal-context intervals that contained
+the required 20 scrapes, and each rejection cost a campaign restart without
+changing any measured value. The floor is now 1 second: the 20-scrape
+requirement, the fixed context interval, and the occupancy, queue, and
+prefill controls decide admission.
+
+Loosening this threshold does not invalidate results measured under a
+stricter one. The floor only admits or rejects a window; it does not change
+the slope computed for an admitted window. Every retained interval that
+passed a 6.0-, 6.5-, or 7.0-second floor also passes this one, so previously
+published tables remain directly comparable.
+
 Client throughput includes fill and drain and is therefore not used as the
 fixed-window engine clock. ITL is retained as the user-facing decode measure.
 Request latency is a secondary integrated measurement of the fixed request.

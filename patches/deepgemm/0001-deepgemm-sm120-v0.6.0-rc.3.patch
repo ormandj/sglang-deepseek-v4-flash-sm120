@@ -1,5 +1,5 @@
 diff --git a/csrc/apis/einsum.hpp b/csrc/apis/einsum.hpp
-index 781701b4c74ab22878f4abd447b93c0fa8e28339..11ca6b31818064389b69125150bef4196433e83a 100644
+index 781701b..11ca6b3 100644
 --- a/csrc/apis/einsum.hpp
 +++ b/csrc/apis/einsum.hpp
 @@ -197,7 +197,8 @@ static void fp8_bmm(const torch::Tensor& a, const torch::Tensor& sfa,
@@ -13,7 +13,7 @@ index 781701b4c74ab22878f4abd447b93c0fa8e28339..11ca6b31818064389b69125150bef419
          return;
      }
 diff --git a/csrc/apis/gemm.hpp b/csrc/apis/gemm.hpp
-index 444ab6f464cb6429899b74e444706f44c80a1ae3..1b7012014e7b805943b9779d40f11a645e13c949 100644
+index 444ab6f..1b70120 100644
 --- a/csrc/apis/gemm.hpp
 +++ b/csrc/apis/gemm.hpp
 @@ -144,9 +144,10 @@ static void fp8_fp4_gemm_nt_sm120(const std::pair<torch::Tensor, torch::Tensor>&
@@ -29,7 +29,7 @@ index 444ab6f464cb6429899b74e444706f44c80a1ae3..1b7012014e7b805943b9779d40f11a64
      } else {
          sm120_fp8_fp4_gemm_1d1d(a_data, sfa, b_data, sfb, c, d, m, n, k, gran_k_a, gran_k_b,
 diff --git a/csrc/jit_kernels/heuristics/sm120.hpp b/csrc/jit_kernels/heuristics/sm120.hpp
-index 0dcdcc8675ac8219d5f55ad147e653c9b4468fbc..50ebf6e27fae18cc74fbe8617970b09f86732c59 100644
+index 0dcdcc8..50ebf6e 100644
 --- a/csrc/jit_kernels/heuristics/sm120.hpp
 +++ b/csrc/jit_kernels/heuristics/sm120.hpp
 @@ -326,6 +326,18 @@ struct SM120ArchSpec {
@@ -52,7 +52,7 @@ index 0dcdcc8675ac8219d5f55ad147e653c9b4468fbc..50ebf6e27fae18cc74fbe8617970b09f
          int split_k = ceil_div(target_blocks, num_mn_blocks);
  
 diff --git a/csrc/utils/layout.hpp b/csrc/utils/layout.hpp
-index bb09f21a724adb81f150db4569435baa6fbbc05f..1ea62a2f996b6d8f57a402e93bfd51155948fc5f 100644
+index bb09f21..1ea62a2 100644
 --- a/csrc/utils/layout.hpp
 +++ b/csrc/utils/layout.hpp
 @@ -1,6 +1,7 @@
@@ -81,15 +81,16 @@ index bb09f21a724adb81f150db4569435baa6fbbc05f..1ea62a2f996b6d8f57a402e93bfd5115
  static void major_check(const torch::Tensor& t) {
      const auto dim = t.dim();
 diff --git a/sgl_deep_gemm/VERSION b/sgl_deep_gemm/VERSION
-index bd52db81d0cdfa45b8ccaf4e811f178160eb261e..802bbdd5c2891d284c8fd66550b2f509aef86118 100644
+index bd52db8..a8c3350 100644
 --- a/sgl_deep_gemm/VERSION
 +++ b/sgl_deep_gemm/VERSION
 @@ -1 +1 @@
 -0.0.0
 \ No newline at end of file
-+0.0.0+sm120jit3
++0.0.0+sm120jit4
+\ No newline at end of file
 diff --git a/sgl_deep_gemm/run_tests.sh b/sgl_deep_gemm/run_tests.sh
-index 86dba4b4c910abf2fe5e28f5cf1c0a89c3323046..99c7164d97717330e917660c41684b12f638297d 100755
+index ab983d0..22fb062 100755
 --- a/sgl_deep_gemm/run_tests.sh
 +++ b/sgl_deep_gemm/run_tests.sh
 @@ -110,6 +110,7 @@ DEFAULT_SINGLE_GPU_TESTS=(
@@ -102,7 +103,7 @@ index 86dba4b4c910abf2fe5e28f5cf1c0a89c3323046..99c7164d97717330e917660c41684b12
    test_fp8_fp4.py
 diff --git a/sgl_deep_gemm/tests/test_runtime_compiled_dims.py b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..31ce742111551e9dda98d24ab26e399c66c95e7d
+index 0000000..31ce742
 --- /dev/null
 +++ b/sgl_deep_gemm/tests/test_runtime_compiled_dims.py
 @@ -0,0 +1,139 @@

@@ -8,15 +8,20 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.5.0-rc.1}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 TP_SIZE=${TP_SIZE:-2}
-CONTEXT_LENGTH=${CONTEXT_LENGTH:-774656}
+CONTEXT_LENGTH=${CONTEXT_LENGTH:-786432}
 CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
 SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=${SGLANG_ENABLE_PCIE_IPC_ALLREDUCE:-1}
 SGLANG_PCIE_IPC_MAX_NUMEL=${SGLANG_PCIE_IPC_MAX_NUMEL:-786432}
 SGLANG_PCIE_IPC_AUTOTUNE=${SGLANG_PCIE_IPC_AUTOTUNE:-1}
+# A request that omits max_tokens is admitted as unbounded and clamped only by
+# the remaining context, so one client can hold the KV pool for hours. This
+# ceiling is the model card's recommended 384K maximum output for the high and
+# max reasoning effort levels; it never truncates a conforming request.
+SGLANG_MAX_NEW_TOKENS_LIMIT=${SGLANG_MAX_NEW_TOKENS_LIMIT:-393216}
 
 if [[ ! -d "$MODEL_DIR" ]]; then
   echo "MODEL_DIR is not a directory: $MODEL_DIR" >&2
@@ -71,7 +76,8 @@ exec docker run --rm \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor \
   --env TILELANG_CACHE_DIR=/root/.cache/tilelang \
-  --env TVM_CACHE_DIR=/root/.cache/tvm \
+  --env TRITON_CACHE_DIR=/root/.cache/triton \
+  --env SGLANG_MAX_NEW_TOKENS_LIMIT="$SGLANG_MAX_NEW_TOKENS_LIMIT" \
   --env SGLANG_FP8_PAGED_MQA_LOGITS_TORCH=0 \
   --env SGLANG_OPT_USE_TILELANG_INDEXER=0 \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \

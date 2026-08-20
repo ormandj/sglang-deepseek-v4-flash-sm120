@@ -29,7 +29,7 @@ esac
 : "${AIPERF_REVISION:?AIPERF_REVISION must be set}"
 : "${BENCH_MODEL_REVISION:?BENCH_MODEL_REVISION must be set}"
 bench_dp_size=${BENCH_DP_SIZE:-1}
-decode_minimum_window_seconds=${DECODE_MINIMUM_WINDOW_SECONDS:-1.0}
+decode_minimum_window_seconds=${DECODE_MINIMUM_WINDOW_SECONDS:-1}
 case "$bench_dp_size" in
   *[!0-9]*|'') echo "error: BENCH_DP_SIZE must be a positive integer" >&2; exit 2 ;;
 esac

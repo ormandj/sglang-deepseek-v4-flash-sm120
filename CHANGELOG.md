@@ -4,6 +4,47 @@ This changelog records user-visible composition, runtime, and benchmark-tooling
 changes. Exact source revisions, effective trees, patch hashes, and image
 digests are recorded in each release bundle and its OCI labels.
 
+## v0.6.0-rc.3 - 2026-08-20
+
+### Changed
+
+- Refreshed SGLang, FlashInfer, and DeepGEMM to the 2026-08-19 source
+  composition recorded in `stack.lock.json`, and re-derived every carried pull
+  request against those new bases rather than re-applying the previous patch
+  set.
+- Raised the qualified capacity envelope to `--mem-fraction-static 0.93` with
+  `--context-length 786432`.
+- Started the `v24` runtime compilation-cache namespace.
+- Removed `TVM_CACHE_DIR` from the documented recipe; it was never read by this
+  image.
+- Added `SGLANG_MAX_NEW_TOKENS_LIMIT=393216` to the documented recipe, matching
+  the model card's recommended maximum output length for the `high` and `max`
+  reasoning effort levels.
+
+### Fixed
+
+- Bounded the DeepSeek-V4 paged indexer's MQA logits allocation against free
+  device memory, composed with #29927's SM120 metadata row cap. The unbounded
+  path allocated a dense FP32 `[query_rows x max_c4_seq_len]` tensor and could
+  request more memory than remained, killing both tensor-parallel ranks on a
+  long-context prefill.
+- Restored SGLang #34018's FP8 W_o_A GEMM on SM120. The SM120 post-process
+  block in `server_args.py` unconditionally disabled
+  `SGLANG_OPT_FP8_WO_A_GEMM`, so an explicit setting could not survive it and
+  the carried pull request had no effect. The setting is now honoured when it
+  was set explicitly.
+
+### Documented
+
+- Stated that `--context-length` is a total budget of prompt plus generated
+  tokens, not an input limit, and worked the arithmetic for a long-context
+  reasoning session against the KV pool.
+- Replaced the KV capacity table with measurements at 0.90, 0.93, and 0.95,
+  including near-limit and concurrent-request outcomes and the observed
+  free-memory floors. The previous table described 0.95 as passing; at the
+  current context setting it exhausts per-request workspace and kills a
+  scheduler rank.
+
 ## v0.5.0-rc.1 - 2026-08-18
 
 ### Changed
