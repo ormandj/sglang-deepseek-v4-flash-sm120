@@ -1,228 +1,192 @@
-# Running the image
+# Operating the image
 
-This candidate targets Linux x86_64 and NVIDIA RTX PRO 6000 Blackwell
-(SM120). The published measurements cover TP2. The same image and configurable
-launcher support larger tensor-parallel topologies, but this repository does
-not yet publish TP4 or TP8 performance results.
+Use the direct Docker command in [`README.md`](README.md) for the first start.
+This guide covers the decisions that follow: using the optional wrapper,
+changing topology or capacity, enabling hierarchical KV cache, and checking the
+result. It intentionally does not duplicate the canonical launch command.
 
-## Requirements
+## Keep the launch contract together
 
-- A driver compatible with CUDA 13.
-- Two or more SM120 GPUs visible to the container.
-- Docker and the NVIDIA Container Toolkit.
-- `uv` for downloading the model.
-- Persistent storage for the model and compiled-kernel cache.
+This image is qualified as a complete source-and-runtime configuration. The
+following groups are performance or capacity inputs, not cosmetic defaults:
 
-Check GPU passthrough:
+- the image tag and `v24` compilation-cache namespace;
+- FP8 KV cache, DSpARK block size 5, and the DeepSeek-V4 FP4 indexer;
+- HC prenorm, fused MHC post+pre, and FP8 W_o_A selectors;
+- PCIe-IPC all-reduce, its 786,432-element ceiling, and persisted autotuning;
+- the `0.93` static-memory fraction, 786,432 context, 8,192-token prefill
+  chunks, graph batch ceiling 32, and scheduler ceiling 48;
+- prefill/decode warmups and the 393,216-token generation ceiling.
 
-```bash
-docker run --rm --gpus all \
-  --entrypoint nvidia-smi \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3
-```
+Begin with the recorded combination. If you change one of these inputs, use a
+new cache directory when source or kernel shape changes, inspect the reported
+KV pool, warm every served shape, and run a near-limit request before relying on
+the deployment.
 
-## Model and cache
+## Optional wrapper
 
-```bash
-export MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731
-uvx --from huggingface-hub hf download \
-  deepseek-ai/DeepSeek-V4-Flash-0731 \
-  --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
-  --local-dir "$MODEL_DIR"
-
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24
-mkdir -p "$CACHE_DIR"
-```
-
-`v24` is the cache schema for this source composition. Do not reuse a cache
-directory from another image source tree.
-
-## Start TP2
+The wrapper validates paths and basic topology inputs, then runs the same
+configuration shown in the README:
 
 ```bash
-MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
   ./examples/serve-dsv4-0731.sh
 ```
 
-The script defaults to the candidate tag, GPUs 0 and 1, TP2, and a 774,656
-context length. `IMAGE`, `PORT`, `CUDA_VISIBLE_DEVICES`, `TP_SIZE`,
-`CONTEXT_LENGTH`, and `CONTAINER_NAME` may be overridden. The number of devices
-listed in `CUDA_VISIBLE_DEVICES` must equal `TP_SIZE`. Record all overrides with
-results.
+The required variables are `MODEL_DIR` and `CACHE_DIR`. Available overrides are:
 
-The qualified runtime enables FlashInfer PCIe-IPC all-reduce for eligible
-decode reductions. `--disable-custom-all-reduce` disables SGLang's legacy
-custom all-reduce so those reductions reach the optional FlashInfer consumer.
-Unsupported and prefill-sized reductions use NCCL. PCIe-IPC all-gather is
-absent, and TRT/MNNVL fusion remains disabled.
+| Variable | Default | Purpose |
+|---|---|---|
+| `IMAGE` | current GHCR candidate | Run another immutable image reference |
+| `PORT` | `8000` | Host port mapped to container port 8000 |
+| `CUDA_VISIBLE_DEVICES` | `0,1` | GPUs exposed to the server process |
+| `TP_SIZE` | `2` | Tensor-parallel size; must match the device count |
+| `CONTEXT_LENGTH` | `786432` | Total prompt-plus-generation budget per request |
+| `CONTAINER_NAME` | `dsv4-flash-sglang` | Docker container name |
+| `SGLANG_MAX_NEW_TOKENS_LIMIT` | `393216` | Server-wide generation ceiling |
+| `SGLANG_ENABLE_PCIE_IPC_ALLREDUCE` | `1` | Qualified PCIe-IPC reduction path |
+| `SGLANG_PCIE_IPC_MAX_NUMEL` | `786432` | PCIe-IPC eligibility ceiling |
+| `SGLANG_PCIE_IPC_AUTOTUNE` | `1` | Persist machine-local tuning choices |
+| `HICACHE` | `0` | Enable the host-memory KV tier |
+| `HICACHE_RATIO` | `10` | Host pool as a multiple of the device pool |
+| `HICACHE_WRITE_POLICY` | `write_through_selective` | Host-tier write policy |
+| `HICACHE_STORAGE_DIR` | unset | Host path for the optional disk tier |
+| `HICACHE_STORAGE_PREFETCH_POLICY` | `timeout` | Disk-tier fetch policy |
 
-The launch script sets `SGLANG_OPT_DEEPGEMM_HC_PRENORM=1`. The carried SM120
-implementation selects DeepGEMM for large-token prefill batches and retains
-the existing fallback below its 1,024-token dispatch threshold.
-
-The launch script also sets `SGLANG_OPT_FUSE_MHC_POST_PRE=1`. The fused
-implementation and runtime selector are already present in the image; open
-[SGLang PR #34019](https://github.com/sgl-project/sglang/pull/34019) changes the
-upstream SM120 default and is tracked rather than applied to this image.
-
-The script additionally sets `SGLANG_OPT_FP8_WO_A_GEMM=1` to select the
-SM120/SM121 target-model FP8 W_o_A path carried from upstream PR #34018.
-
-The first start compiles SM120 kernels into `$CACHE_DIR`. The server performs
-the qualified prefill and decode-path warmups before it reports ready. Reuse
-the same v24 cache for subsequent starts of the identical image; do not time
-compilation as serving startup or inference.
-
-## Health and API
+Example TP4 invocation:
 
 ```bash
-curl -fsS http://localhost:8000/health
-curl -fsS http://localhost:8000/v1/models | jq -r '.data[].id'
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+TP_SIZE=4 \
+MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24-tp4 \
+  ./examples/serve-dsv4-0731.sh
 ```
 
-A deterministic smoke request:
+The image and launcher support TP4 and TP8, but the published capacity and
+performance results are TP2. Do not copy the TP2 pool or context claims to
+another topology without measuring it.
 
-```bash
-curl -fsS http://localhost:8000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "deepseek-v4-flash",
-    "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
-    "max_tokens": 32,
-    "temperature": 0
-  }' | jq -r '.choices[0].message.content'
-```
+## Capacity and long outputs
 
-Agentic requests should follow the model card: temperature `1.0` and top-p
-`0.95`. The deterministic engine gate uses temperature `0` to isolate engine
-behavior.
+`--mem-fraction-static` reserves device memory for the static KV pool and
+trades capacity directly against request workspace. The following TP2 sweep
+used `--context-length 786432`; pool and free-memory values are SGLang startup
+reports.
 
-## Capacity
+| Static fraction | KV tokens | Free after startup | Near-limit request | Four 250K requests |
+|---:|---:|---:|---|---|
+| 0.90 | 474,624 | 5,488 MiB | 470K passes; 4,322 MiB floor | passes |
+| **0.93 (shipped)** | **801,536** | **2,628 MiB** | **780K passes; 120 MiB floor** | **passes; 120 MiB floor** |
+| 0.95 | 1,019,648 | 440 MiB | scheduler rank crashes | not reached |
 
-The TP2 script uses `--context-length 786432`. Confirm the actual pool after
-every image, topology, memory-fraction, or graph change:
+The 0.95 server starts, but a 550,000-token request exhausts workspace. Choose
+this setting by completed near-limit work, not by the startup pool alone. The
+shipped 0.93 result is also tight: its 120 MiB floor is a measured pass, not a
+large safety margin.
+
+`--context-length` is the total prompt plus generated-token budget. A request
+is rejected when `input + max_tokens` exceeds it. If `max_tokens` is omitted,
+the server treats generation as unbounded, clamps it to the remaining context,
+and then applies `SGLANG_MAX_NEW_TOKENS_LIMIT`.
+
+For example, a session with 400K prompt/context tokens, 300K reasoning tokens,
+and a 30K answer uses about 730K of the 786,432-token request budget. One such
+request fits the 801,536-token pool; two do not remain resident together.
+
+After every image, topology, memory-fraction, context, or graph change:
 
 ```bash
 curl -fsS http://localhost:8000/get_server_info \
   | jq '{max_total_num_tokens, max_req_input_len}'
 ```
 
-Do not copy the TP2 context limit to TP4 without checking the TP4 server
-information and completing a near-limit request.
+Then complete a request near the intended limit. A successful startup does not
+exercise peak prefill workspace.
 
 ## Hierarchical KV cache
 
-Disabled by default. It addresses one specific failure: several long-context
-conversations sharing a deployment whose device pool cannot hold them all at
-once. In that state the prefix cache evicts between turns, every turn
-re-prefills its entire context, and the GPU spends its time recomputing
-prefixes it already had.
+HiCache is off by default. Enable it when multiple long-running conversations
+cycle through a deployment and returning turns lose their prefix-cache hits.
+It adds a pinned host-memory tier (L2) and, optionally, a persistent disk tier
+(L3). It does not enlarge the device pool or increase resident concurrency.
 
-Decide by measuring. `--enable-cache-report` (already in the recorded
-configuration) makes the server report reuse per request:
+Check real reuse first. `--enable-cache-report` is already enabled, so a
+response from `/generate` includes `prompt_tokens` and `cached_tokens` in
+`meta_info`. The `/metrics` endpoint also exposes aggregate cached and evicted
+token counters. If returning requests already retain nearly all prompt tokens,
+HiCache has little to recover.
 
-```bash
-curl -fsS http://localhost:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"input_ids": [1,2,3], "sampling_params": {"max_new_tokens": 8}}' \
-  | jq '.meta_info | {prompt_tokens, cached_tokens}'
-```
-
-Send a conversation twice. If the second call's `cached_tokens` is close to
-`prompt_tokens`, the cache is holding and HiCache gains you nothing. If it
-collapses toward zero under real concurrency, prefixes are being evicted and
-this is your problem. `sglang:cached_tokens_total` and
-`sglang:evicted_tokens_total` on `/metrics` show the same thing in aggregate.
-
-### Enabling it
-
-| variable | default | meaning |
-|---|---|---|
-| `HICACHE` | `0` | `1` enables the host (L2) tier |
-| `HICACHE_RATIO` | `10` | host pool as a multiple of the device pool |
-| `HICACHE_WRITE_POLICY` | `write_through_selective` | `write_through`, `write_through_selective`, `write_back` |
-| `HICACHE_STORAGE_DIR` | unset | host path for the on-disk (L3) tier; unset means L2 only |
-| `HICACHE_STORAGE_PREFETCH_POLICY` | `timeout` | `best_effort`, `wait_complete`, `timeout` |
+Enable the host tier with the wrapper:
 
 ```bash
 HICACHE=1 HICACHE_RATIO=10 \
-MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
   ./examples/serve-dsv4-0731.sh
 ```
 
-### Sizing
-
-`HICACHE_RATIO` multiplies the device pool. Take the total context of the
-sessions you want covered and divide by `max_total_num_tokens`:
+The ratio multiplies the device pool. Ten full-context sessions require:
 
 ```text
-ten sessions x 786,432 tokens = 7,864,320
-7,864,320 / 801,536           = 9.8  ->  ratio 10
+10 x 786,432 / 801,536 = 9.8  ->  HICACHE_RATIO=10
 ```
 
-Confirm it at startup. The server logs each host pool as it allocates, and the
-page counts should be your ratio times the device pool's:
+On the measured TP2 host, ratio 10 pins about 61 GiB per rank, or 122 GiB in
+total. Pinned memory is not reclaimable by the kernel, so size it against free
+RAM. Confirm the allocated pages in startup logs.
 
-```text
-Allocating 24.62 GB host memory for V4 paged pool 'deepseek_v4_c4' (pages=31310, ...)
-Tree cache initialized: ... hicache_attached=True
-```
-
-On this hardware ratio 10 costs about 61 GiB per rank, ~122 GiB across TP2.
-**That memory is pinned and cannot be reclaimed by the kernel**, so it is
-subtracted from page cache for the lifetime of the process. Size it against
-free RAM, not total RAM.
-
-The device-side envelope is untouched: `max_total_num_tokens`, `context_len`,
-and free GPU memory are identical with HiCache on and off.
-
-### The storage tier
-
-The host tier is RAM and is lost on restart, so every active conversation pays
-one full cold prefill afterwards. Those cold prefills serialize, which on a
-busy deployment is minutes of queue. Pointing `HICACHE_STORAGE_DIR` at a local
-disk persists prefixes across restarts:
+For persistence across restarts, add a storage path:
 
 ```bash
-HICACHE=1 HICACHE_RATIO=10 HICACHE_STORAGE_DIR=/srv/hicache \
-MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+HICACHE=1 \
+HICACHE_RATIO=10 \
+HICACHE_STORAGE_DIR=/srv/hicache \
+MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
   ./examples/serve-dsv4-0731.sh
 ```
 
-Entries are content-addressed, so identical prefixes deduplicate and nothing
-depends on process state. Budget roughly the same bytes per token as the host
-tier. `SGLANG_HICACHE_FILE_BACKEND_MAX_SIZE`,
-`SGLANG_HICACHE_FILE_BACKEND_EVICTION_RATIO`, and
-`SGLANG_HICACHE_FILE_BACKEND_MIN_FREE_SPACE` bound its disk use.
+`HICACHE_STORAGE_PREFETCH_POLICY` may be `best_effort`, `wait_complete`, or
+`timeout`. The default `timeout` waits briefly before falling back to prefill.
+The file-backend size, eviction ratio, and minimum-free-space environment
+variables exposed by SGLang can bound disk use.
 
-`HICACHE_STORAGE_PREFETCH_POLICY` decides what happens when a fetch is slow:
-`wait_complete` guarantees the hit but ties time-to-first-token to disk
-latency, `best_effort` never stalls but may discard the fetch and re-prefill,
-and `timeout` waits briefly and then gives up.
+Measured at 1.14x device-pool oversubscription with three 300K sessions:
 
-### What it does not do
+| Returning-turn metric | HiCache off | HiCache on |
+|---|---:|---:|
+| Prefill | 18–20 s | about 0.5 s |
+| Prefix reuse | 64% | 99.3% |
+| Tokens recomputed over two turns | 657,216 | 13,632 |
 
-It does not raise concurrency. The device pool is unchanged, so the same number
-of sessions stay resident and `#running-req` does not move; only the cost of
-swapping between them changes.
+The first uncached prefill was about 10% slower because it also populated the
+host tier. HiCache is intended for repeated long conversations, not one-shot
+traffic.
 
-It does not help a first, uncached prefill -- that gets about 10% slower,
-because the same pass also populates the host tier. Prompts whose uncached
-extent exceeds `--chunked-prefill-size` are additionally processed one at a
-time, so a burst of cold long contexts queues serially regardless of this
-setting. HiCache's value is in the second and later turns of a conversation.
+## Exposure and client settings
 
-## Benchmarking
+The quickstart publishes port 8000 on all host interfaces and does not add
+authentication. Bind or firewall the port appropriately, or put the service
+behind an authenticated proxy before exposing it to an untrusted network.
 
-The executable harness lives in [`bench/aiperf`](bench/aiperf). Clients run
-inside the selected serving pod against localhost. The frozen protocol uses:
+Agentic requests should follow the model card defaults: temperature `1.0` and
+top-p `0.95`. The temperature-0 request in the README is only a deterministic
+engine smoke test.
 
-- identical 16,384-token input and 4,096-token output shapes at C1–C32;
-- five sequential fixed-seed repetitions at every published supported
-  concurrency;
-- separate cache-cold prefill diagnostics;
-- full GSM8K correctness.
+## Common checks
 
-The published `v0.6.0-rc.3` panel uses five measured repetitions at every
-supported concurrency and prefill length. All measured cells run sequentially
-on one unchanged process after one warmup per distinct shape.
+- **Startup is slow once:** the first start compiles kernels and performs shape
+  warmups. Reuse the matching cache; do not treat cold compilation as serving
+  latency.
+- **A large request kills one TP rank:** lower the static memory fraction or
+  request envelope. Free startup memory and a large KV count are not sufficient
+  evidence.
+- **Returning long turns prefill again:** inspect cached/evicted-token metrics,
+  then size HiCache to the working set if prefixes are cycling out.
+- **Changing TP:** use one listed GPU per TP rank, isolate the compiled cache by
+  topology when kernel shapes change, and remeasure capacity.
+
+For performance and quality qualification, use [`BENCHMARKS.md`](BENCHMARKS.md)
+and the executable protocol in [`bench/aiperf/README.md`](bench/aiperf/README.md).

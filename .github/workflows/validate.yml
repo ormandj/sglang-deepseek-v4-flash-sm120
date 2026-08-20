@@ -30,5 +30,7 @@ jobs:
         run: jq -e . release.json stack.lock.json bench/results/*.json >/dev/null
       - name: Validate release contract
         run: ./scripts/validate-release.sh
+      - name: Validate documentation contract
+        run: ./scripts/validate-docs.sh
       - name: Verify the locked stack reproduces
         run: ./scripts/verify-patches.sh
