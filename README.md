@@ -131,6 +131,73 @@ three 4,096-token requests completed with no failures at the same floor. KV for
 a long sequence is drawn from the pre-allocated pool, so a long generation does
 not move the free-memory floor the way a long prompt's workspace does.
 
+### Hierarchical KV cache (HiCache)
+
+Off by default. Turn it on when several long-context conversations share one
+deployment.
+
+The device pool holds a fixed number of tokens (801,536 in the configuration
+above). Two 400K-context sessions fill it, so with more concurrent sessions
+than that the prefix cache evicts between turns and every turn re-prefills its
+whole context. HiCache adds a host-memory tier (L2) and an optional on-disk
+tier (L3): an evicted prefix is kept and fetched back instead of recomputed.
+
+Measured here at 1.14x oversubscription, three 300K sessions taking successive
+turns:
+
+| | off | on |
+|---|---:|---:|
+| prefill on a returning turn | 18-20 s | **~0.5 s** |
+| prefix reuse | 64% | **99.3%** |
+| tokens recomputed over two turns | 657,216 | **13,632** |
+
+Add these to the `docker run` above:
+
+```bash
+  --enable-hierarchical-cache \
+  --hicache-ratio 10 \
+  --hicache-write-policy write_through_selective \
+```
+
+`--hicache-ratio` is the sizing knob: the host pool holds that multiple of the
+device pool's tokens. Divide the total context of the sessions you want covered
+by `max_total_num_tokens` to choose it. Ratio 10 covers ten sessions at the full
+786,432-token context and costs about 122 GiB across TP2. **Host memory is
+pinned**, so it is not reclaimable by the kernel; size it against free RAM
+deliberately.
+
+To also persist prefixes across restarts, mount a directory and add the storage
+tier — the host tier is RAM and does not survive a restart:
+
+```bash
+  --volume /srv/hicache:/hicache \
+  --env SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR=/hicache \
+  --enable-hierarchical-cache \
+  --hicache-ratio 10 \
+  --hicache-write-policy write_through_selective \
+  --hicache-storage-backend file \
+  --hicache-storage-prefetch-policy timeout \
+```
+
+The wrapper script exposes the same choices as `HICACHE`, `HICACHE_RATIO`,
+`HICACHE_WRITE_POLICY`, `HICACHE_STORAGE_DIR`, and
+`HICACHE_STORAGE_PREFETCH_POLICY`:
+
+```bash
+HICACHE=1 HICACHE_RATIO=10 HICACHE_STORAGE_DIR=/srv/hicache \
+MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+  ./examples/serve-dsv4-0731.sh
+```
+
+Two things HiCache does not do. It does not increase concurrency: the device
+pool is unchanged, so the same number of sessions stay resident and
+`#running-req` does not move. And it makes a first, uncached prefill slightly
+slower (about 10% here) because that prefill also populates the host tier. It
+is the wrong trade for one-shot traffic and the right one for conversations.
+
+[RUN.md](RUN.md) covers sizing, the storage tier, and how to confirm it is
+working.
+
 A configuration can boot cleanly and still fail later on a large request, so
 validate with a near-limit request rather than trusting startup:
 

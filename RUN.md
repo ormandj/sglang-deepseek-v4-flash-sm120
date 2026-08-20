@@ -110,6 +110,108 @@ curl -fsS http://localhost:8000/get_server_info \
 Do not copy the TP2 context limit to TP4 without checking the TP4 server
 information and completing a near-limit request.
 
+## Hierarchical KV cache
+
+Disabled by default. It addresses one specific failure: several long-context
+conversations sharing a deployment whose device pool cannot hold them all at
+once. In that state the prefix cache evicts between turns, every turn
+re-prefills its entire context, and the GPU spends its time recomputing
+prefixes it already had.
+
+Decide by measuring. `--enable-cache-report` (already in the recorded
+configuration) makes the server report reuse per request:
+
+```bash
+curl -fsS http://localhost:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"input_ids": [1,2,3], "sampling_params": {"max_new_tokens": 8}}' \
+  | jq '.meta_info | {prompt_tokens, cached_tokens}'
+```
+
+Send a conversation twice. If the second call's `cached_tokens` is close to
+`prompt_tokens`, the cache is holding and HiCache gains you nothing. If it
+collapses toward zero under real concurrency, prefixes are being evicted and
+this is your problem. `sglang:cached_tokens_total` and
+`sglang:evicted_tokens_total` on `/metrics` show the same thing in aggregate.
+
+### Enabling it
+
+| variable | default | meaning |
+|---|---|---|
+| `HICACHE` | `0` | `1` enables the host (L2) tier |
+| `HICACHE_RATIO` | `10` | host pool as a multiple of the device pool |
+| `HICACHE_WRITE_POLICY` | `write_through_selective` | `write_through`, `write_through_selective`, `write_back` |
+| `HICACHE_STORAGE_DIR` | unset | host path for the on-disk (L3) tier; unset means L2 only |
+| `HICACHE_STORAGE_PREFETCH_POLICY` | `timeout` | `best_effort`, `wait_complete`, `timeout` |
+
+```bash
+HICACHE=1 HICACHE_RATIO=10 \
+MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+  ./examples/serve-dsv4-0731.sh
+```
+
+### Sizing
+
+`HICACHE_RATIO` multiplies the device pool. Take the total context of the
+sessions you want covered and divide by `max_total_num_tokens`:
+
+```text
+ten sessions x 786,432 tokens = 7,864,320
+7,864,320 / 801,536           = 9.8  ->  ratio 10
+```
+
+Confirm it at startup. The server logs each host pool as it allocates, and the
+page counts should be your ratio times the device pool's:
+
+```text
+Allocating 24.62 GB host memory for V4 paged pool 'deepseek_v4_c4' (pages=31310, ...)
+Tree cache initialized: ... hicache_attached=True
+```
+
+On this hardware ratio 10 costs about 61 GiB per rank, ~122 GiB across TP2.
+**That memory is pinned and cannot be reclaimed by the kernel**, so it is
+subtracted from page cache for the lifetime of the process. Size it against
+free RAM, not total RAM.
+
+The device-side envelope is untouched: `max_total_num_tokens`, `context_len`,
+and free GPU memory are identical with HiCache on and off.
+
+### The storage tier
+
+The host tier is RAM and is lost on restart, so every active conversation pays
+one full cold prefill afterwards. Those cold prefills serialize, which on a
+busy deployment is minutes of queue. Pointing `HICACHE_STORAGE_DIR` at a local
+disk persists prefixes across restarts:
+
+```bash
+HICACHE=1 HICACHE_RATIO=10 HICACHE_STORAGE_DIR=/srv/hicache \
+MODEL_DIR="$MODEL_DIR" CACHE_DIR="$CACHE_DIR" \
+  ./examples/serve-dsv4-0731.sh
+```
+
+Entries are content-addressed, so identical prefixes deduplicate and nothing
+depends on process state. Budget roughly the same bytes per token as the host
+tier. `SGLANG_HICACHE_FILE_BACKEND_MAX_SIZE`,
+`SGLANG_HICACHE_FILE_BACKEND_EVICTION_RATIO`, and
+`SGLANG_HICACHE_FILE_BACKEND_MIN_FREE_SPACE` bound its disk use.
+
+`HICACHE_STORAGE_PREFETCH_POLICY` decides what happens when a fetch is slow:
+`wait_complete` guarantees the hit but ties time-to-first-token to disk
+latency, `best_effort` never stalls but may discard the fetch and re-prefill,
+and `timeout` waits briefly and then gives up.
+
+### What it does not do
+
+It does not raise concurrency. The device pool is unchanged, so the same number
+of sessions stay resident and `#running-req` does not move; only the cost of
+swapping between them changes.
+
+It does not help a first, uncached prefill -- that gets about 10% slower,
+because the same pass also populates the host tier. Prompts whose uncached
+extent exceeds `--chunked-prefill-size` are additionally processed one at a
+time, so a burst of cold long contexts queues serially regardless of this
+setting. HiCache's value is in the second and later turns of a conversation.
+
 ## Benchmarking
 
 The executable harness lives in [`bench/aiperf`](bench/aiperf). Clients run
