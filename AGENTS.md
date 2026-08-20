@@ -19,6 +19,21 @@ experiments, and private diagnostic detail out of the public repository.
 - Use `uv` or `uvx` for Python execution and tooling. Do not invoke `python`,
   `python3`, `pip`, or `pip3` directly.
 
+## Workspace hygiene
+
+- Reuse the primary checkout or an existing task worktree before creating
+  another. A task may have at most one temporary worktree for this repository;
+  do not create disposable clones for audits or comparisons.
+- Keep the primary checkout clean and return it to `main` before handoff. Give
+  every temporary branch and directory one purpose and one same-task
+  disposition: pushed and retained for active review, removed after merge or
+  supersession, or reported with its exact dirty/unique state and reason.
+- Use fetched refs for read-only release and carry audits. Do not create backup,
+  date-suffixed, or iterative branches to preserve agent checkpoints.
+- At handoff, remove task worktrees and temporary artifacts, run
+  `git worktree prune`, and report anything intentionally retained. Cleanup is
+  a required release/documentation check, not a separate future task.
+
 ## Documentation ownership
 
 Each fact has one detailed owner. Other files may summarize it briefly and must
