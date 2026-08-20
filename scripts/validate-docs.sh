@@ -14,6 +14,9 @@ for tool in jq grep find wc tr; do
 done
 
 candidate_tag=$(jq -er '.candidate_tag' "$manifest")
+version=$(jq -er '.version' "$manifest")
+candidate=$(jq -er '.candidate' "$manifest")
+release_name="${version}-rc${candidate}"
 cache_schema=$(jq -er '.cache_schema' "$manifest")
 product=$(jq -er '.product' "$manifest")
 image="ghcr.io/ormandj/${product}:${candidate_tag}"
@@ -43,7 +46,7 @@ require_text() {
 require_text "$readme" "$image"
 require_text "$readme" "/srv/cache/sglang-dsv4-0731-${cache_schema}"
 require_text "$run_guide" "/srv/cache/sglang-dsv4-0731-${cache_schema}"
-require_text "$changelog" "## ${candidate_tag}"
+require_text "$changelog" "## ${release_name}"
 
 [[ $(grep -Fc -- 'docker run --rm' "$readme") -eq 1 ]] || {
   echo "README.md must contain exactly one canonical direct-Docker command" >&2
@@ -57,6 +60,7 @@ fi
 critical_launcher_values=(
   'CONTEXT_LENGTH=${CONTEXT_LENGTH:-786432}'
   'SGLANG_MAX_NEW_TOKENS_LIMIT=${SGLANG_MAX_NEW_TOKENS_LIMIT:-393216}'
+  'SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION=${SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION:-0.8}'
   'SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=${SGLANG_ENABLE_PCIE_IPC_ALLREDUCE:-1}'
   'SGLANG_PCIE_IPC_MAX_NUMEL=${SGLANG_PCIE_IPC_MAX_NUMEL:-786432}'
   'SGLANG_PCIE_IPC_AUTOTUNE=${SGLANG_PCIE_IPC_AUTOTUNE:-1}'
@@ -73,6 +77,7 @@ done
 
 critical_readme_values=(
   '--env SGLANG_MAX_NEW_TOKENS_LIMIT=393216'
+  '--env SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION=0.8'
   '--env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1'
   '--env SGLANG_OPT_FUSE_MHC_POST_PRE=1'
   '--env SGLANG_OPT_FP8_WO_A_GEMM=1'

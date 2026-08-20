@@ -5,16 +5,21 @@ results remain available in their immutable Git tags. Exact source revisions,
 effective trees, package versions, patch hashes, and image identity are recorded
 in [`stack.lock.json`](stack.lock.json) and the image's OCI labels.
 
-## v0.6.0-rc.3 — 2026-08-20
+## 0.7.0-rc1 — 2026-08-20
+
+The immutable image tag is `v0.7.0-rc.1`.
 
 ### Runtime and capacity
 
-- Refreshed the qualified SGLang, FlashInfer, and DeepGEMM source composition.
-- Restored the explicit SM120 FP8 W_o_A path and bounded the DeepSeek-V4 paged
-  indexer's large MQA-logits allocation against available device memory.
+- Refreshed SGLang, FlashInfer, and DeepGEMM from current upstream sources and
+  current carried pull-request heads.
+- Replaced the local DeepSeek-V4 logits-bound patch with the stronger upstream
+  row-slicing implementation and removed merged, redundant, and unsafe carries.
+- Set the paged-indexer live-memory fraction to the measured `0.8` starting
+  point while retaining its allocation bound.
 - Qualified `--mem-fraction-static 0.93`, a 786,432-token total context budget,
   an 801,536-token TP2 KV pool, and a 393,216-token server generation ceiling.
-- Started compilation-cache schema `v24` and retained pre-readiness prefill and
+- Started compilation-cache schema `v26` and retained pre-readiness prefill and
   decode-path warmups plus persisted PCIe-IPC autotuning.
 
 ### Serving documentation
@@ -23,8 +28,8 @@ in [`stack.lock.json`](stack.lock.json) and the image's OCI labels.
   validated wrapper as an optional path.
 - Documented which environment variables and flags form the measured launch
   contract and how to recheck capacity after changing them.
-- Added hierarchical KV-cache sizing, host-memory, disk-persistence, and
-  workload-fit guidance. HiCache remains disabled by default.
+- Kept hierarchical KV-cache host and bounded file-storage configuration
+  available through the optional wrapper. HiCache remains disabled by default.
 - Reorganized current performance, prefill, TP2 capacity, and quality evidence
   into paired SGLang/vLLM columns.
 
@@ -32,9 +37,6 @@ in [`stack.lock.json`](stack.lock.json) and the image's OCI labels.
 
 - Completed five decode repetitions at C1, C2, C4, C8, C16, and C32 and five
   cache-cold prefill requests at 8K, 32K, 64K, and 128K.
-- Completed GSM8K: 1,263 of 1,319 correct with zero request errors.
+- Completed GSM8K: 1,260 of 1,319 correct with zero request errors.
 - Completed a 780,000-token request, four concurrent 250,000-token requests,
-  and a mixed long/short generation batch at the shipped TP2 envelope.
-- Measured HiCache with three 300K sessions at 1.14x device-pool
-  oversubscription: returning-turn prefill fell from 18–20 seconds to about
-  0.5 seconds, while device-pool capacity remained unchanged.
+  and zero process restarts at the shipped TP2 envelope.

@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-20 CDT.
 
-This page reports the qualified SGLang `v0.6.0-rc.3` panel beside the retained
+This page reports the qualified SGLang `0.7.0-rc1` panel beside the retained
 vLLM r33 panel. Performance, capacity, and quality are separate measurements;
 the tables do not combine them into an overall score. Machine-readable
 summaries retain every measured repetition, distribution statistics, and raw
@@ -20,12 +20,12 @@ time per generated token.
 
 | C | SGLang forward/s | vLLM forward/s | SGLang synthetic tok/s | vLLM synthetic tok/s | SGLang ITL ms | vLLM ITL ms |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 64.372 | 66.575 | 355.9 | 255.2 | 2.967 | 3.886 |
-| 2 | 49.527 | 46.337 | 459.5 | 421.0 | 4.392 | 5.215 |
-| 4 | 33.253 | 33.074 | 646.5 | 616.0 | 6.668 | 7.082 |
-| 8 | 23.443 | 23.454 | 870.3 | 795.8 | 9.849 | 11.122 |
-| 16 | 17.863 | 15.865 | 1389.6 | 1097.2 | 14.065 | 17.111 |
-| 32 | 13.344 | — | 2049.6 | — | 21.899 | — |
+| 1 | 65.106 | 66.575 | 345.3 | 255.2 | 3.154 | 3.886 |
+| 2 | 48.797 | 46.337 | 457.3 | 421.0 | 4.544 | 5.215 |
+| 4 | 33.670 | 33.074 | 660.0 | 616.0 | 6.688 | 7.082 |
+| 8 | 23.226 | 23.454 | 939.4 | 795.8 | 9.485 | 11.122 |
+| 16 | 17.853 | 15.865 | 1397.0 | 1097.2 | 14.318 | 17.111 |
+| 32 | 13.336 | — | 2101.7 | — | 21.552 | — |
 
 The paired acceptance statistics explain why synthetic output rate can move
 independently of forward rate. They are workload/configuration evidence, not a
@@ -33,12 +33,12 @@ second engine-speed metric.
 
 | C | SGLang acceptance | vLLM acceptance | SGLang output/forward/request | vLLM output/forward/request |
 |---:|---:|---:|---:|---:|
-| 1 | 0.940 | 0.532 | 5.614 | 3.952 |
-| 2 | 0.750 | 0.714 | 4.702 | 4.638 |
-| 4 | 0.769 | 0.761 | 4.885 | 4.814 |
-| 8 | 0.729 | 0.656 | 4.598 | 4.241 |
-| 16 | 0.769 | 0.674 | 4.837 | 4.352 |
-| 32 | 0.765 | — | 4.806 | — |
+| 1 | 0.870 | 0.532 | 5.324 | 3.952 |
+| 2 | 0.741 | 0.714 | 4.661 | 4.638 |
+| 4 | 0.779 | 0.761 | 4.794 | 4.814 |
+| 8 | 0.814 | 0.656 | 4.964 | 4.241 |
+| 16 | 0.779 | 0.674 | 4.874 | 4.352 |
+| 32 | 0.767 | — | 4.887 | — |
 
 vLLM r33 was not measured at C32. Its documented TP2 profile set
 `max_num_seqs=16` and reported 143,599 KV tokens; the C32 workload needs about
@@ -53,10 +53,10 @@ therefore not repeated as an independent result.
 
 | Input target | SGLang prompt tok/s | vLLM prompt tok/s |
 |---:|---:|---:|
-| 8K | 7916.2 | 7689.8 |
-| 32K | 8818.5 | 8784.7 |
-| 64K | 8487.6 | 8518.7 |
-| 128K | 7949.3 | 7953.6 |
+| 8K | 7925.9 | 7689.8 |
+| 32K | 8825.5 | 8784.7 |
+| 64K | 8461.4 | 8518.7 |
+| 128K | 7953.3 | 7953.6 |
 
 ### TP2 capacity
 
@@ -64,7 +64,7 @@ These are startup reports from the exact measured profiles. The profiles use
 different context and scheduler limits, so this table describes deployable
 capacity rather than isolating engine memory efficiency.
 
-| Setting | SGLang v0.6.0-rc.3 | vLLM r33 |
+| Setting | SGLang 0.7.0-rc1 | vLLM r33 |
 |---|---:|---:|
 | Reported KV cache | 801,536 tokens | 143,599 tokens |
 | Declared context limit | 786,432 | 131,072 |
@@ -72,22 +72,21 @@ capacity rather than isolating engine memory efficiency.
 | Static/GPU memory fraction | 0.93 | 0.975 |
 | C32 fixed-window workload | completed, n=5 | not reachable in profile |
 
-At the shipped SGLang envelope, a 780,000-token request and four concurrent
-250,000-token requests completed. A 400,000-token prompt followed by 32,768
-generated tokens completed at 375 tok/s, and a mixed batch containing that
-request plus three short requests completed without failures. See
-[`RUN.md`](RUN.md) for the full memory-fraction sweep and its free-memory floors.
+At the shipped SGLang envelope, a cold 780,000-token request and four cold
+concurrent 250,000-token requests completed without process restarts. The
+four-request shape recomputed all 1,000,000 prompt tokens. See
+[`RUN.md`](RUN.md) for capacity guidance and the prior higher-fraction failure.
 
 ### Quality
 
 Each engine ran the full GSM8K set once at C16, temperature 0, seed 42, and a
 16,384-token response cap.
 
-| Result | SGLang v0.6.0-rc.3 | vLLM r33 |
+| Result | SGLang 0.7.0-rc1 | vLLM r33 |
 |---|---:|---:|
 | Questions | 1,319 | 1,319 |
-| Correct | 1,263 | 1,243 |
-| Accuracy | 95.75% | 94.24% |
+| Correct | 1,260 | 1,243 |
+| Accuracy | 95.53% | 94.24% |
 | Request errors | 0 | 0 |
 
 All 1,319 SGLang responses used the grader's documented last-number fallback
@@ -111,15 +110,15 @@ NCCL fallback, and prefill/decode warmups. PCIe-IPC all-gather and TRT/MNNVL
 fusion were absent. Its qualified source identity is:
 
 ```text
-SGLang base                   5f128395910dafb98c34083dc26cb790c7674d34
-SGLang effective tree         3d6254585f7baf4aa4c78db37c50d90e63156342
-FlashInfer base               05e5d927399d62a2479c430ad3e167738254d760
-FlashInfer effective tree     06cbd9e30d319454ecca57bf51bed915d86c9d52
+SGLang base                   7f8f030000b628ea2cb033e7457a13dd0ac80f99
+SGLang effective tree         6696e98a1f037f16774eeea793c05d3eb1316d6d
+FlashInfer base               5366177a074e27df7db527f5b744c77dfd748484
+FlashInfer effective tree     917a439a4cd74f5f0fa4f7dbb13543c606ffe346
 FlashInfer version            0.6.18.dev20260819
 DeepGEMM base                 80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f
-DeepGEMM effective tree       ed1efbc5588a673b39a78cfdfafaac4eb282365a
-DeepGEMM version              0.0.0+sm120jit4
-Compilation-cache schema      v24
+DeepGEMM effective tree       b7e23a6fb5ac6571046cc12e85352d43af63f27d
+DeepGEMM version              0.0.0+sm120jit5
+Compilation-cache schema      v26
 ```
 
 The vLLM panel used local-inference-lab r33 at:
@@ -141,7 +140,7 @@ AIPerf 0.12.0 is pinned at revision:
 ```
 
 The SGLang panel used benchmark-project revision
-`15f5dcc169f64b629523803a9c0d8ded1728aabf`; the retained vLLM panel used
+`27bf5b07924c0d001ac142b92138cfdf4b162626`; the retained vLLM panel used
 `6fc08101a6c309b998a2f393b30065942e98a0b4`. Both revisions use the same
 request shapes, fixed context interval, five repetitions per supported cell,
 and 20-scrape minimum. The SGLang analyzer accepts a valid interval of at least
@@ -166,8 +165,8 @@ measurements.
 
 ## Machine-readable results
 
-- [`sglang-v0.6.0-rc.3-publication-summary.json`](bench/results/sglang-v0.6.0-rc.3-publication-summary.json)
-- [`sglang-v0.6.0-rc.3-gsm8k.json`](bench/results/sglang-v0.6.0-rc.3-gsm8k.json)
+- [`sglang-v0.7.0-rc.1-publication-summary.json`](bench/results/sglang-v0.7.0-rc.1-publication-summary.json)
+- [`sglang-v0.7.0-rc.1-gsm8k.json`](bench/results/sglang-v0.7.0-rc.1-gsm8k.json)
 - [`vllm-r33-publication-summary.json`](bench/results/vllm-r33-publication-summary.json)
 - [`vllm-r33-gsm8k.json`](bench/results/vllm-r33-gsm8k.json)
 

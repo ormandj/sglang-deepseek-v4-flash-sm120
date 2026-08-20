@@ -10,13 +10,15 @@ result. It intentionally does not duplicate the canonical launch command.
 This image is qualified as a complete source-and-runtime configuration. The
 following groups are performance or capacity inputs, not cosmetic defaults:
 
-- the image tag and `v24` compilation-cache namespace;
+- the image tag and `v26` compilation-cache namespace;
 - FP8 KV cache, DSpARK block size 5, and the DeepSeek-V4 FP4 indexer;
 - HC prenorm, fused MHC post+pre, and FP8 W_o_A selectors;
 - PCIe-IPC all-reduce, its 786,432-element ceiling, and persisted autotuning;
 - the `0.93` static-memory fraction, 786,432 context, 8,192-token prefill
   chunks, graph batch ceiling 32, and scheduler ceiling 48;
 - prefill/decode warmups and the 393,216-token generation ceiling.
+- the paged-indexer live-memory fraction, which avoids excessive row splitting
+  while preserving the runtime's allocation bound.
 
 Begin with the recorded combination. If you change one of these inputs, use a
 new cache directory when source or kernel shape changes, inspect the reported
@@ -30,7 +32,7 @@ configuration shown in the README:
 
 ```bash
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -45,6 +47,7 @@ The required variables are `MODEL_DIR` and `CACHE_DIR`. Available overrides are:
 | `CONTEXT_LENGTH` | `786432` | Total prompt-plus-generation budget per request |
 | `CONTAINER_NAME` | `dsv4-flash-sglang` | Docker container name |
 | `SGLANG_MAX_NEW_TOKENS_LIMIT` | `393216` | Server-wide generation ceiling |
+| `SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION` | `0.8` | Live-memory share available to paged-indexer logits |
 | `SGLANG_ENABLE_PCIE_IPC_ALLREDUCE` | `1` | Qualified PCIe-IPC reduction path |
 | `SGLANG_PCIE_IPC_MAX_NUMEL` | `786432` | PCIe-IPC eligibility ceiling |
 | `SGLANG_PCIE_IPC_AUTOTUNE` | `1` | Persist machine-local tuning choices |
@@ -60,7 +63,7 @@ Example TP4 invocation:
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 TP_SIZE=4 \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24-tp4 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26-tp4 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -71,20 +74,16 @@ another topology without measuring it.
 ## Capacity and long outputs
 
 `--mem-fraction-static` reserves device memory for the static KV pool and
-trades capacity directly against request workspace. The following TP2 sweep
-used `--context-length 786432`; pool and free-memory values are SGLang startup
-reports.
+trades capacity directly against request workspace. At the qualified TP2
+setting of `0.93`, `0.7.0-rc1` reported an 801,536-token pool. One cold
+780,000-token request and four cold concurrent 250,000-token requests completed
+without failures or process restarts. The four-request shape recomputed all
+1,000,000 submitted prompt tokens.
 
-| Static fraction | KV tokens | Free after startup | Near-limit request | Four 250K requests |
-|---:|---:|---:|---|---|
-| 0.90 | 474,624 | 5,488 MiB | 470K passes; 4,322 MiB floor | passes |
-| **0.93 (shipped)** | **801,536** | **2,628 MiB** | **780K passes; 120 MiB floor** | **passes; 120 MiB floor** |
-| 0.95 | 1,019,648 | 440 MiB | scheduler rank crashes | not reached |
-
-The 0.95 server starts, but a 550,000-token request exhausts workspace. Choose
-this setting by completed near-limit work, not by the startup pool alone. The
-shipped 0.93 result is also tight: its 120 MiB floor is a measured pass, not a
-large safety margin.
+Do not raise the fraction merely to obtain a larger startup pool. The previous
+matched sweep showed that `0.95` could start with 1,019,648 KV tokens and still
+crash a scheduler rank on a 550,000-token request because too little workspace
+remained. Choose the setting by completed near-limit work, not startup alone.
 
 `--context-length` is the total prompt plus generated-token budget. A request
 is rejected when `input + max_tokens` exceeds it. If `max_tokens` is omitted,
@@ -123,7 +122,7 @@ Enable the host tier with the wrapper:
 ```bash
 HICACHE=1 HICACHE_RATIO=10 \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -144,7 +143,7 @@ HICACHE=1 \
 HICACHE_RATIO=10 \
 HICACHE_STORAGE_DIR=/srv/hicache \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -153,17 +152,9 @@ CACHE_DIR=/srv/cache/sglang-dsv4-0731-v24 \
 The file-backend size, eviction ratio, and minimum-free-space environment
 variables exposed by SGLang can bound disk use.
 
-Measured at 1.14x device-pool oversubscription with three 300K sessions:
-
-| Returning-turn metric | HiCache off | HiCache on |
-|---|---:|---:|
-| Prefill | 18–20 s | about 0.5 s |
-| Prefix reuse | 64% | 99.3% |
-| Tokens recomputed over two turns | 657,216 | 13,632 |
-
-The first uncached prefill was about 10% slower because it also populated the
-host tier. HiCache is intended for repeated long conversations, not one-shot
-traffic.
+HiCache is intended for repeated long conversations, not one-shot traffic.
+Measure returning-turn cached tokens and cold-write cost on your own working
+set before enabling it for a deployment.
 
 ## Exposure and client settings
 
