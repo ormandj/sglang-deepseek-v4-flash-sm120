@@ -81,6 +81,11 @@ its consequence and the verification required after changing it.
 
 ## Public-content boundaries
 
+- In prose, result labels, and comparisons, always use the complete release
+  name, such as `0.7.0-rc1` or `0.6.0-rc3`. Never use `rc1`, `rc3`, "the newer
+  RC," or another suffix-only name that hides the release line. Preserve exact
+  Git tags, image tags, filenames, and other immutable identifiers verbatim
+  when they use a different spelling, such as `v0.7.0-rc.1`.
 - Publish measured facts and enough configuration to reproduce them, not
   private endpoints, credentials, secret names, internal image references, or
   irrelevant diagnostic data.

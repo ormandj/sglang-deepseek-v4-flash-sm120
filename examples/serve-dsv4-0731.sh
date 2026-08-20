@@ -8,7 +8,7 @@ set -euo pipefail
 : "${MODEL_DIR:?set MODEL_DIR to a local DeepSeek-V4-Flash-0731 snapshot directory}"
 : "${CACHE_DIR:?set CACHE_DIR to a persistent, image-specific cache directory}"
 
-IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.6.0-rc.3}
+IMAGE=${IMAGE:-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.7.0-rc.1}
 PORT=${PORT:-8000}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 TP_SIZE=${TP_SIZE:-2}
@@ -17,6 +17,9 @@ CONTAINER_NAME=${CONTAINER_NAME:-dsv4-flash-sglang}
 SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=${SGLANG_ENABLE_PCIE_IPC_ALLREDUCE:-1}
 SGLANG_PCIE_IPC_MAX_NUMEL=${SGLANG_PCIE_IPC_MAX_NUMEL:-786432}
 SGLANG_PCIE_IPC_AUTOTUNE=${SGLANG_PCIE_IPC_AUTOTUNE:-1}
+# Keep the paged-indexer allocation large enough to avoid pathological
+# cold-prefill splitting while the runtime still caps it against live memory.
+SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION=${SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION:-0.8}
 # A request that omits max_tokens is admitted as unbounded and clamped only by
 # the remaining context, so one client can hold the KV pool for hours. This
 # ceiling is the model card's recommended 384K maximum output for the high and
@@ -157,6 +160,7 @@ exec docker run --rm \
   --env SGLANG_OPT_DEEPGEMM_HC_PRENORM=1 \
   --env SGLANG_OPT_FUSE_MHC_POST_PRE=1 \
   --env SGLANG_OPT_FP8_WO_A_GEMM=1 \
+  --env SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION="$SGLANG_DSV4_MQA_LOGITS_FREE_MEM_FRACTION" \
   --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE="$SGLANG_ENABLE_PCIE_IPC_ALLREDUCE" \
   --env SGLANG_PCIE_IPC_MAX_NUMEL="$SGLANG_PCIE_IPC_MAX_NUMEL" \
   --env SGLANG_PCIE_IPC_AUTOTUNE="$SGLANG_PCIE_IPC_AUTOTUNE" \

@@ -1,41 +1,39 @@
 # DeepSeek-V4-Flash-0731 on SGLang for RTX PRO 6000 Blackwell (SM120).
 #
-# v0.5.0 refreshes SGLang and FlashInfer main, the official nightly base,
-# the FlashInfer cubin wheel, and the active DeepGEMM dev base while
-# preserving the reviewed SM120 carries.
-ARG DSV4_0731_RELEASE_VERSION=0.6.0
-ARG DSV4_0731_RELEASE_CANDIDATE=3
-ARG DSV4_0731_CACHE_SCHEMA=v24
+# v0.7.0 refreshes the source heads and removes carries now provided by
+# upstream while preserving the reviewed SM120-specific effective behavior.
+ARG DSV4_0731_RELEASE_VERSION=0.7.0
+ARG DSV4_0731_RELEASE_CANDIDATE=1
+ARG DSV4_0731_CACHE_SCHEMA=v26
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf
 ARG DSV4_0731_SGLANG_BASE_HEAD=c0b6474b43363c2f4bc60fe3d7817d393fb51d32
-ARG DSV4_0731_SGLANG_MAIN_HEAD=5f128395910dafb98c34083dc26cb790c7674d34
-ARG DSV4_0731_SGLANG_MAIN_TREE=7b900862e331aa1776a760803f4c1a1040a43990
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=3d6254585f7baf4aa4c78db37c50d90e63156342
-ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=970c4fa0b7d11e15ac83552a751a70afd0fcabd1
-ARG DSV4_0731_SGLANG_PR29927_HEAD=b887ce30245bfb85d533a1be00d75ef16218425a
+ARG DSV4_0731_SGLANG_MAIN_HEAD=7f8f030000b628ea2cb033e7457a13dd0ac80f99
+ARG DSV4_0731_SGLANG_MAIN_TREE=f392a43569c7021f78a6046bcefd84d14f7a18d7
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=6696e98a1f037f16774eeea793c05d3eb1316d6d
+ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=678c5226279c416a42e8fa77dd8b9f0ccca09b71
+ARG DSV4_0731_SGLANG_PR29927_HEAD=b19fd53b923614f4cbafc21ae99a853737ede9bd
 ARG DSV4_0731_SGLANG_PR35116_HEAD=65eef2612efba5759aaebbabfae37763cf56a277
 ARG DSV4_0731_SGLANG_PR35118_HEAD=23d2ac6f51f2696da42663b2160bc89754680ca9
-ARG DSV4_0731_SGLANG_PR33614_HEAD=4c4e07cfa258cd5190a7257cb076dc7201fe2af6
+ARG DSV4_0731_SGLANG_PR33614_HEAD=652e5ed0a5dfbd888c0c6657c20823e4af578140
 ARG DSV4_0731_SGLANG_PR32686_HEAD=15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b
 ARG DSV4_0731_SGLANG_PR33568_HEAD=cab45a29997f8898e076e9253741a5119a401db0
 ARG DSV4_0731_SGLANG_PR34018_HEAD=c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0
 ARG DSV4_0731_SGLANG_PR34528_HEAD=f28d875d121a1ec0ab879ef54873220c2ed23c6a
-ARG DSV4_0731_FLASHINFER_MAIN_HEAD=05e5d927399d62a2479c430ad3e167738254d760
-ARG DSV4_0731_FLASHINFER_MAIN_TREE=6b49fb42949b28ef50ce149cdacae8f6ad534d0e
-ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=06cbd9e30d319454ecca57bf51bed915d86c9d52
-ARG DSV4_0731_FLASHINFER_INTEGRATION_HEAD=f3a625561f9eb0a3cb3094ae80169b8ca95199d4
+ARG DSV4_0731_SGLANG_PR35217_HEAD=8460babe10361637deee4c59bd7a1372eda51fc6
+ARG DSV4_0731_FLASHINFER_MAIN_HEAD=5366177a074e27df7db527f5b744c77dfd748484
+ARG DSV4_0731_FLASHINFER_MAIN_TREE=4395863927a93b3b84501143b05bf4d36921c01d
+ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=917a439a4cd74f5f0fa4f7dbb13543c606ffe346
+ARG DSV4_0731_FLASHINFER_INTEGRATION_HEAD=fb61a80b2d5da03b119ae4e7a6424ede137ba2c1
 ARG DSV4_0731_FLASHINFER_PR3930_HEAD=e855cc25993d11d4707678d68fbde108d0578bef
-ARG DSV4_0731_FLASHINFER_PR4393_HEAD=3a94d0de04aa65333aec000a9b9a4fa56853f979
 ARG DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD=441a07a8b34b631345c942dab865ab0602cd1066
-ARG DSV4_0731_FLASHINFER_TUNE_COVERAGE_HEAD=f3a625561f9eb0a3cb3094ae80169b8ca95199d4
 ARG DSV4_0731_FLASHINFER_VERSION=0.6.18.dev20260819
 ARG DSV4_0731_FLASHINFER_CUBIN_URL=https://github.com/flashinfer-ai/flashinfer/releases/download/nightly-v0.6.18-20260819/flashinfer_cubin-0.6.18.dev20260819-py3-none-any.whl
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256=277c3f2ef478dd8da5f315f21c3ce56c4437dbb47b170ceb4b47185f9c46560b
 ARG DSV4_0731_DEEPGEMM_MAIN_HEAD=80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f
 ARG DSV4_0731_DEEPGEMM_MAIN_TREE=c27ad7254f740eb7635f2eea56da948e09883328
-ARG DSV4_0731_DEEPGEMM_EFFECTIVE_TREE=ed1efbc5588a673b39a78cfdfafaac4eb282365a
-ARG DSV4_0731_DEEPGEMM_INTEGRATION_HEAD=3b979cc84bb1473422c5de09bcf6ef8b43835dfe
-ARG DSV4_0731_DEEPGEMM_VERSION=0.0.0+sm120jit4
+ARG DSV4_0731_DEEPGEMM_EFFECTIVE_TREE=b7e23a6fb5ac6571046cc12e85352d43af63f27d
+ARG DSV4_0731_DEEPGEMM_INTEGRATION_HEAD=9e3b08724b54fbcfe340a5fecc3bbeb7ed173da9
+ARG DSV4_0731_DEEPGEMM_VERSION=0.0.0+sm120jit5
 ARG DSV4_0731_DEEPGEMM_PR76_HEAD=4900cbd750b4fb10bf756bd1be1f4357b66eac74
 ARG DSV4_0731_DEEPGEMM_PR77_HEAD=c5dd8bfde3fb1ec8c8537e218e201dd0199189f1
 ARG IMAGE_SOURCE
@@ -58,14 +56,13 @@ ARG DSV4_0731_SGLANG_PR32686_HEAD
 ARG DSV4_0731_SGLANG_PR33568_HEAD
 ARG DSV4_0731_SGLANG_PR34018_HEAD
 ARG DSV4_0731_SGLANG_PR34528_HEAD
+ARG DSV4_0731_SGLANG_PR35217_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_TREE
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE
 ARG DSV4_0731_FLASHINFER_INTEGRATION_HEAD
 ARG DSV4_0731_FLASHINFER_PR3930_HEAD
-ARG DSV4_0731_FLASHINFER_PR4393_HEAD
 ARG DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD
-ARG DSV4_0731_FLASHINFER_TUNE_COVERAGE_HEAD
 ARG DSV4_0731_FLASHINFER_VERSION
 ARG DSV4_0731_FLASHINFER_CUBIN_URL
 ARG DSV4_0731_FLASHINFER_CUBIN_SHA256
@@ -79,7 +76,7 @@ ARG DSV4_0731_DEEPGEMM_PR77_HEAD
 ARG IMAGE_SOURCE
 ARG IMAGE_SOURCE_REVISION
 
-COPY patches/sglang/0001-sglang-dsv4-0731-v0.6.0-rc.3.patch /tmp/sglang-release.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-v0.7.0-rc.1.patch /tmp/sglang-release.patch
 RUN set -e; cd /sgl-workspace/sglang; \
     git config --local --unset-all http.https://github.com/.extraheader || true; \
     git remote set-url origin https://github.com/sgl-project/sglang.git; \
@@ -108,7 +105,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       python/sglang/srt/speculative/spec_utils.py; \
     rm /tmp/sglang-release.patch
 
-COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.6.0-rc.3.patch /tmp/flashinfer-release.patch
+COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.7.0-rc.1.patch /tmp/flashinfer-release.patch
 RUN set -e; \
     git init /tmp/flashinfer-src; \
     git -C /tmp/flashinfer-src remote add origin https://github.com/flashinfer-ai/flashinfer.git; \
@@ -138,7 +135,7 @@ RUN set -e; \
     uv run --no-project --python /usr/bin/python python -c "import flashinfer, importlib.metadata as m; expected='${DSV4_0731_FLASHINFER_VERSION}'; assert flashinfer.__version__ == expected, flashinfer.__version__; assert flashinfer.__git_version__ == '${DSV4_0731_FLASHINFER_MAIN_HEAD}', flashinfer.__git_version__; assert m.version('flashinfer-cubin') == expected, m.version('flashinfer-cubin'); assert all(d.metadata['Name'] != 'flashinfer-jit-cache' for d in m.distributions()); print('flashinfer', expected)"; \
     rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheel /tmp/flashinfer-release.patch
 
-COPY patches/deepgemm/0001-deepgemm-sm120-v0.6.0-rc.3.patch /tmp/deepgemm-release.patch
+COPY patches/deepgemm/0001-deepgemm-sm120-v0.7.0-rc.1.patch /tmp/deepgemm-release.patch
 RUN set -e; \
     git init /tmp/deepgemm-src; \
     git -C /tmp/deepgemm-src remote add origin https://github.com/sgl-project/DeepGEMM.git; \
@@ -163,6 +160,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
     uv run --no-project --python /usr/bin/python python -c "import deep_gemm, importlib.metadata as m; assert m.version('sgl-deep-gemm') == '${DSV4_0731_DEEPGEMM_VERSION}', m.version('sgl-deep-gemm'); missing=[n for n in ('m_grouped_fp8_fp4_gemm_nt_contiguous', 'fp8_paged_mqa_logits', 'fp8_fp4_paged_mqa_logits', 'tf32_hc_prenorm_gemm') if not hasattr(deep_gemm, n)]; assert not missing, missing; print('sgl-deep-gemm', m.version('sgl-deep-gemm'))"; \
     uv run --no-project --python /usr/bin/python python -c "import sglang; from sglang.srt.entrypoints.openai import encoding_dsv4; print('sglang', sglang.__version__, 'dsv4 encoding OK')"; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/layers/deep_gemm_wrapper/test_compile_utils.py; \
+    uv run --no-project --python /usr/bin/python python test/registered/attention/test_dsv4_indexer_row_slice.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/layers/test_dsv4_nonpaged_indexer.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/entrypoints/openai/test_serving_chat.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/entrypoints/test_warmup.py; \
@@ -195,15 +193,14 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.pr33568.head=${DSV4_0731_SGLANG_PR33568_HEAD} \
       ai.sglang.pr34018.head=${DSV4_0731_SGLANG_PR34018_HEAD} \
       ai.sglang.pr34528.head=${DSV4_0731_SGLANG_PR34528_HEAD} \
+      ai.sglang.pr35217.head=${DSV4_0731_SGLANG_PR35217_HEAD} \
       ai.flashinfer.version=${DSV4_0731_FLASHINFER_VERSION} \
       ai.flashinfer.main.head=${DSV4_0731_FLASHINFER_MAIN_HEAD} \
       ai.flashinfer.main.tree=${DSV4_0731_FLASHINFER_MAIN_TREE} \
       ai.flashinfer.effective.tree=${DSV4_0731_FLASHINFER_EFFECTIVE_TREE} \
       ai.flashinfer.integration.head=${DSV4_0731_FLASHINFER_INTEGRATION_HEAD} \
       ai.flashinfer.pr3930.head=${DSV4_0731_FLASHINFER_PR3930_HEAD} \
-      ai.flashinfer.pr4393.head=${DSV4_0731_FLASHINFER_PR4393_HEAD} \
       ai.flashinfer.local.cudart-resolver.source=${DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD} \
-      ai.flashinfer.local.tune-coverage.head=${DSV4_0731_FLASHINFER_TUNE_COVERAGE_HEAD} \
       ai.flashinfer.cubin.sha256=${DSV4_0731_FLASHINFER_CUBIN_SHA256} \
       ai.flashinfer.sm120.module=persistent-runtime-jit \
       ai.deepgemm.version=${DSV4_0731_DEEPGEMM_VERSION} \

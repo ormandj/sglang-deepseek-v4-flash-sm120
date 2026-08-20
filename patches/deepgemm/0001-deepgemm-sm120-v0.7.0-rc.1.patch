@@ -81,14 +81,13 @@ index bb09f21..1ea62a2 100644
  static void major_check(const torch::Tensor& t) {
      const auto dim = t.dim();
 diff --git a/sgl_deep_gemm/VERSION b/sgl_deep_gemm/VERSION
-index bd52db8..a8c3350 100644
+index bd52db8..a6eb5fd 100644
 --- a/sgl_deep_gemm/VERSION
 +++ b/sgl_deep_gemm/VERSION
 @@ -1 +1 @@
 -0.0.0
 \ No newline at end of file
-+0.0.0+sm120jit4
-\ No newline at end of file
++0.0.0+sm120jit5
 diff --git a/sgl_deep_gemm/run_tests.sh b/sgl_deep_gemm/run_tests.sh
 index ab983d0..22fb062 100755
 --- a/sgl_deep_gemm/run_tests.sh
