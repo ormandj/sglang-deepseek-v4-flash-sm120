@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ai-dynamo/aiperf/6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23/src/aiperf/config/schema/aiperf-config.schema.json
+schemaVersion: "2.0"
+
+randomSeed: ${AIPERF_RANDOM_SEED:2026082201}
+
+benchmark:
+  model: ${MODEL_NAME:deepseek-v4-flash}
+
+  endpoint:
+    url: ${INFERENCE_URL:http://127.0.0.1:8000}
+    type: chat
+    api_key: ${BENCH_API_KEY:}
+    streaming: true
+    timeout: ${REQUEST_TIMEOUT_SECONDS:600}
+    useServerTokenCount: true
+    waitForModelTimeout: 300
+    waitForModelMode: both
+    resetKvCache:
+      path: /flush_cache?timeout=60
+      timeoutSeconds: 70
+    extra:
+      temperature: 0.0
+      top_p: 1.0
+      seed: ${SAMPLING_SEED:2026082201}
+      ignore_eos: true
+      min_tokens: ${TURNOVER_OSL:256}
+
+  tokenizer:
+    name: ${TOKENIZER_PATH:/models/deepseek-ai/DeepSeek-V4-Flash-0731}
+    trustRemoteCode: true
+    applyChatTemplate: true
+
+  dataset:
+    type: synthetic
+    entries: ${TURNOVER_REQUESTS:16}
+    sampling: sequential
+    prompts:
+      corpus: coding
+      isl: ${TURNOVER_ISL:256}
+      osl: ${TURNOVER_OSL:256}
+      cacheBust:
+        target: first_turn_prefix
+
+  phases:
+    - name: profiling
+      type: concurrency
+      requests: ${TURNOVER_REQUESTS:16}
+      concurrency: ${TURNOVER_CONCURRENCY:8}
+
+  runtime:
+    ui: none
+    workers: ${AIPERF_WORKERS:1}
+    recordProcessors: ${AIPERF_RECORD_PROCESSORS:1}
+    statsInterval: 0
+
+  gpuTelemetry:
+    enabled: ${GPU_TELEMETRY_ENABLED:true}
+
+  serverMetrics:
+    enabled: true
+    urls:
+      - ${SERVER_METRICS_URL:http://127.0.0.1:8000/metrics}
+    formats: [json, csv, parquet, jsonl]
+    discovery:
+      mode: disabled
+
+  artifacts:
+    dir: ${ARTIFACT_DIR:./artifacts/turnover}
+    summary: [json]
+    records: [jsonl]
+    raw: false
+    trace: false
+    sliceDuration: 1
+    autoPlot: false

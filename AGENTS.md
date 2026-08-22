@@ -50,8 +50,8 @@ link to the owner instead of copying the full explanation.
 | `release.json` / `stack.lock.json` | release identity and exact composition | prose guidance |
 
 Historical public documentation and result panels belong in immutable release
-tags. Current main keeps only the current SGLang result pair and the retained
-comparison result pair in `bench/results/`. Do not recreate
+tags. Current main keeps only the current SGLang engine, turnover, and quality
+results plus the retained comparison result pair in `bench/results/`. Do not recreate
 `PERFORMANCE-HISTORY.md` or copy old release artifacts forward.
 
 ## Release synchronization
@@ -67,6 +67,17 @@ Treat the following as one contract and update them in the same change:
 - performance and quality summaries in the JSON artifacts and paired Markdown
   tables;
 - user-visible changes and completed qualification in `CHANGELOG.md`.
+
+Every engine-changing public release must run the dedicated C8 turnover gate
+in `release-screen` mode with three valid repetitions. Escalate to the full
+C1/C2/C4/C8 `publication` turnover panel with five valid repetitions per
+concurrency when the candidate changes scheduler, admission, batching, or
+refill behavior; integrates a new upstream-main source baseline; or produces a
+suspicious C8 screen. A packaging- or documentation-only release may reuse
+turnover evidence only when its engine, dependencies, runtime configuration,
+and immutable image identity are already qualified. Publish the reproducible
+turnover harness and method with the release evidence. Never replace turnover
+with the clean decode panel or average the two dimensions.
 
 Never update a result table from memory, a partial run, or a different method.
 Published cells require the frozen method's complete matched sample set. Keep

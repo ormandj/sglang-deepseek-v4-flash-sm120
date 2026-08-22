@@ -38,6 +38,16 @@ effect.
 Publication uses five sequential fixed-seed paths at every supported decode
 concurrency and five requests at each prefill length.
 
+## Request turnover and refill batching
+
+[`aiperf/run-turnover-gate-in-pod.sh`](aiperf/run-turnover-gate-in-pod.sh)
+measures the repeated admission path that the clean steady-state decode window
+deliberately excludes. Every engine-changing public release runs its short C8
+screen; scheduler/admission changes, new upstream-main integrations, and
+suspicious screens run the full C1/C2/C4/C8 panel. Turnover output rate,
+latency, occupancy, queue depth, and requests per prefill pass remain separate
+from clean decode and cold prefill results.
+
 ## Release quality checks
 
 - [`aiperf/configs/gsm8k.yaml`](aiperf/configs/gsm8k.yaml): full 1,319-question

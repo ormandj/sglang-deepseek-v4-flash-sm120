@@ -10,6 +10,8 @@ The method deliberately separates three questions:
 2. How many output tokens does the speculative stack produce per verifier step?
 3. How does the server behave on cold prefill and production-shaped agentic
    traffic?
+4. Does the scheduler keep replacement requests batched while short requests
+   continuously finish at fixed client concurrency?
 
 [`STATISTICAL-DESIGN.md`](STATISTICAL-DESIGN.md) records why the workloads and
 sample counts were selected.
@@ -124,6 +126,55 @@ size.
 The output includes raw AIPerf request/server/GPU exports, exact inputs and
 config, the analyzer results, `summary.json`, environment provenance, and a
 checksum inventory. Performance value is never an exclusion rule.
+
+## Turnover and refill gate
+
+[`run-turnover-gate-in-pod.sh`](run-turnover-gate-in-pod.sh) runs unique,
+cache-busted synthetic coding requests: 16 at C1/C2/C4 and 32 at C8. This gives
+at least four replacement waves per cell without turning the structural
+scheduler check into another long throughput sweep. Every request has a
+256-token input target and a forced 256-token output at temperature 0. AIPerf
+keeps the client side closed-loop: when one request finishes, another is
+submitted until the cell's request set is complete.
+
+The analyzer requires the complete successful request set, exact input/output
+shape, sustained target client occupancy while requests remain to be admitted,
+the requested peak server occupancy, bounded queue depth, and valid server
+metrics. Terminal drain is reported but is not misclassified as a loss of
+client load. The gate reports aggregate output tokens/s, median TTFT, median
+ITL, running/queued occupancy, total prefill passes, and effective requests per
+prefill pass. The batching ratio is valid for this short, one-pass prompt shape
+and must not be compared with a different prompt or chunking method.
+
+The `release-screen` mode runs C8 three times and is the routine turnover check
+for an engine-changing public release. The broader `screen` mode runs three
+repetitions at C1/C2/C4/C8. `qualification` and `publication` run five at every
+concurrency. Use the full `publication` panel when the candidate changes
+scheduler, admission, batching, or refill behavior; integrates a new
+upstream-main source baseline; or produces a suspicious C8 release screen. A
+packaging- or documentation-only release may reuse evidence only when the exact
+immutable engine candidate and runtime configuration were already qualified.
+Run turnover immediately after the engine panel without restarting the server
+so the short screen reuses the existing serving session while retaining
+separate metrics and artifacts.
+
+Run it inside the selected pod with the same provenance variables as the engine
+gate:
+
+```bash
+BENCH_IMAGE_REF='image@sha256:...' \
+BENCH_GITOPS_REVISION='<deployment revision>' \
+BENCH_PROJECT_REVISION='<this repository revision>' \
+AIPERF_REVISION='6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23' \
+BENCH_MODEL_REVISION='<model snapshot revision>' \
+./run-turnover-gate-in-pod.sh <campaign> <build> release-screen
+```
+
+Turnover is its own regression dimension. A gain here cannot erase a decode or
+prefill regression, and a clean decode plateau cannot excuse a turnover
+regression. Compare two matched summaries with
+[`compare_turnover_gates.py`](compare_turnover_gates.py); it rejects different
+modes, cell sets, request shapes, and repetition IDs.
 
 ## Production-shaped AgentX gate
 

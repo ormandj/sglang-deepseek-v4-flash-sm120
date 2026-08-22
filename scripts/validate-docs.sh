@@ -99,11 +99,12 @@ done
 
 results_dir="$repo/bench/results"
 sglang_summary="$results_dir/sglang-${candidate_tag}-publication-summary.json"
+sglang_turnover="$results_dir/sglang-${candidate_tag}-turnover-summary.json"
 sglang_quality="$results_dir/sglang-${candidate_tag}-gsm8k.json"
 vllm_summary="$results_dir/vllm-r33-publication-summary.json"
 vllm_quality="$results_dir/vllm-r33-gsm8k.json"
 
-for file in "$sglang_summary" "$sglang_quality" "$vllm_summary" "$vllm_quality"; do
+for file in "$sglang_summary" "$sglang_turnover" "$sglang_quality" "$vllm_summary" "$vllm_quality"; do
   [[ -s "$file" ]] || {
     echo "current result artifact is missing: ${file#$repo/}" >&2
     exit 1
@@ -111,8 +112,8 @@ for file in "$sglang_summary" "$sglang_quality" "$vllm_summary" "$vllm_quality";
 done
 
 result_count=$(find "$results_dir" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d '[:space:]')
-[[ "$result_count" == 4 ]] || {
-  echo "current main must contain exactly four current comparison artifacts; found $result_count" >&2
+[[ "$result_count" == 5 ]] || {
+  echo "current main must contain exactly five current result artifacts; found $result_count" >&2
   exit 1
 }
 
@@ -128,6 +129,12 @@ require_rounded() {
   require_text "$file" "$rounded"
   printf '%s=%s\n' "$label" "$rounded" >/dev/null
 }
+
+require_rounded "$readme" "$sglang_turnover" '.turnover.c8.requests_per_prefill_pass.median' 2 'sglang-c8-turnover-batching'
+require_rounded "$benchmarks" "$sglang_turnover" '.turnover.c8.output_tokens_per_second.median' 1 'sglang-c8-turnover-output'
+require_rounded "$benchmarks" "$sglang_turnover" '.turnover.c8.median_ttft_ms.median' 1 'sglang-c8-turnover-ttft'
+require_rounded "$benchmarks" "$sglang_turnover" '.turnover.c8.median_itl_ms.median' 3 'sglang-c8-turnover-itl'
+require_rounded "$benchmarks" "$sglang_turnover" '.turnover.c8.requests_per_prefill_pass.median' 2 'sglang-c8-turnover-batching'
 
 for concurrency in 1 2 4 8 16; do
   key="c${concurrency}"

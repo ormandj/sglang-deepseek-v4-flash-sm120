@@ -10,7 +10,7 @@ result. It intentionally does not duplicate the canonical launch command.
 This image is qualified as a complete source-and-runtime configuration. The
 following groups are performance or capacity inputs, not cosmetic defaults:
 
-- the image tag and `v26` compilation-cache namespace;
+- the image tag and `v34` compilation-cache namespace;
 - FP8 KV cache, DSpARK block size 5, and the DeepSeek-V4 FP4 indexer;
 - HC prenorm, fused MHC post+pre, and FP8 W_o_A selectors;
 - PCIe-IPC all-reduce, its 786,432-element ceiling, and persisted autotuning;
@@ -32,7 +32,7 @@ configuration shown in the README:
 
 ```bash
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v34 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -63,7 +63,7 @@ Example TP4 invocation:
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 TP_SIZE=4 \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26-tp4 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v34-tp4 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -75,10 +75,11 @@ another topology without measuring it.
 
 `--mem-fraction-static` reserves device memory for the static KV pool and
 trades capacity directly against request workspace. At the qualified TP2
-setting of `0.93`, `0.7.0-rc1` reported an 801,536-token pool. One cold
-780,000-token request and four cold concurrent 250,000-token requests completed
-without failures or process restarts. The four-request shape recomputed all
-1,000,000 submitted prompt tokens.
+setting of `0.93`, `0.8.1-rc1` reported an 801,536-token pool. One cold
+780,000-token request completed in 260.0 seconds and four cold concurrent
+250,000-token requests completed in 143.2 seconds without failures or process
+restarts. The four-request shape recomputed all 1,000,000 submitted prompt
+tokens.
 
 Do not raise the fraction merely to obtain a larger startup pool. The previous
 matched sweep showed that `0.95` could start with 1,019,648 KV tokens and still
@@ -122,7 +123,7 @@ Enable the host tier with the wrapper:
 ```bash
 HICACHE=1 HICACHE_RATIO=10 \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v34 \
   ./examples/serve-dsv4-0731.sh
 ```
 
@@ -143,7 +144,7 @@ HICACHE=1 \
 HICACHE_RATIO=10 \
 HICACHE_STORAGE_DIR=/srv/hicache \
 MODEL_DIR=/srv/models/DeepSeek-V4-Flash-0731 \
-CACHE_DIR=/srv/cache/sglang-dsv4-0731-v26 \
+CACHE_DIR=/srv/cache/sglang-dsv4-0731-v34 \
   ./examples/serve-dsv4-0731.sh
 ```
 

@@ -1,29 +1,29 @@
 # DeepSeek-V4-Flash-0731 on SGLang for RTX PRO 6000 Blackwell (SM120).
 #
-# v0.7.0 refreshes the source heads and removes carries now provided by
-# upstream while preserving the reviewed SM120-specific effective behavior.
-ARG DSV4_0731_RELEASE_VERSION=0.7.0
+# v0.8.1 refreshes SGLang and FlashInfer to current upstream heads and batches
+# replacement prefills from observed scheduler occupancy.
+ARG DSV4_0731_RELEASE_VERSION=0.8.1
 ARG DSV4_0731_RELEASE_CANDIDATE=1
-ARG DSV4_0731_CACHE_SCHEMA=v26
+ARG DSV4_0731_CACHE_SCHEMA=v34
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf
 ARG DSV4_0731_SGLANG_BASE_HEAD=c0b6474b43363c2f4bc60fe3d7817d393fb51d32
-ARG DSV4_0731_SGLANG_MAIN_HEAD=7f8f030000b628ea2cb033e7457a13dd0ac80f99
-ARG DSV4_0731_SGLANG_MAIN_TREE=f392a43569c7021f78a6046bcefd84d14f7a18d7
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=6696e98a1f037f16774eeea793c05d3eb1316d6d
-ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=678c5226279c416a42e8fa77dd8b9f0ccca09b71
+ARG DSV4_0731_SGLANG_MAIN_HEAD=7fd5454335c15a4be0826397d2c2e6f19be3232f
+ARG DSV4_0731_SGLANG_MAIN_TREE=367b8a306878c12e8b0a42d09805e9c7fd2c11da
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=9c8afe4bbcd04cd56df849d9ae8b55282d231115
+ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=aefd8358e8236456e4883c3df1af5516faf67952
 ARG DSV4_0731_SGLANG_PR29927_HEAD=b19fd53b923614f4cbafc21ae99a853737ede9bd
 ARG DSV4_0731_SGLANG_PR35116_HEAD=65eef2612efba5759aaebbabfae37763cf56a277
 ARG DSV4_0731_SGLANG_PR35118_HEAD=23d2ac6f51f2696da42663b2160bc89754680ca9
-ARG DSV4_0731_SGLANG_PR33614_HEAD=652e5ed0a5dfbd888c0c6657c20823e4af578140
+ARG DSV4_0731_SGLANG_PR33614_HEAD=bec130168a81340df263397c17238e24162c7636
 ARG DSV4_0731_SGLANG_PR32686_HEAD=15c0902eefc59cb8aae919d16d4a0cf60f1a9a2b
 ARG DSV4_0731_SGLANG_PR33568_HEAD=cab45a29997f8898e076e9253741a5119a401db0
 ARG DSV4_0731_SGLANG_PR34018_HEAD=c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0
 ARG DSV4_0731_SGLANG_PR34528_HEAD=f28d875d121a1ec0ab879ef54873220c2ed23c6a
 ARG DSV4_0731_SGLANG_PR35217_HEAD=8460babe10361637deee4c59bd7a1372eda51fc6
-ARG DSV4_0731_FLASHINFER_MAIN_HEAD=5366177a074e27df7db527f5b744c77dfd748484
-ARG DSV4_0731_FLASHINFER_MAIN_TREE=4395863927a93b3b84501143b05bf4d36921c01d
-ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=917a439a4cd74f5f0fa4f7dbb13543c606ffe346
-ARG DSV4_0731_FLASHINFER_INTEGRATION_HEAD=fb61a80b2d5da03b119ae4e7a6424ede137ba2c1
+ARG DSV4_0731_FLASHINFER_MAIN_HEAD=46fc99b9773bc98832a8610b5d789d3bcdafde85
+ARG DSV4_0731_FLASHINFER_MAIN_TREE=2a74155a6c51287e2f54b773c87e8488fcf7147c
+ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=2f72f320813e86813778f6e4b5b9badefcccd6d0
+ARG DSV4_0731_FLASHINFER_INTEGRATION_HEAD=def74f1bd4a7dddc208e1595d1cc30caefc2c36e
 ARG DSV4_0731_FLASHINFER_PR3930_HEAD=e855cc25993d11d4707678d68fbde108d0578bef
 ARG DSV4_0731_FLASHINFER_CUDART_RESOLVER_SOURCE_HEAD=441a07a8b34b631345c942dab865ab0602cd1066
 ARG DSV4_0731_FLASHINFER_VERSION=0.6.18.dev20260819
@@ -32,7 +32,7 @@ ARG DSV4_0731_FLASHINFER_CUBIN_SHA256=277c3f2ef478dd8da5f315f21c3ce56c4437dbb47b
 ARG DSV4_0731_DEEPGEMM_MAIN_HEAD=80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f
 ARG DSV4_0731_DEEPGEMM_MAIN_TREE=c27ad7254f740eb7635f2eea56da948e09883328
 ARG DSV4_0731_DEEPGEMM_EFFECTIVE_TREE=b7e23a6fb5ac6571046cc12e85352d43af63f27d
-ARG DSV4_0731_DEEPGEMM_INTEGRATION_HEAD=9e3b08724b54fbcfe340a5fecc3bbeb7ed173da9
+ARG DSV4_0731_DEEPGEMM_INTEGRATION_HEAD=5bea657210be20b7a2312f29911fc81274d3c7f3
 ARG DSV4_0731_DEEPGEMM_VERSION=0.0.0+sm120jit5
 ARG DSV4_0731_DEEPGEMM_PR76_HEAD=4900cbd750b4fb10bf756bd1be1f4357b66eac74
 ARG DSV4_0731_DEEPGEMM_PR77_HEAD=c5dd8bfde3fb1ec8c8537e218e201dd0199189f1
@@ -76,7 +76,7 @@ ARG DSV4_0731_DEEPGEMM_PR77_HEAD
 ARG IMAGE_SOURCE
 ARG IMAGE_SOURCE_REVISION
 
-COPY patches/sglang/0001-sglang-dsv4-0731-v0.7.0-rc.1.patch /tmp/sglang-release.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-v0.8.1-rc.1.patch /tmp/sglang-release.patch
 RUN set -e; cd /sgl-workspace/sglang; \
     git config --local --unset-all http.https://github.com/.extraheader || true; \
     git remote set-url origin https://github.com/sgl-project/sglang.git; \
@@ -100,12 +100,15 @@ RUN set -e; cd /sgl-workspace/sglang; \
       python/sglang/srt/layers/deep_gemm_wrapper \
       python/sglang/srt/layers/moe/moe_runner/deep_gemm.py \
       python/sglang/srt/layers/moe/moe_runner/deep_gemm_sm120.py \
+      python/sglang/srt/managers/min_free_slots_delayer.py \
+      python/sglang/srt/managers/scheduler.py \
       python/sglang/srt/models/deepseek_v4.py \
+      python/sglang/srt/server_args.py \
       python/sglang/srt/speculative/dspark_components \
       python/sglang/srt/speculative/spec_utils.py; \
     rm /tmp/sglang-release.patch
 
-COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.7.0-rc.1.patch /tmp/flashinfer-release.patch
+COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.1.patch /tmp/flashinfer-release.patch
 RUN set -e; \
     git init /tmp/flashinfer-src; \
     git -C /tmp/flashinfer-src remote add origin https://github.com/flashinfer-ai/flashinfer.git; \
@@ -135,7 +138,7 @@ RUN set -e; \
     uv run --no-project --python /usr/bin/python python -c "import flashinfer, importlib.metadata as m; expected='${DSV4_0731_FLASHINFER_VERSION}'; assert flashinfer.__version__ == expected, flashinfer.__version__; assert flashinfer.__git_version__ == '${DSV4_0731_FLASHINFER_MAIN_HEAD}', flashinfer.__git_version__; assert m.version('flashinfer-cubin') == expected, m.version('flashinfer-cubin'); assert all(d.metadata['Name'] != 'flashinfer-jit-cache' for d in m.distributions()); print('flashinfer', expected)"; \
     rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheel /tmp/flashinfer-release.patch
 
-COPY patches/deepgemm/0001-deepgemm-sm120-v0.7.0-rc.1.patch /tmp/deepgemm-release.patch
+COPY patches/deepgemm/0001-deepgemm-sm120-v0.8.1-rc.1.patch /tmp/deepgemm-release.patch
 RUN set -e; \
     git init /tmp/deepgemm-src; \
     git -C /tmp/deepgemm-src remote add origin https://github.com/sgl-project/DeepGEMM.git; \
@@ -165,6 +168,8 @@ RUN set -e; cd /sgl-workspace/sglang; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/entrypoints/openai/test_serving_chat.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/entrypoints/test_warmup.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/distributed/test_pcie_ipc_ar.py; \
+    uv run --no-project --python /usr/bin/python python test/registered/scheduler/test_min_free_slots_delayer.py; \
+    uv run --no-project --python /usr/bin/python python test/registered/unit/server_args/test_server_args.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/spec/test_decode_bookkeeping_ownership.py; \
     uv run --no-project --python /usr/bin/python python test/registered/spec/dspark/test_dspark_dp_tier.py
 

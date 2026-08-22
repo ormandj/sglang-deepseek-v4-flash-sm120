@@ -1,0 +1,333 @@
+{
+  "build_id": "test-ba83165d8300c699321fe1b458019d773c7c8dcf",
+  "engine": "sglang",
+  "interpretation": "same-process closed-loop request-turnover signal; compare each concurrency independently from steady-state decode and cold prefill",
+  "mode": "qualification",
+  "schema_version": "1.0",
+  "turnover": {
+    "c1": {
+      "median_itl_ms": {
+        "count": 5,
+        "max": 4.095847615686274,
+        "mean": 3.8391437188235296,
+        "median": 3.8849779352941174,
+        "min": 3.5440018333333336,
+        "sample_cv": 0.05499414892621742,
+        "sample_stddev": 0.21113044142213336
+      },
+      "median_ttft_ms": {
+        "count": 5,
+        "max": 169.8889185,
+        "mean": 168.45430249999998,
+        "median": 168.70191649999998,
+        "min": 166.75133499999998,
+        "sample_cv": 0.007398583962336791,
+        "sample_stddev": 1.2463233008631303
+      },
+      "output_tokens_per_second": {
+        "count": 5,
+        "max": 232.56225692256564,
+        "mean": 221.92387815950656,
+        "median": 220.5661001752135,
+        "min": 215.19089569883542,
+        "sample_cv": 0.028823035374573706,
+        "sample_stddev": 6.396519790654042
+      },
+      "repetitions": [
+        {
+          "id": "r01",
+          "median_itl_ms": 3.5440018333333336,
+          "median_ttft_ms": 166.75133499999998,
+          "output_tokens_per_second": 232.56225692256564,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r02",
+          "median_itl_ms": 3.7278108,
+          "median_ttft_ms": 168.70191649999998,
+          "output_tokens_per_second": 220.4698391403826,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r03",
+          "median_itl_ms": 3.8849779352941174,
+          "median_ttft_ms": 169.8889185,
+          "output_tokens_per_second": 220.8302988605356,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r04",
+          "median_itl_ms": 3.9430804098039216,
+          "median_ttft_ms": 167.692163,
+          "output_tokens_per_second": 220.5661001752135,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r05",
+          "median_itl_ms": 4.095847615686274,
+          "median_ttft_ms": 169.23717949999997,
+          "output_tokens_per_second": 215.19089569883542,
+          "requests_per_prefill_pass": 1.0
+        }
+      ],
+      "requests_per_prefill_pass": {
+        "count": 5,
+        "max": 1.0,
+        "mean": 1.0,
+        "median": 1.0,
+        "min": 1.0,
+        "sample_cv": 0.0,
+        "sample_stddev": 0.0
+      },
+      "shape": {
+        "expected_requests": 16,
+        "target_concurrency": 1,
+        "target_isl": 256,
+        "target_osl": 256
+      }
+    },
+    "c2": {
+      "median_itl_ms": {
+        "count": 5,
+        "max": 5.730464605882352,
+        "mean": 5.511134305490196,
+        "median": 5.497915682352941,
+        "min": 5.326224964705881,
+        "sample_cv": 0.02614754536989574,
+        "sample_stddev": 0.14410263429239376
+      },
+      "median_ttft_ms": {
+        "count": 5,
+        "max": 177.8005945,
+        "mean": 174.9375409,
+        "median": 175.694291,
+        "min": 171.723843,
+        "sample_cv": 0.014074946651802337,
+        "sample_stddev": 2.4622365555649894
+      },
+      "output_tokens_per_second": {
+        "count": 5,
+        "max": 316.26136209180544,
+        "mean": 308.48683865284363,
+        "median": 307.4235311925863,
+        "min": 305.4785691679096,
+        "sample_cv": 0.014433896073146251,
+        "sample_stddev": 4.452666969048581
+      },
+      "repetitions": [
+        {
+          "id": "r01",
+          "median_itl_ms": 5.514052203921569,
+          "median_ttft_ms": 173.142261,
+          "output_tokens_per_second": 305.4785691679096,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r02",
+          "median_itl_ms": 5.497915682352941,
+          "median_ttft_ms": 176.32671499999998,
+          "output_tokens_per_second": 307.4235311925863,
+          "requests_per_prefill_pass": 1.0666666666666667
+        },
+        {
+          "id": "r03",
+          "median_itl_ms": 5.730464605882352,
+          "median_ttft_ms": 177.8005945,
+          "output_tokens_per_second": 305.67997453590283,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r04",
+          "median_itl_ms": 5.487014070588235,
+          "median_ttft_ms": 171.723843,
+          "output_tokens_per_second": 307.590756276014,
+          "requests_per_prefill_pass": 1.0
+        },
+        {
+          "id": "r05",
+          "median_itl_ms": 5.326224964705881,
+          "median_ttft_ms": 175.694291,
+          "output_tokens_per_second": 316.26136209180544,
+          "requests_per_prefill_pass": 1.0
+        }
+      ],
+      "requests_per_prefill_pass": {
+        "count": 5,
+        "max": 1.0666666666666667,
+        "mean": 1.0133333333333332,
+        "median": 1.0,
+        "min": 1.0,
+        "sample_cv": 0.02942194707236565,
+        "sample_stddev": 0.029814239699997188
+      },
+      "shape": {
+        "expected_requests": 16,
+        "target_concurrency": 2,
+        "target_isl": 256,
+        "target_osl": 256
+      }
+    },
+    "c4": {
+      "median_itl_ms": {
+        "count": 5,
+        "max": 8.30618281764706,
+        "mean": 7.95287930235294,
+        "median": 7.84666582745098,
+        "min": 7.5446714941176465,
+        "sample_cv": 0.03937688256889936,
+        "sample_stddev": 0.313159594373382
+      },
+      "median_ttft_ms": {
+        "count": 5,
+        "max": 317.3985325,
+        "mean": 225.1486928,
+        "median": 189.49658799999997,
+        "min": 182.9820315,
+        "sample_cv": 0.2601716389314765,
+        "sample_stddev": 58.577304409055515
+      },
+      "output_tokens_per_second": {
+        "count": 5,
+        "max": 430.90448475342055,
+        "mean": 426.3639659469246,
+        "median": 427.8747608026267,
+        "min": 418.4637482594504,
+        "sample_cv": 0.011014497338692359,
+        "sample_stddev": 4.696184768236721
+      },
+      "repetitions": [
+        {
+          "id": "r01",
+          "median_itl_ms": 7.837788029411764,
+          "median_ttft_ms": 185.82442199999997,
+          "output_tokens_per_second": 427.8747608026267,
+          "requests_per_prefill_pass": 1.1428571428571428
+        },
+        {
+          "id": "r02",
+          "median_itl_ms": 7.5446714941176465,
+          "median_ttft_ms": 250.04188999999997,
+          "output_tokens_per_second": 428.0614415118216,
+          "requests_per_prefill_pass": 1.1428571428571428
+        },
+        {
+          "id": "r03",
+          "median_itl_ms": 8.229088343137255,
+          "median_ttft_ms": 317.3985325,
+          "output_tokens_per_second": 418.4637482594504,
+          "requests_per_prefill_pass": 1.2307692307692308
+        },
+        {
+          "id": "r04",
+          "median_itl_ms": 7.84666582745098,
+          "median_ttft_ms": 182.9820315,
+          "output_tokens_per_second": 430.90448475342055,
+          "requests_per_prefill_pass": 1.2307692307692308
+        },
+        {
+          "id": "r05",
+          "median_itl_ms": 8.30618281764706,
+          "median_ttft_ms": 189.49658799999997,
+          "output_tokens_per_second": 426.5153944073035,
+          "requests_per_prefill_pass": 1.3333333333333333
+        }
+      ],
+      "requests_per_prefill_pass": {
+        "count": 5,
+        "max": 1.3333333333333333,
+        "mean": 1.216117216117216,
+        "median": 1.2307692307692308,
+        "min": 1.1428571428571428,
+        "sample_cv": 0.06488150370041572,
+        "sample_stddev": 0.07890351365764842
+      },
+      "shape": {
+        "expected_requests": 16,
+        "target_concurrency": 4,
+        "target_isl": 256,
+        "target_osl": 256
+      }
+    },
+    "c8": {
+      "median_itl_ms": {
+        "count": 5,
+        "max": 11.224964413725491,
+        "mean": 10.766669566666668,
+        "median": 10.703838749019607,
+        "min": 10.129621415686275,
+        "sample_cv": 0.040060355041113244,
+        "sample_stddev": 0.4313166054510156
+      },
+      "median_ttft_ms": {
+        "count": 5,
+        "max": 347.69650349999995,
+        "mean": 313.8732179,
+        "median": 297.9325615,
+        "min": 281.25818849999996,
+        "sample_cv": 0.09784020768218224,
+        "sample_stddev": 30.709420825210838
+      },
+      "output_tokens_per_second": {
+        "count": 5,
+        "max": 619.4819472098097,
+        "mean": 601.4474633396642,
+        "median": 611.6271336185306,
+        "min": 557.7703547145248,
+        "sample_cv": 0.04193792239719585,
+        "sample_stddev": 25.22345704352913
+      },
+      "repetitions": [
+        {
+          "id": "r01",
+          "median_itl_ms": 10.129621415686275,
+          "median_ttft_ms": 345.753628,
+          "output_tokens_per_second": 619.4819472098097,
+          "requests_per_prefill_pass": 2.2857142857142856
+        },
+        {
+          "id": "r02",
+          "median_itl_ms": 10.669353411764705,
+          "median_ttft_ms": 296.72520799999995,
+          "output_tokens_per_second": 602.5163004463519,
+          "requests_per_prefill_pass": 2.2857142857142856
+        },
+        {
+          "id": "r03",
+          "median_itl_ms": 11.105569843137253,
+          "median_ttft_ms": 347.69650349999995,
+          "output_tokens_per_second": 557.7703547145248,
+          "requests_per_prefill_pass": 2.4615384615384617
+        },
+        {
+          "id": "r04",
+          "median_itl_ms": 11.224964413725491,
+          "median_ttft_ms": 297.9325615,
+          "output_tokens_per_second": 611.6271336185306,
+          "requests_per_prefill_pass": 2.2857142857142856
+        },
+        {
+          "id": "r05",
+          "median_itl_ms": 10.703838749019607,
+          "median_ttft_ms": 281.25818849999996,
+          "output_tokens_per_second": 615.8415807091039,
+          "requests_per_prefill_pass": 2.1333333333333333
+        }
+      ],
+      "requests_per_prefill_pass": {
+        "count": 5,
+        "max": 2.4615384615384617,
+        "mean": 2.2904029304029305,
+        "median": 2.2857142857142856,
+        "min": 2.1333333333333333,
+        "sample_cv": 0.05074020289844603,
+        "sample_stddev": 0.11621550940784006
+      },
+      "shape": {
+        "expected_requests": 32,
+        "target_concurrency": 8,
+        "target_isl": 256,
+        "target_osl": 256
+      }
+    }
+  }
+}

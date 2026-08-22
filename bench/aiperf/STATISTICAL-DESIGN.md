@@ -118,6 +118,28 @@ The scenario must run at least 900 seconds and must report
 Fixed synthetic and AgentX results are both factual. They answer different
 questions and are never merged into one score.
 
+## Request turnover and refill batching
+
+The clean decode panel intentionally rejects any interval containing prefill
+work. It therefore cannot detect a scheduler regression that admits each
+replacement request as a separate prefill while a fixed number of other
+requests continue decoding.
+
+The turnover panel closes that gap without contaminating the decode metric. It
+submits 16 unique requests at C1/C2/C4 and 32 at C8, providing at least four
+closed-loop replacement waves with 256-input/256-output shapes. The routine
+engine-release screen uses three same-process prompt-path repetitions at C8.
+The broader screen uses three at C1/C2/C4/C8, and full qualification/publication
+uses five at every concurrency. Scheduler, admission, batching, or refill
+changes, a new upstream-main integration, and an anomalous C8 release screen
+require the full panel. The analyzer validates request shape and client/server
+occupancy, then reports output rate and latency beside the number of requests
+served per prefill forward pass. That batching ratio is diagnostic evidence for
+the frozen short-prompt/chunking method, not a portable engine score.
+
+Turnover results remain a separate decision dimension. They are never averaged
+with fixed decode, cold prefill, AgentX, capacity, or quality.
+
 ## Validity and reporting
 
 Objective invalidation conditions are wrong token shape, failed requests,

@@ -723,7 +723,7 @@ index 6a0406e277..76c26b5d4e 100644
              use_torch_symm_mem_allreduce=False,
              use_message_queue_broadcaster=envs.SGLANG_USE_MESSAGE_QUEUE_BROADCASTER.get(),
 diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
-index 31c2637bb0..282dc68833 100644
+index 7bdc08b287..962fb1cc71 100644
 --- a/python/sglang/srt/entrypoints/openai/serving_chat.py
 +++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
 @@ -1252,7 +1252,13 @@ class OpenAIServingChat(OpenAIServingBase):
@@ -790,10 +790,10 @@ index 2608621f6a..a52dc59458 100644
 +        async for _ in tokenizer_manager.generate_request(generate_req_input, None):
 +            pass
 diff --git a/python/sglang/srt/environ.py b/python/sglang/srt/environ.py
-index 4cc5e50153..d7e6244a8a 100644
+index 86b95e63fc..28cc6b4cc7 100644
 --- a/python/sglang/srt/environ.py
 +++ b/python/sglang/srt/environ.py
-@@ -1111,6 +1111,22 @@ class Envs:
+@@ -1123,6 +1123,22 @@ class Envs:
      SGLANG_CUSTOM_ALL_REDUCE_V2_MAX_SIZE_KB = EnvInt(16 * 1024)
      SGLANG_FORCE_CUSTOM_ALL_REDUCE_V2_PULL_SIZE_KB = EnvInt(None)
      SGLANG_FORCE_CUSTOM_ALL_REDUCE_V2_PUSH_SIZE_KB = EnvInt(None)
@@ -816,7 +816,7 @@ index 4cc5e50153..d7e6244a8a 100644
  
      # ===================================================================
      # RoPE cache
-@@ -1277,6 +1293,10 @@ class Envs:
+@@ -1289,6 +1305,10 @@ class Envs:
      # Per-rank local query rows (after DP-attention sharding when enabled),
      # not request ISL.
      SGLANG_OPT_DSV4_NONPAGED_INDEXER_MIN_QUERY_TOKENS = EnvInt(8192)
@@ -1682,6 +1682,216 @@ index 0000000000..78d341b228
 +        use_masked_gemm=False,
 +        m_indices=m_indices,
 +    )
+diff --git a/python/sglang/srt/managers/min_free_slots_delayer.py b/python/sglang/srt/managers/min_free_slots_delayer.py
+index 9e31e2107c..00d56181a4 100644
+--- a/python/sglang/srt/managers/min_free_slots_delayer.py
++++ b/python/sglang/srt/managers/min_free_slots_delayer.py
+@@ -1,6 +1,14 @@
+ from typing import Optional
+ 
+ 
++def resolve_auto_min_free_slots(request_target: int) -> Optional[int]:
++    """Scale a refill threshold from the observed request target."""
++    request_target = max(0, int(request_target))
++    if request_target < 8:
++        return None
++    return min(4, max(2, (request_target + 5) // 6))
++
++
+ def resolve_min_free_slots(
+     user_value: Optional[int],
+     max_running_requests: int,
+@@ -17,22 +25,123 @@ def resolve_min_free_slots(
+     if user_value is not None:
+         threshold = min(user_value, max_running_requests)
+         return threshold if threshold > 1 else None
+-    if is_dflash_family and max_running_requests >= 8:
+-        return min(4, max(2, (max_running_requests + 5) // 6))
++    if is_dflash_family:
++        return resolve_auto_min_free_slots(max_running_requests)
+     return None
+ 
+ 
+ class MinFreeSlotsDelayer:
+-    """Delay fresh prefill admissions until at least ``min_free_slots`` running-
+-    request slots free up, batching them into one admission instead of one at a
+-    time. Useful when each admission is expensive (e.g. DFlash's draft prefill).
++    """Batch replacement prefills after enough active requests complete.
++
++    ``num_allocatable_reqs`` includes request-pool capacity that may never have
++    been occupied. Counting it directly makes the delay ineffective whenever
++    configured capacity is larger than workload concurrency. Track the request
++    target established by actual admissions instead, while allowing a growing
++    workload to use idle capacity immediately.
+ 
+     Per-rank local: running-batch slots are private to each DP rank, so a rank
+     with free slots does not wait for a congested peer.
+     """
+ 
+-    def __init__(self, min_free_slots: int):
++    def __init__(
++        self,
++        min_free_slots: int,
++        *,
++        scale_with_observed_target: bool = False,
++        max_delay_passes: Optional[int] = None,
++    ):
++        if max_delay_passes is not None and max_delay_passes < 0:
++            raise ValueError("max_delay_passes must be non-negative")
+         self._min_free_slots = min_free_slots
++        self._scale_with_observed_target = scale_with_observed_target
++        self._max_delay_passes = max_delay_passes
++        self._delay_passes = 0
++        self._target_running_bs = 0
++
++    def should_delay(
++        self,
++        *,
++        running_bs: int,
++        num_allocatable_reqs: int,
++        waiting_bs: int,
++        active_running_bs: Optional[int] = None,
++    ) -> bool:
++        """Return whether this prefill attempt should wait for a larger batch.
++
++        ``running_bs`` is raw scheduler occupancy, including requests that
++        finished since the last decode update. ``active_running_bs`` excludes
++        those finished requests. The former determines which slots are already
++        reusable; the latter distinguishes replacements from real demand
++        growth. Callers without deferred completion state may omit the latter.
++        """
++        running_bs = max(0, int(running_bs))
++        if running_bs == 0:
++            self._target_running_bs = 0
++            self._delay_passes = 0
++            return False
++
++        if active_running_bs is None:
++            active_running_bs = running_bs
++        active_running_bs = min(running_bs, max(0, int(active_running_bs)))
++        self._target_running_bs = max(self._target_running_bs, active_running_bs)
++        refillable_bs = min(max(0, int(num_allocatable_reqs)), max(0, int(waiting_bs)))
++        if refillable_bs == 0:
++            self._delay_passes = 0
++            return False
++
++        active_demand = active_running_bs + refillable_bs
++        if active_demand > self._target_running_bs:
++            # Do not delay a real increase in workload concurrency.
++            self._delay_passes = 0
++            return False
++
++        min_free_slots = self._resolve_threshold()
++        if min_free_slots is None:
++            self._delay_passes = 0
++            return False
++
++        # Adapt after a real workload contraction without mistaking a staggered
++        # replacement for a lower target. Equality proves that the decode update
++        # already removed finished requests; the threshold-sized hysteresis
++        # leaves one refill batch of room for replacements still in transit.
++        if (
++            running_bs == active_running_bs
++            and self._target_running_bs - active_demand >= min_free_slots
++        ):
++            self._target_running_bs = active_demand
++            self._delay_passes = 0
++            min_free_slots = self._resolve_threshold()
++            if min_free_slots is None:
++                self._delay_passes = 0
++                return False
++
++        # Finished requests remain in the raw running batch until the next
++        # decode update filters them. Do not treat those slots as reusable yet:
++        # delaying this pass lets filtering happen and gives replacement
++        # requests a chance to accumulate into one prefill batch.
++        num_freed_slots = max(0, self._target_running_bs - running_bs)
++        if num_freed_slots >= min_free_slots:
++            self._delay_passes = 0
++            return False
++        if (
++            self._max_delay_passes is not None
++            and self._delay_passes >= self._max_delay_passes
++        ):
++            self._delay_passes = 0
++            return False
++
++        self._delay_passes += 1
++        return True
++
++    def _resolve_threshold(self) -> Optional[int]:
++        if self._scale_with_observed_target:
++            return resolve_auto_min_free_slots(self._target_running_bs)
++        return min(self._min_free_slots, self._target_running_bs)
+ 
+-    def should_delay(self, *, running_bs: int, num_allocatable_reqs: int) -> bool:
+-        return running_bs > 0 and num_allocatable_reqs < self._min_free_slots
++    def on_prefill_admitted(self, *, active_running_bs: int, admitted_bs: int) -> None:
++        """Record the request target established by an actual prefill batch."""
++        self._target_running_bs = max(
++            self._target_running_bs,
++            max(0, int(active_running_bs)) + max(0, int(admitted_bs)),
++        )
++        self._delay_passes = 0
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index b1bba1fdb3..325d0599d2 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -1054,7 +1054,11 @@ class Scheduler(
+         )
+         if min_free_slots is not None:
+             self.min_free_slots_delayer = MinFreeSlotsDelayer(
+-                min_free_slots=min_free_slots
++                min_free_slots=min_free_slots,
++                scale_with_observed_target=(
++                    get_schedule().min_free_slots_delay is None
++                ),
++                max_delay_passes=get_schedule().min_free_slots_max_delay_passes,
+             )
+         if not get_parallel().pp_max_micro_batch_size:
+             get_context().override(
+@@ -3270,16 +3274,21 @@ class Scheduler(
+             return None, running_batch
+ 
+         running_bs = len(running_batch.reqs)
++        track_min_free_slots_admission = (
++            self.min_free_slots_delayer is not None and self.chunked_req is None
++        )
+         # Skipped during a chunked prefill: that pass must proceed regardless.
+-        if (
+-            self.min_free_slots_delayer is not None
+-            and self.chunked_req is None
+-            and self.min_free_slots_delayer.should_delay(
++        if track_min_free_slots_admission:
++            active_running_bs = sum(
++                not req.finished() for req in running_batch.reqs
++            )
++            if self.min_free_slots_delayer.should_delay(
+                 running_bs=running_bs,
++                active_running_bs=active_running_bs,
+                 num_allocatable_reqs=self.get_num_allocatable_reqs(running_bs),
+-            )
+-        ):
+-            return None, running_batch
++                waiting_bs=len(self.waiting_queue),
++            ):
++                return None, running_batch
+ 
+         # Ignore the check if self.chunked_req is not None.
+         # In the non-PP case, when self.chunked_req is not None, num_allocatable_reqs should always be greater than 0,
+@@ -3452,6 +3461,12 @@ class Scheduler(
+         if len(can_run_list) == 0:
+             return None, running_batch
+ 
++        if track_min_free_slots_admission:
++            self.min_free_slots_delayer.on_prefill_admitted(
++                active_running_bs=sum(not req.finished() for req in running_batch.reqs),
++                admitted_bs=len(can_run_list),
++            )
++
+         can_run_set = set(can_run_list)
+         self.waiting_queue = [x for x in self.waiting_queue if x not in can_run_set]
+         if adder.preempt_list:
 diff --git a/python/sglang/srt/model_loader/utils.py b/python/sglang/srt/model_loader/utils.py
 index 1996033216..c82e5d60fb 100644
 --- a/python/sglang/srt/model_loader/utils.py
@@ -1706,7 +1916,7 @@ index 1996033216..c82e5d60fb 100644
          return False
      if weight_shape is not None and (
 diff --git a/python/sglang/srt/models/deepseek_v4.py b/python/sglang/srt/models/deepseek_v4.py
-index bc2f397617..dc4c08ac89 100644
+index e088f6b056..d1760c9758 100644
 --- a/python/sglang/srt/models/deepseek_v4.py
 +++ b/python/sglang/srt/models/deepseek_v4.py
 @@ -29,6 +29,7 @@ from sglang.kernels.ops.attention.dsv4 import (
@@ -1749,7 +1959,7 @@ index bc2f397617..dc4c08ac89 100644
              )
          self.wo_b = RowParallelLinear(
              self.n_groups * self.o_lora_rank,
-@@ -1504,12 +1520,19 @@ class MQALayer(MqaAttentionBase):
+@@ -1538,12 +1554,19 @@ class MQALayer(MqaAttentionBase):
          )
  
          tp_slice, q_padded, q_out = slice(None), None, None
@@ -1770,7 +1980,7 @@ index bc2f397617..dc4c08ac89 100644
              # Only [0:n_local_heads] is written below. Uninitialized padded TP
              # heads inject NaN into attention on gfx942 (fnuz), so zero-init
              # there; other archs tolerate new_empty and skip the per-forward
-@@ -1640,8 +1663,9 @@ class MQALayer(MqaAttentionBase):
+@@ -1677,8 +1700,9 @@ class MQALayer(MqaAttentionBase):
  
              T, G, D = o.shape
              R = self.o_lora_rank
@@ -1782,7 +1992,7 @@ index bc2f397617..dc4c08ac89 100644
                  o_fp8, o_s = sglang_per_token_group_quant_fp8_dsv4_wo_a(o)
                  recipe = (1, 1, 128)
              else:
-@@ -1881,7 +1905,12 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1918,7 +1942,12 @@ class DeepseekV4DecoderLayer(nn.Module):
              )
              return y, post.squeeze(-1), comb, False
  
@@ -1796,7 +2006,7 @@ index bc2f397617..dc4c08ac89 100644
              from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
                  tf32_hc_prenorm_gemm,
              )
-@@ -1908,6 +1937,8 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1945,6 +1974,8 @@ class DeepseekV4DecoderLayer(nn.Module):
              self.hc_sinkhorn_iters,
              self.hc_eps,
          )
@@ -1805,7 +2015,7 @@ index bc2f397617..dc4c08ac89 100644
          # y is the post-norm activation fed into the MoE. Allocate it in the
          # symmetric memory pool so the downstream all-reduce uses the low-latency
          # NCCL symmetric path: the Triton inplace MoE runner writes the expert
-@@ -1917,7 +1948,7 @@ class DeepseekV4DecoderLayer(nn.Module):
+@@ -1954,7 +1985,7 @@ class DeepseekV4DecoderLayer(nn.Module):
          with use_symmetric_memory(
              get_tp_group(), disabled=not is_allocation_symmetric()
          ):
@@ -1814,7 +2024,7 @@ index bc2f397617..dc4c08ac89 100644
          return y, post.squeeze(1), comb.squeeze(1), False
  
      def hc_post(
-@@ -3179,7 +3210,7 @@ class DeepseekV4ForCausalLM(nn.Module):
+@@ -3216,7 +3247,7 @@ class DeepseekV4ForCausalLM(nn.Module):
      def _setup_fp8_wo_a_scales(self, is_nextn: bool) -> None:
          from sglang.srt.layers import deep_gemm_wrapper
  
@@ -1823,7 +2033,7 @@ index bc2f397617..dc4c08ac89 100644
              from deep_gemm import transform_sf_into_required_layout
  
          if is_nextn:
-@@ -3196,7 +3227,7 @@ class DeepseekV4ForCausalLM(nn.Module):
+@@ -3233,7 +3264,7 @@ class DeepseekV4ForCausalLM(nn.Module):
              D = attn.wo_a.weight.shape[1]
  
              raw_scale = attn.wo_a.weight_scale_inv.data.view(G, R // 128, D // 128)
@@ -1833,10 +2043,40 @@ index bc2f397617..dc4c08ac89 100644
                      raw_scale,
                      mn=R,
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index e7c8d4c054..966f937b44 100644
+index 912701c51e..74ec46871c 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
-@@ -5548,15 +5548,23 @@ class ServerArgs:
+@@ -3420,9 +3420,18 @@ class ServerArgs:
+             "Useful when each admission is disproportionately expensive, e.g. "
+             "speculative decoding with a separate draft prefill pass. An "
+             "explicit value always wins, capped by max-running-requests "
+-            "(1 disables). When unset, DFlash workloads auto-enable the "
+-            "formula; other workloads stay disabled. Not supported with "
+-            "pipeline parallelism."
++            "(1 disables). When unset, DFlash workloads scale the formula "
++            "from active request demand; other workloads stay disabled. Not "
++            "supported with pipeline parallelism."
++        ),
++        NS("schedule"),
++    ] = None
++    min_free_slots_max_delay_passes: A[
++        Optional[int],
++        (
++            "Maximum scheduler passes to wait while accumulating the "
++            "requested free slots. Unset waits until the threshold is reached; "
++            "0 disables waiting."
+         ),
+         NS("schedule"),
+     ] = None
+@@ -3656,6 +3665,7 @@ class ServerArgs:
+         self._handle_media_url_security()
+         self._handle_hicache_ratio_default()
+         self._validate_prefill_decode_interval()
++        self._validate_min_free_slots_max_delay_passes()
+         if self.model_path.lower() in ["none", "dummy"]:
+             return
+ 
+@@ -5543,15 +5553,23 @@ class ServerArgs:
              if is_sm120_supported():
                  # SM120 lacks tcgen05/TMEM: disable features that depend on
                  # DeepGEMM or require >99KB SMEM (topk_v2).
@@ -1866,7 +2106,7 @@ index e7c8d4c054..966f937b44 100644
              elif is_hip():
                  envs.SGLANG_OPT_DEEPGEMM_HC_PRENORM.set(False)
                  envs.SGLANG_OPT_FP8_WO_A_GEMM.set(False)
-@@ -8191,7 +8199,7 @@ class ServerArgs:
+@@ -8180,7 +8198,7 @@ class ServerArgs:
              explicit = envs.SGLANG_OPT_FP8_WO_A_GEMM.is_set()
              supported = deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0 or (
                  deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
@@ -1875,11 +2115,35 @@ index e7c8d4c054..966f937b44 100644
                  and explicit
              )
              if not supported and explicit:
+@@ -8606,6 +8624,15 @@ class ServerArgs:
+         if self.prefill_decode_interval < 0:
+             raise ValueError("--prefill-decode-interval must be non-negative.")
+ 
++    def _validate_min_free_slots_max_delay_passes(self):
++        if (
++            self.min_free_slots_max_delay_passes is not None
++            and self.min_free_slots_max_delay_passes < 0
++        ):
++            raise ValueError(
++                "--min-free-slots-max-delay-passes must be non-negative."
++            )
++
+     def _handle_other_validations(self):
+         if self.default_chat_template_kwargs is not None and not isinstance(
+             self.default_chat_template_kwargs, dict
+@@ -9224,7 +9251,6 @@ class ServerArgs:
+             "pp_max_micro_batch_size must be a positive integer or None (for auto-compute). "
+             f"Got: {self.pp_max_micro_batch_size}"
+         )
+-
+         assert not (self.disable_cuda_graph_padding and self.enable_torch_compile), (
+             "--disable-cuda-graph-padding is incompatible with --enable-torch-compile. "
+             "With padding disabled, every distinct batch size gets its own torch.compile + "
 diff --git a/python/sglang/srt/speculative/dflash_worker_v2.py b/python/sglang/srt/speculative/dflash_worker_v2.py
-index 7ae69921b5..ab982196c1 100644
+index 59aedd3bbd..edec941f3c 100644
 --- a/python/sglang/srt/speculative/dflash_worker_v2.py
 +++ b/python/sglang/srt/speculative/dflash_worker_v2.py
-@@ -287,6 +287,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+@@ -288,6 +288,7 @@ class DFlashWorkerV2(BaseSpecWorker):
          self._warned_sampling_fallback = False
          self._draft_probs_buf = None
          self._logged_first_verify = False
@@ -1887,7 +2151,7 @@ index 7ae69921b5..ab982196c1 100644
  
          bundle = build_draft_tp_worker(
              server_args=server_args,
-@@ -450,7 +451,14 @@ class DFlashWorkerV2(BaseSpecWorker):
+@@ -451,7 +452,14 @@ class DFlashWorkerV2(BaseSpecWorker):
              get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
          )
          if is_cuda() and capture_decode_cuda_graph:
@@ -1903,7 +2167,7 @@ index 7ae69921b5..ab982196c1 100644
              if available_mem < 1.0:
                  capture_decode_cuda_graph = False
                  logger.warning(
-@@ -1604,6 +1612,90 @@ class DFlashWorkerV2(BaseSpecWorker):
+@@ -1605,6 +1613,89 @@ class DFlashWorkerV2(BaseSpecWorker):
              self._new_seq_lens_bufs[slot][:bs],
          )
  
@@ -1916,7 +2180,6 @@ index 7ae69921b5..ab982196c1 100644
 +        draft_input,
 +        prefix_lens: torch.Tensor,
 +        bs: int,
-+        device,
 +    ):
 +        new_seq_lens = None
 +        target_predict = None
@@ -1994,7 +2257,7 @@ index 7ae69921b5..ab982196c1 100644
      def _validate_phase1_sampling_support(self, batch: ScheduleBatch) -> None:
          sampling_info = batch.sampling_info
          # A selector draft carries its own q and verifies through accept_sampling, so
-@@ -1660,6 +1752,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+@@ -1661,6 +1752,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                  batch_output.logits_output,
                  batch_output.next_token_ids,
              )
@@ -2002,7 +2265,7 @@ index 7ae69921b5..ab982196c1 100644
              batch_output.new_seq_lens = batch.seq_lens
              if on_publish is not None:
                  on_publish(batch_output.new_seq_lens)
-@@ -2009,72 +2102,22 @@ class DFlashWorkerV2(BaseSpecWorker):
+@@ -2010,72 +2102,21 @@ class DFlashWorkerV2(BaseSpecWorker):
              grammar_mask.apply(logits_output.next_token_logits)
  
          candidates = draft_tokens
@@ -2086,16 +2349,15 @@ index 7ae69921b5..ab982196c1 100644
 +            draft_input=draft_input,
 +            prefix_lens=prefix_lens,
 +            bs=bs,
-+            device=device,
 +        )
  
          if SIMULATE_ACC_LEN > 0:
              if SIMULATE_ACC_TOKEN_MODE not in ("fixed", "real-draft-token"):
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_draft.py b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
-index da261b9e85..01daa4872a 100644
+index 5514c7d490..ff4cb41837 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_draft.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_draft.py
-@@ -22,6 +22,7 @@ from sglang.srt.runtime_context import get_parallel
+@@ -23,6 +23,7 @@ from sglang.srt.runtime_context import get_parallel
  from sglang.srt.speculative.dflash_info_v2 import DFlashDraftInputV2
  from sglang.srt.speculative.draft_worker_common import make_draft_input_v2
  from sglang.srt.speculative.dspark_components.dspark_planner import VerifyWindow
@@ -2103,7 +2365,7 @@ index da261b9e85..01daa4872a 100644
  from sglang.srt.speculative.spec_info import (
      SpeculativeAlgorithm,
      spec_scale_global_num_tokens,
-@@ -107,6 +108,7 @@ def sample_draft_block(
+@@ -108,6 +109,7 @@ def sample_draft_block(
      sampling_info,
      markov_head,
      device: torch.device,
@@ -2111,7 +2373,7 @@ index da261b9e85..01daa4872a 100644
  ) -> DraftBlockResult:
      bs = base_logits.shape[0]
      greedy_mask = resolve_greedy_mask(bs=bs, sampling_info=sampling_info, device=device)
-@@ -124,7 +126,7 @@ def sample_draft_block(
+@@ -125,7 +127,7 @@ def sample_draft_block(
  
          def sampler(step_logits: torch.Tensor, step_idx: int) -> torch.Tensor:
              expect(_DRAFT_STEP_LOGITS, step_logits, msg=f"step {step_idx}")
@@ -2120,7 +2382,7 @@ index da261b9e85..01daa4872a 100644
  
      else:
  
-@@ -134,11 +136,13 @@ def sample_draft_block(
+@@ -135,11 +137,13 @@ def sample_draft_block(
                  exp_noise = torch.empty(
                      step_logits.shape, dtype=torch.float32, device=step_logits.device
                  ).exponential_(1)
@@ -2139,7 +2401,7 @@ index da261b9e85..01daa4872a 100644
                  )
              else:
                  probs = torch.softmax(
-@@ -147,7 +151,9 @@ def sample_draft_block(
+@@ -148,7 +152,9 @@ def sample_draft_block(
                  probs = expect(_DRAFT_PROBS, probs)
                  argmax_tokens = torch.argmax(step_logits, dim=-1)
                  sampled_tokens = torch.multinomial(probs, num_samples=1).squeeze(-1)
@@ -2150,7 +2412,7 @@ index da261b9e85..01daa4872a 100644
  
      draft_tokens, corrected_logits = markov_head.sample_block(
          base_logits,
-@@ -172,6 +178,7 @@ class DraftBlockProposer:
+@@ -173,6 +179,7 @@ class DraftBlockProposer:
          gamma: int,
          mask_token_id: int,
          draft_block_spec_info,
@@ -2158,7 +2420,7 @@ index da261b9e85..01daa4872a 100644
          dp_moe_sync: bool = False,
      ) -> None:
          self.draft_model = draft_model
-@@ -179,6 +186,7 @@ class DraftBlockProposer:
+@@ -180,6 +187,7 @@ class DraftBlockProposer:
          self.gamma = gamma
          self._mask_token_id = mask_token_id
          self._draft_block_spec_info = draft_block_spec_info
@@ -2166,7 +2428,7 @@ index da261b9e85..01daa4872a 100644
          self._draft_sampler = None
          self._dp_moe_sync = dp_moe_sync
  
-@@ -274,6 +282,7 @@ class DraftBlockProposer:
+@@ -275,6 +283,7 @@ class DraftBlockProposer:
                  sampling_info=sampling_info,
                  markov_head=self.draft_model.markov_head,
                  device=device,
@@ -2403,10 +2665,10 @@ index 1bdfa7c4a2..8a981d51ae 100644
      verify_lens_cpu: list[int],
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_tp.py b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
 new file mode 100644
-index 0000000000..36ec231ac1
+index 0000000000..a4b715c44f
 --- /dev/null
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_tp.py
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,53 @@
 +from __future__ import annotations
 +
 +from typing import Optional
@@ -2422,7 +2684,9 @@ index 0000000000..36ec231ac1
 +        self._tp_group = tp_group
 +        self._enabled = tp_group.world_size > 1
 +        self._optional_int_buffer = (
-+            torch.empty((1,), dtype=torch.int64) if self._enabled else None
++            torch.empty((1,), dtype=torch.int64, device="cpu")
++            if self._enabled
++            else None
 +        )
 +
 +    def sync(self, values: torch.Tensor) -> torch.Tensor:
@@ -2523,10 +2787,18 @@ index f486400c83..7509a9a2df 100644
              correct_len=correct_len,
              cap_trim_lens=cap_trim_lens,
 diff --git a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-index d3024c4454..8849cd0732 100644
+index 462db6d61b..ccf4ab4319 100644
 --- a/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
 +++ b/python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py
-@@ -54,6 +54,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
+@@ -16,6 +16,7 @@ from sglang.srt.lora.layers import unwrap_lora_layer
+ from sglang.srt.managers.schedule_batch import ScheduleBatch
+ from sglang.srt.managers.scheduler import GenerationBatchResult
+ from sglang.srt.managers.tp_worker import TpModelWorker
++from sglang.srt.model_executor.cuda_graph_config import Backend
+ from sglang.srt.model_executor.forward_batch_info import (
+     CaptureHiddenMode,
+     compute_position,
+@@ -61,6 +62,7 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
      dp_global_verify_tier_num_tokens,
      idle_ragged_layout,
  )
@@ -2534,7 +2806,7 @@ index d3024c4454..8849cd0732 100644
  from sglang.srt.speculative.dspark_components.dspark_verify import (
      CommitInjectCtx,
      DsparkVerifyEpilogue,
-@@ -66,7 +67,7 @@ from sglang.srt.speculative.spec_utils import (
+@@ -73,7 +75,7 @@ from sglang.srt.speculative.spec_utils import (
      draft_tp_context,
      prepare_mamba_track_for_verify,
  )
@@ -2543,7 +2815,17 @@ index d3024c4454..8849cd0732 100644
  
  logger = logging.getLogger(__name__)
  
-@@ -157,6 +158,18 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -108,7 +110,8 @@ class DSparkWorkerV2(BaseSpecWorker):
+         )
+         self._is_pd_prefill = server_args.disaggregation_mode == "prefill"
+         self._decode_graph_allowed = (
+-            not get_exec().graph.disable_cuda_graph and not self._is_pd_prefill
++            get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
++            and not self._is_pd_prefill
+         )
+         if (
+             get_parallel().enable_dp_attention
+@@ -164,6 +167,18 @@ class DSparkWorkerV2(BaseSpecWorker):
          self.speculative_num_draft_tokens = self.verify_num_draft_tokens
          self._mask_token_id = runtime_config.mask_token_id
  
@@ -2562,7 +2844,7 @@ index d3024c4454..8849cd0732 100644
          if self.ps.tp_rank == 0:
              logger.info(
                  "Initialized DSpark draft runner. attention_backend=%s, model=%s, "
-@@ -202,6 +215,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -211,6 +226,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              tp_rank=self.ps.tp_rank,
              server_args=self.server_args,
              verify_num_draft_tokens=self.verify_num_draft_tokens,
@@ -2570,7 +2852,7 @@ index d3024c4454..8849cd0732 100644
          )
          if (
              get_parallel().enable_dp_attention
-@@ -230,6 +244,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -239,6 +255,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              gamma=self.gamma,
              mask_token_id=self._mask_token_id,
              draft_block_spec_info=self._draft_block_spec_info,
@@ -2578,7 +2860,7 @@ index d3024c4454..8849cd0732 100644
              dp_moe_sync=self._draft_is_moe and get_parallel().enable_dp_attention,
          )
          self._verify_epilogue = None
-@@ -242,6 +257,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -251,6 +268,7 @@ class DSparkWorkerV2(BaseSpecWorker):
                  max_bs=max(get_exec().graph.cuda_graph_config.decode.bs),
                  verify_num_draft_tokens=self.verify_num_draft_tokens,
                  device=self.device,
@@ -2586,7 +2868,7 @@ index d3024c4454..8849cd0732 100644
                  commit_ctx=CommitInjectCtx(
                      draft_model=self.draft_model,
                      block_pos_offsets=self._block_pos_offsets,
-@@ -280,6 +296,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -289,6 +307,7 @@ class DSparkWorkerV2(BaseSpecWorker):
              verify_num_draft_tokens=self.verify_num_draft_tokens,
              model_runner=self.model_runner,
              kv_injector=self._kv_injector,
@@ -2594,7 +2876,7 @@ index d3024c4454..8849cd0732 100644
              verify_epilogue=self._verify_epilogue,
              simulate_acc_len=self._simulate_acc_len,
          )
-@@ -355,8 +372,17 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -364,8 +383,17 @@ class DSparkWorkerV2(BaseSpecWorker):
  
      def init_cuda_graphs(self):
          capture_decode_cuda_graph = self._decode_graph_allowed
@@ -2614,7 +2896,7 @@ index d3024c4454..8849cd0732 100644
              if available_mem < 1.0:
                  capture_decode_cuda_graph = False
                  logger.warning(
-@@ -373,7 +399,9 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -382,7 +410,9 @@ class DSparkWorkerV2(BaseSpecWorker):
                  # from being the intended precision fallback, skipping the
                  # unused hook avoids paying for two proposal computations.
                  if envs.SGLANG_DSPARK_FOLDED_PROPOSAL.get():
@@ -2625,7 +2907,7 @@ index d3024c4454..8849cd0732 100644
                      if self._draft_sampler is not None:
                          self.draft_model_runner.capture_tail_hooks.append(
                              make_draft_sampler_capture_hook(self._draft_sampler)
-@@ -383,13 +411,15 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -392,13 +422,15 @@ class DSparkWorkerV2(BaseSpecWorker):
                  capture_decode_cuda_graph=capture_decode_cuda_graph
              )
  
@@ -2642,7 +2924,7 @@ index d3024c4454..8849cd0732 100644
              confidence_fn=(
                  self._verify_planner.compute_confidence_tensor
                  if self._verify_planner.carries_confidence
-@@ -449,6 +479,7 @@ class DSparkWorkerV2(BaseSpecWorker):
+@@ -458,6 +490,7 @@ class DSparkWorkerV2(BaseSpecWorker):
          )
          logits_output = batch_output.logits_output
          next_token_ids = batch_output.next_token_ids
@@ -2968,6 +3250,333 @@ index 0000000000..82b070ac0f
 +    ref = _reference(x_flat, pre, hc, torch.bfloat16)
 +    scale = ref.float().abs().max().clamp(min=1e-6)
 +    assert (got.float() - ref.float()).abs().max() / scale < 5e-2
+diff --git a/test/registered/scheduler/test_min_free_slots_delayer.py b/test/registered/scheduler/test_min_free_slots_delayer.py
+index 44f2f8c49d..b28899c69e 100644
+--- a/test/registered/scheduler/test_min_free_slots_delayer.py
++++ b/test/registered/scheduler/test_min_free_slots_delayer.py
+@@ -2,6 +2,7 @@ import unittest
+ 
+ from sglang.srt.managers.min_free_slots_delayer import (
+     MinFreeSlotsDelayer,
++    resolve_auto_min_free_slots,
+     resolve_min_free_slots,
+ )
+ from sglang.test.ci.ci_register import register_cpu_ci
+@@ -10,6 +11,14 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
+ 
+ 
+ class TestResolveMinFreeSlots(unittest.TestCase):
++    def test_auto_formula_scales_with_request_target(self):
++        self.assertIsNone(resolve_auto_min_free_slots(0))
++        self.assertIsNone(resolve_auto_min_free_slots(7))
++        self.assertEqual(resolve_auto_min_free_slots(8), 2)
++        self.assertEqual(resolve_auto_min_free_slots(12), 2)
++        self.assertEqual(resolve_auto_min_free_slots(13), 3)
++        self.assertEqual(resolve_auto_min_free_slots(24), 4)
++        self.assertEqual(resolve_auto_min_free_slots(512), 4)
+ 
+     def test_unset_non_dflash_disables(self):
+         self.assertIsNone(resolve_min_free_slots(None, 512, is_dflash_family=False))
+@@ -50,20 +59,294 @@ class TestResolveMinFreeSlots(unittest.TestCase):
+ 
+ 
+ class TestMinFreeSlotsDelayer(unittest.TestCase):
+-
+     def test_delays_below_threshold(self):
+         delayer = MinFreeSlotsDelayer(min_free_slots=4)
+-        self.assertTrue(delayer.should_delay(running_bs=100, num_allocatable_reqs=2))
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=100)
++        self.assertTrue(
++            delayer.should_delay(running_bs=98, num_allocatable_reqs=414, waiting_bs=2)
++        )
+ 
+     def test_no_delay_at_or_above_threshold(self):
+         delayer = MinFreeSlotsDelayer(min_free_slots=4)
+-        self.assertFalse(delayer.should_delay(running_bs=100, num_allocatable_reqs=4))
+-        self.assertFalse(delayer.should_delay(running_bs=100, num_allocatable_reqs=8))
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=100)
++        self.assertFalse(
++            delayer.should_delay(running_bs=96, num_allocatable_reqs=416, waiting_bs=4)
++        )
+ 
+     def test_no_delay_when_idle(self):
+         # Nothing running: no decode batch to protect, prefill at once.
+         delayer = MinFreeSlotsDelayer(min_free_slots=4)
+-        self.assertFalse(delayer.should_delay(running_bs=0, num_allocatable_reqs=0))
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++        self.assertFalse(
++            delayer.should_delay(running_bs=0, num_allocatable_reqs=48, waiting_bs=8)
++        )
++
++    def test_unused_request_capacity_does_not_count_as_freed_slots(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++        self.assertFalse(
++            delayer.should_delay(running_bs=6, num_allocatable_reqs=42, waiting_bs=2)
++        )
++
++    def test_workload_growth_is_admitted_immediately(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertFalse(
++            delayer.should_delay(running_bs=8, num_allocatable_reqs=40, waiting_bs=1)
++        )
++
++    def test_replacement_plus_growth_is_admitted_immediately(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertFalse(
++            delayer.should_delay(
++                running_bs=8,
++                active_running_bs=7,
++                num_allocatable_reqs=40,
++                waiting_bs=2,
++            )
++        )
++
++    def test_actual_admission_resets_request_target(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++        self.assertFalse(
++            delayer.should_delay(running_bs=6, num_allocatable_reqs=42, waiting_bs=2)
++        )
++
++        delayer.on_prefill_admitted(active_running_bs=6, admitted_bs=2)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++
++    def test_auto_threshold_scales_with_observed_target(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++        self.assertFalse(
++            delayer.should_delay(running_bs=6, num_allocatable_reqs=42, waiting_bs=2)
++        )
++
++    def test_finished_requests_do_not_count_as_reusable_slots(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=8,
++                active_running_bs=6,
++                num_allocatable_reqs=40,
++                waiting_bs=1,
++            )
++        )
++
++    def test_filtered_slots_release_at_the_threshold(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertFalse(
++            delayer.should_delay(
++                running_bs=6,
++                active_running_bs=6,
++                num_allocatable_reqs=42,
++                waiting_bs=2,
++            )
++        )
++
++    def test_partial_refill_does_not_lower_established_target(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++        delayer.on_prefill_admitted(active_running_bs=6, admitted_bs=1)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=7,
++                active_running_bs=7,
++                num_allocatable_reqs=41,
++                waiting_bs=1,
++            )
++        )
++
++    def test_target_adapts_after_large_workload_contraction(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=32)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=8,
++                active_running_bs=8,
++                num_allocatable_reqs=40,
++                waiting_bs=1,
++            )
++        )
++        self.assertFalse(
++            delayer.should_delay(
++                running_bs=7,
++                active_running_bs=7,
++                num_allocatable_reqs=41,
++                waiting_bs=2,
++            )
++        )
++
++    def test_unfiltered_completions_do_not_trigger_target_contraction(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=32)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=32,
++                active_running_bs=8,
++                num_allocatable_reqs=16,
++                waiting_bs=1,
++            )
++        )
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=8,
++                active_running_bs=8,
++                num_allocatable_reqs=40,
++                waiting_bs=1,
++            )
++        )
++
++    def test_unused_capacity_does_not_change_decision(self):
++        small_pool = MinFreeSlotsDelayer(min_free_slots=2)
++        large_pool = MinFreeSlotsDelayer(min_free_slots=2)
++        for delayer in (small_pool, large_pool):
++            delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertEqual(
++            small_pool.should_delay(running_bs=7, num_allocatable_reqs=1, waiting_bs=1),
++            large_pool.should_delay(
++                running_bs=7, num_allocatable_reqs=505, waiting_bs=1
++            ),
++        )
++
++    def test_auto_threshold_uses_larger_active_batch_formula(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=16)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=14, num_allocatable_reqs=34, waiting_bs=2)
++        )
++        self.assertFalse(
++            delayer.should_delay(running_bs=13, num_allocatable_reqs=35, waiting_bs=3)
++        )
++
++    def test_auto_threshold_is_shape_independent(self):
++        for target in (8, 12, 13, 24, 48, 128):
++            with self.subTest(target=target):
++                threshold = resolve_auto_min_free_slots(target)
++                assert threshold is not None
++                delayer = MinFreeSlotsDelayer(
++                    min_free_slots=4, scale_with_observed_target=True
++                )
++                delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=target)
++
++                self.assertTrue(
++                    delayer.should_delay(
++                        running_bs=target - threshold + 1,
++                        num_allocatable_reqs=512,
++                        waiting_bs=1,
++                    )
++                )
++                self.assertFalse(
++                    delayer.should_delay(
++                        running_bs=target - threshold,
++                        num_allocatable_reqs=512,
++                        waiting_bs=threshold,
++                    )
++                )
++
++    def test_staggered_closed_loop_refill_sequence(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=4, scale_with_observed_target=True)
++
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=1)
++        self.assertFalse(
++            delayer.should_delay(
++                running_bs=1,
++                active_running_bs=1,
++                num_allocatable_reqs=47,
++                waiting_bs=7,
++            )
++        )
++        delayer.on_prefill_admitted(active_running_bs=1, admitted_bs=7)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=8,
++                active_running_bs=6,
++                num_allocatable_reqs=40,
++                waiting_bs=1,
++            )
++        )
++        self.assertFalse(
++            delayer.should_delay(
++                running_bs=6,
++                active_running_bs=6,
++                num_allocatable_reqs=42,
++                waiting_bs=2,
++            )
++        )
++        delayer.on_prefill_admitted(active_running_bs=6, admitted_bs=2)
++
++        self.assertTrue(
++            delayer.should_delay(
++                running_bs=7,
++                active_running_bs=7,
++                num_allocatable_reqs=41,
++                waiting_bs=1,
++            )
++        )
++
++    def test_max_delay_passes_releases_an_incomplete_refill(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2, max_delay_passes=1)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++        self.assertFalse(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++
++    def test_admission_resets_max_delay_passes(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2, max_delay_passes=1)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++        self.assertFalse(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++
++        delayer.on_prefill_admitted(active_running_bs=7, admitted_bs=1)
++
++        self.assertTrue(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++
++    def test_zero_max_delay_passes_disables_waiting(self):
++        delayer = MinFreeSlotsDelayer(min_free_slots=2, max_delay_passes=0)
++        delayer.on_prefill_admitted(active_running_bs=0, admitted_bs=8)
++
++        self.assertFalse(
++            delayer.should_delay(running_bs=7, num_allocatable_reqs=41, waiting_bs=1)
++        )
++
++    def test_negative_max_delay_passes_is_rejected(self):
++        with self.assertRaisesRegex(ValueError, "must be non-negative"):
++            MinFreeSlotsDelayer(min_free_slots=2, max_delay_passes=-1)
+ 
+ 
+ if __name__ == "__main__":
 diff --git a/test/registered/unit/distributed/test_pcie_ipc_ar.py b/test/registered/unit/distributed/test_pcie_ipc_ar.py
 new file mode 100644
 index 0000000000..3d54120904
@@ -3141,10 +3750,10 @@ index 0000000000..3d54120904
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/test/registered/unit/entrypoints/openai/test_serving_chat.py b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-index f9e546f831..27754ea3f1 100644
+index 033a14761f..ab78310d88 100644
 --- a/test/registered/unit/entrypoints/openai/test_serving_chat.py
 +++ b/test/registered/unit/entrypoints/openai/test_serving_chat.py
-@@ -1248,6 +1248,39 @@ class ServingChatTestCase(unittest.TestCase):
+@@ -1253,6 +1253,39 @@ class ServingChatTestCase(unittest.TestCase):
  
                  self.chat._process_messages(req, is_multimodal=False)
  
@@ -3478,3 +4087,24 @@ index e73e9a9925..f5d7fc92d7 100644
      def test_nonpaged_dispatch_uses_gathered_kv_contract(self):
          query_rows = 4
          plan = NonPagedIndexerPlan(
+diff --git a/test/registered/unit/server_args/test_server_args.py b/test/registered/unit/server_args/test_server_args.py
+index 28ea5f7edd..cd1c272caa 100644
+--- a/test/registered/unit/server_args/test_server_args.py
++++ b/test/registered/unit/server_args/test_server_args.py
+@@ -52,6 +52,16 @@ class TestPrepareServerArgs(CustomTestCase):
+         ):
+             ServerArgs(model_path="dummy", prefill_decode_interval=-1)
+ 
++    def test_min_free_slots_max_delay_passes(self):
++        args = ServerArgs(model_path="dummy", min_free_slots_max_delay_passes=1)
++        self.assertEqual(args.min_free_slots_max_delay_passes, 1)
++
++        with self.assertRaisesRegex(
++            ValueError,
++            "--min-free-slots-max-delay-passes must be non-negative",
++        ):
++            ServerArgs(model_path="dummy", min_free_slots_max_delay_passes=-1)
++
+     def test_dsv4_prefill_backend_cli_choices(self):
+         parser = server_args_module.argparse.ArgumentParser()
+         ServerArgs.add_cli_args(parser)
