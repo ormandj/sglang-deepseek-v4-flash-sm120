@@ -20,24 +20,30 @@ class SummaryError(RuntimeError):
 
 EXPECTED_DECODE = {
     "sglang": {
+        "exploratory-decode": {1: 3, 2: 3, 4: 3, 8: 3},
         "quick": {1: 3, 4: 3, 8: 3},
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
+        "repeat-c2-c4": {2: 5, 4: 5},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3, 32: 3},
         "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5, 32: 5},
     },
     "vllm": {
+        "exploratory-decode": {1: 3, 2: 3, 4: 3, 8: 3},
         "quick": {1: 3, 4: 3, 8: 3},
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
+        "repeat-c2-c4": {2: 5, 4: 5},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3},
         "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5},
     },
 }
 EXPECTED_PREFILL = {
+    "exploratory-decode": {},
     "quick": {"8k-c1": 3, "32k-c1": 3, "64k-c1": 3, "128k-c1": 3},
     "prefill-quick": {"8k-c1": 3, "32k-c1": 3, "64k-c1": 3, "128k-c1": 3},
     "decode-supplement": {},
+    "repeat-c2-c4": {},
     "qualification": {
         "8k-c1": 5,
         "32k-c1": 5,
@@ -283,8 +289,8 @@ def summarize(
             "same-process engineering regression signal; synthetic fixed-window "
             "output rate is not expected production, interactive, or application "
             "throughput and includes path-dependent speculative acceptance; "
-            "repetitions are "
-            "prompt-path subsamples, not independent deployment replicates"
+            "repetitions are prompt-path subsamples, not independent deployment "
+            "replicates"
         ),
         "decode": decode,
         "prefill": prefill,

@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,64 @@ def _prefill_passes(document: dict[str, Any]) -> dict[str, Any]:
         "total": sum(value["total"] for value in modes.values()),
         "per_second": sum(value["per_second"] for value in modes.values()),
     }
+
+
+def _counter_total(
+    document: dict[str, Any], names: Sequence[str], *, required_labels: dict[str, str]
+) -> float:
+    """Sum one counter family without double-counting replicated rank series."""
+    try:
+        metrics = document["metrics"]
+    except (KeyError, TypeError) as exc:
+        raise AnalysisError("server summary has no metrics object") from exc
+
+    rank_labels = {"tp_rank", "pp_rank", "moe_ep_rank"}
+    for name in names:
+        metric = metrics.get(name)
+        if not isinstance(metric, dict):
+            continue
+        series = metric.get("series")
+        if not isinstance(series, list):
+            raise AnalysisError(f"server counter {name} has no series list")
+
+        matches: list[tuple[dict[str, str], float]] = []
+        for item in series:
+            try:
+                labels = {
+                    str(key): str(value) for key, value in item["labels"].items()
+                }
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AnalysisError(f"server counter {name} has invalid labels") from exc
+            if any(labels.get(key) != value for key, value in required_labels.items()):
+                continue
+            try:
+                total = float(item["stats"]["total"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AnalysisError(f"server counter {name} has invalid stats") from exc
+            if not math.isfinite(total) or total < 0:
+                raise AnalysisError(f"server counter {name} has an invalid total")
+            matches.append((labels, total))
+
+        if not matches:
+            continue
+        if not any(rank_labels & labels.keys() for labels, _ in matches):
+            return sum(total for _, total in matches)
+
+        by_owner: dict[tuple[tuple[str, str], ...], float] = {}
+        for labels, total in matches:
+            owner_key = tuple(
+                sorted(
+                    (key, value)
+                    for key, value in labels.items()
+                    if key not in rank_labels
+                )
+            )
+            by_owner[owner_key] = max(total, by_owner.get(owner_key, 0.0))
+        return sum(by_owner.values())
+
+    raise AnalysisError(
+        f"server summary has no counter {names[0]} with labels {required_labels}"
+    )
 
 
 def _admission_concurrency_summary(
@@ -236,17 +295,27 @@ def analyze(
         raise AnalysisError("server metrics have no running or waiting request gauges")
     running_summary = _summarize_gauge(running)
     waiting_summary = _summarize_gauge(waiting)
-    if running_summary["max"] > target_concurrency:
-        failures.append(
-            f"server running occupancy reached {running_summary['max']:g}; expected at most {target_concurrency}"
-        )
     if running_summary["max"] < target_concurrency:
         failures.append(
             f"server running occupancy reached only {running_summary['max']:g}; expected {target_concurrency}"
         )
+    if running_summary["max"] > expected_requests:
+        failures.append(
+            f"server running occupancy reached {running_summary['max']:g}; expected at most {expected_requests}"
+        )
     if waiting_summary["max"] > target_concurrency:
         failures.append(
             f"server queue reached {waiting_summary['max']:g}; expected at most {target_concurrency}"
+        )
+
+    chat_completion_posts = _counter_total(
+        server_summary,
+        ("sglang:http_requests", "sglang:http_requests_total"),
+        required_labels={"endpoint": "/v1/chat/completions", "method": "POST"},
+    )
+    if chat_completion_posts != expected_requests:
+        failures.append(
+            f"server observed {chat_completion_posts:g} chat-completion POSTs; expected {expected_requests}"
         )
 
     prefill = _prefill_passes(server_summary)
@@ -296,6 +365,10 @@ def analyze(
         "server_occupancy": {
             "running": running_summary,
             "waiting": waiting_summary,
+        },
+        "server_requests": {
+            "chat_completion_posts": chat_completion_posts,
+            "expected": expected_requests,
         },
         "refill_batching": {
             "prefill_passes": prefill,

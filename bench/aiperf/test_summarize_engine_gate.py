@@ -104,6 +104,32 @@ def test_summarize_quick_gate_retains_every_repetition(tmp_path) -> None:
     assert result["prefill"]["128k-c1"]["prompt_tokens_per_second"] == 8000
 
 
+def test_exploratory_decode_requires_priority_cells_without_prefill(tmp_path) -> None:
+    root = _gate(tmp_path)
+    for repetition in range(1, 4):
+        run_id = f"r{repetition:02d}"
+        c1 = root / "decode" / "c1" / run_id
+        analysis = json.loads(
+            (c1 / "decode-analysis.json").read_text(encoding="utf-8")
+        )
+        analysis["decode"]["target_concurrency"] = 2
+        _write(root / "decode" / "c2" / run_id / "decode-analysis.json", analysis)
+        profile = json.loads(
+            (c1 / "profile_export_aiperf.json").read_text(encoding="utf-8")
+        )
+        _write(
+            root / "decode" / "c2" / run_id / "profile_export_aiperf.json",
+            profile,
+        )
+    for path in root.glob("prefill/*/prefill-analysis.json"):
+        path.unlink()
+
+    result = summarize(root, mode="exploratory-decode", build_id="0.8.0-rc5")
+
+    assert set(result["decode"]) == {"c1", "c2", "c4", "c8"}
+    assert result["prefill"] == {}
+
+
 def test_summarize_rejects_missing_repetition(tmp_path) -> None:
     root = _gate(tmp_path)
     path = root / "decode" / "c1" / "r03" / "decode-analysis.json"
@@ -184,6 +210,50 @@ def test_decode_supplement_requires_only_mid_concurrency_cells(tmp_path) -> None
     assert result["prefill"] == {}
 
 
+def test_repeat_c2_c4_requires_five_independent_repetitions(tmp_path) -> None:
+    for concurrency in (2, 4):
+        for repetition in range(1, 6):
+            run = tmp_path / "decode" / f"c{concurrency}" / f"r{repetition:02d}"
+            _write(
+                run / "decode-analysis.json",
+                {
+                    "validation": {"valid": True},
+                    "decode": {
+                        "target_concurrency": concurrency,
+                        "tokens_per_second_ols": 100 * concurrency + repetition,
+                    },
+                    "engine_work": {
+                        "forward_passes_per_second_ols": 50 + repetition,
+                        "useful_tokens_per_forward_per_request": 5.5,
+                    },
+                    "server_cross_checks": _speculative(repetition),
+                },
+            )
+            _write(
+                run / "profile_export_aiperf.json",
+                {
+                    metric: {
+                        "unit": "ms",
+                        "avg": 10 + repetition,
+                        "p50": 9 + repetition,
+                        "p90": 11 + repetition,
+                        "p99": 12 + repetition,
+                    }
+                    for metric in (
+                        "time_to_first_token",
+                        "inter_token_latency",
+                        "request_latency",
+                    )
+                },
+            )
+
+    result = summarize(tmp_path, mode="repeat-c2-c4", build_id="rc2-repeat")
+
+    assert set(result["decode"]) == {"c2", "c4"}
+    assert result["decode"]["c2"]["engine_forward_passes_per_second"]["count"] == 5
+    assert result["prefill"] == {}
+
+
 def test_prefill_quick_requires_only_quick_prefill_cells(tmp_path) -> None:
     root = _gate(tmp_path)
     for path in root.glob("decode/c*/r*/decode-analysis.json"):
@@ -200,10 +270,9 @@ def test_prefill_quick_requires_only_quick_prefill_cells(tmp_path) -> None:
     }
 
 
-def test_publication_requires_five_samples_per_cell(tmp_path) -> None:
+def test_publication_requires_five_repetitions_and_prefill_requests(tmp_path) -> None:
     for concurrency in (1, 2, 4, 8, 16, 32):
-        repetitions = 5
-        for repetition in range(1, repetitions + 1):
+        for repetition in range(1, 6):
             _write(
                 tmp_path
                 / "decode"
@@ -261,11 +330,8 @@ def test_publication_requires_five_samples_per_cell(tmp_path) -> None:
 
     assert set(result["decode"]) == {"c1", "c2", "c4", "c8", "c16", "c32"}
     assert all(
-        result["decode"][f"c{concurrency}"]["engine_forward_passes_per_second"][
-            "count"
-        ]
-        == 5
-        for concurrency in (1, 2, 4, 8, 16, 32)
+        cell["engine_forward_passes_per_second"]["count"] == 5
+        for cell in result["decode"].values()
     )
     assert all(cell["requests"] == 5 for cell in result["prefill"].values())
 

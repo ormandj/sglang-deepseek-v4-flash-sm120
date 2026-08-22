@@ -68,6 +68,14 @@ Treat the following as one contract and update them in the same change:
   tables;
 - user-visible changes and completed qualification in `CHANGELOG.md`.
 
+Before publishing an engine-changing release, complete the `publication`
+engine panel, including five decode repetitions at every supported concurrency
+and five cache-cold prefill requests at every published length; full GSM8K;
+the near-context and concurrent-capacity checks; and the C1/C8 AgentX validity
+gate. Keep these dimensions separate in the evidence. Packaging- or
+documentation-only releases may reuse them only when the immutable engine,
+dependencies, runtime configuration, and image identity are unchanged.
+
 Every engine-changing public release must run the dedicated C8 turnover gate
 in `release-screen` mode with three valid repetitions. Escalate to the full
 C1/C2/C4/C8 `publication` turnover panel with five valid repetitions per
@@ -78,6 +86,14 @@ turnover evidence only when its engine, dependencies, runtime configuration,
 and immutable image identity are already qualified. Publish the reproducible
 turnover harness and method with the release evidence. Never replace turnover
 with the clean decode panel or average the two dimensions.
+
+For turnover measurements, client request intervals define the concurrency
+contract. SGLang's running-request gauge may temporarily include finished
+entries awaiting scheduler cleanup and therefore is not an upper bound on
+client concurrency. The analyzer must reconcile the server's exact
+`/v1/chat/completions` POST count with the expected request count so unrelated
+traffic invalidates the cell while legitimate scheduler cleanup overlap does
+not.
 
 Never update a result table from memory, a partial run, or a different method.
 Published cells require the frozen method's complete matched sample set. Keep

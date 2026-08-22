@@ -1,5 +1,5 @@
 diff --git a/flashinfer/comm/cuda_ipc.py b/flashinfer/comm/cuda_ipc.py
-index d66c3fa6..66aa9df0 100644
+index d66c3fa63c36031281132cb0158423d6fe3ebf5d..66aa9df0cc4ebf99bba20ad002ebe8fb3d9364e2 100644
 --- a/flashinfer/comm/cuda_ipc.py
 +++ b/flashinfer/comm/cuda_ipc.py
 @@ -15,6 +15,7 @@ limitations under the License.
@@ -54,7 +54,7 @@ index d66c3fa6..66aa9df0 100644
  class CudaRTLibrary:
 diff --git a/tests/comm/test_cuda_ipc.py b/tests/comm/test_cuda_ipc.py
 new file mode 100644
-index 00000000..f133df39
+index 0000000000000000000000000000000000000000..f133df39df897147164fd7d177011d4fabfe955c
 --- /dev/null
 +++ b/tests/comm/test_cuda_ipc.py
 @@ -0,0 +1,97 @@

@@ -140,19 +140,19 @@ for concurrency in 1 2 4 8 16; do
   key="c${concurrency}"
   require_rounded "$readme" "$sglang_summary" ".decode.${key}.engine_forward_passes_per_second.median" 3 "sglang-c${concurrency}-forward"
   require_rounded "$readme" "$vllm_summary" ".decode.${key}.engine_forward_passes_per_second.median" 3 "vllm-c${concurrency}-forward"
-  require_rounded "$readme" "$sglang_summary" ".decode.${key}.useful_tokens_per_second.median" 1 "sglang-c${concurrency}-synthetic"
-  require_rounded "$readme" "$vllm_summary" ".decode.${key}.synthetic_decode_tokens_per_second.median" 1 "vllm-c${concurrency}-synthetic"
+  require_rounded "$readme" "$sglang_summary" "(.decode.${key}.synthetic_decode_tokens_per_second // .decode.${key}.useful_tokens_per_second).median" 1 "sglang-c${concurrency}-synthetic"
+  require_rounded "$readme" "$vllm_summary" "(.decode.${key}.synthetic_decode_tokens_per_second // .decode.${key}.useful_tokens_per_second).median" 1 "vllm-c${concurrency}-synthetic"
 
   require_rounded "$benchmarks" "$sglang_summary" ".decode.${key}.engine_forward_passes_per_second.median" 3 "sglang-c${concurrency}-forward"
   require_rounded "$benchmarks" "$vllm_summary" ".decode.${key}.engine_forward_passes_per_second.median" 3 "vllm-c${concurrency}-forward"
-  require_rounded "$benchmarks" "$sglang_summary" ".decode.${key}.useful_tokens_per_second.median" 1 "sglang-c${concurrency}-synthetic"
-  require_rounded "$benchmarks" "$vllm_summary" ".decode.${key}.synthetic_decode_tokens_per_second.median" 1 "vllm-c${concurrency}-synthetic"
+  require_rounded "$benchmarks" "$sglang_summary" "(.decode.${key}.synthetic_decode_tokens_per_second // .decode.${key}.useful_tokens_per_second).median" 1 "sglang-c${concurrency}-synthetic"
+  require_rounded "$benchmarks" "$vllm_summary" "(.decode.${key}.synthetic_decode_tokens_per_second // .decode.${key}.useful_tokens_per_second).median" 1 "vllm-c${concurrency}-synthetic"
 done
 
 require_rounded "$readme" "$sglang_summary" '.decode.c32.engine_forward_passes_per_second.median' 3 'sglang-c32-forward'
-require_rounded "$readme" "$sglang_summary" '.decode.c32.useful_tokens_per_second.median' 1 'sglang-c32-synthetic'
+require_rounded "$readme" "$sglang_summary" '(.decode.c32.synthetic_decode_tokens_per_second // .decode.c32.useful_tokens_per_second).median' 1 'sglang-c32-synthetic'
 require_rounded "$benchmarks" "$sglang_summary" '.decode.c32.engine_forward_passes_per_second.median' 3 'sglang-c32-forward'
-require_rounded "$benchmarks" "$sglang_summary" '.decode.c32.useful_tokens_per_second.median' 1 'sglang-c32-synthetic'
+require_rounded "$benchmarks" "$sglang_summary" '(.decode.c32.synthetic_decode_tokens_per_second // .decode.c32.useful_tokens_per_second).median' 1 'sglang-c32-synthetic'
 
 for target in 8 32 64 128; do
   key="${target}k-c1"

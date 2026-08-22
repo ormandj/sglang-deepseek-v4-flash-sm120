@@ -29,7 +29,7 @@ benchmark:
 
   dataset:
     type: synthetic
-    entries: ${WARMUP_CONCURRENCY:1}
+    entries: ${WARMUP_REQUESTS:1}
     sampling: sequential
     prompts:
       corpus: coding

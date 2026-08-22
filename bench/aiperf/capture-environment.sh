@@ -22,9 +22,20 @@ mkdir -p "$output_dir"
   echo "benchmark_dp_size=${BENCH_DP_SIZE:-1}"
   echo "model_name=${MODEL_NAME:-unknown}"
   echo "tokenizer_path=${TOKENIZER_PATH:-unknown}"
+  echo "max_context_length=${MAX_CONTEXT_LENGTH:-unknown}"
+  echo "agentx_duration_seconds=${AGENTX_DURATION_SECONDS:-unknown}"
+  echo "agentx_concurrency=${AGENTX_CONCURRENCY:-unknown}"
+  echo "aiperf_workers=${AIPERF_WORKERS:-unknown}"
+  echo "aiperf_record_processors=${AIPERF_RECORD_PROCESSORS:-unknown}"
+  echo "aiperf_random_seed=${AIPERF_RANDOM_SEED:-unknown}"
+  echo "sampling_seed=${SAMPLING_SEED:-unknown}"
 } > "$output_dir/environment.txt"
 
-tr '\000' ' ' < /proc/1/cmdline > "$output_dir/server-command.txt"
+server_command=$(tr '\000' ' ' < /proc/1/cmdline)
+printf '%s' "$server_command" \
+  | sed -E 's/(--(api-key|admin-api-key|ssl-keyfile-password|hf-token|access-token|auth-token|password|secret))([=[:space:]]+)[^[:space:]]+/\1\3<redacted>/g' \
+  > "$output_dir/server-command.txt"
+unset server_command
 printf '\n' >> "$output_dir/server-command.txt"
 nvidia-smi --query-gpu=index,name,uuid,pci.bus_id,pstate,power.limit,memory.total,driver_version --format=csv,noheader > "$output_dir/gpus.csv"
 lscpu > "$output_dir/lscpu.txt"

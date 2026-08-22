@@ -7,11 +7,14 @@ starts, stops, or restarts the server.
 The method deliberately separates three questions:
 
 1. Does the engine execute a fixed decode shape faster?
-2. How many output tokens does the speculative stack produce per verifier step?
+2. How much useful output does the speculative stack produce?
 3. How does the server behave on cold prefill and production-shaped agentic
    traffic?
-4. Does the scheduler keep replacement requests batched while short requests
-   continuously finish at fixed client concurrency?
+
+A separate turnover gate answers a fourth question: how does the scheduler
+behave when short requests continuously finish and are replaced at fixed client
+concurrency? This path is deliberately excluded from the clean decode plateau,
+so both measurements are required for scheduler or admission-policy changes.
 
 [`STATISTICAL-DESIGN.md`](STATISTICAL-DESIGN.md) records why the workloads and
 sample counts were selected.
@@ -30,9 +33,10 @@ that checkout once in the serving pod's persistent tools directory:
 ```
 
 The committed configs accept both authenticated and keyless endpoints.
-`BENCH_API_KEY` takes precedence, then a container-provided `VLLM_API_KEY`;
-with neither set, no authorization header is sent. Keys, arbitrary environment
-variables, internal endpoint names, and registry credentials are not captured.
+`BENCH_API_KEY` takes precedence, followed by the container-provided
+`SGLANG_API_KEY` or `VLLM_API_KEY` for the selected engine. With none set, no
+authorization header is sent. Keys, arbitrary environment variables, internal
+endpoint names, and registry credentials are not captured.
 
 ## Controlled engine gate
 
@@ -46,22 +50,16 @@ Every decode cell uses the same workload:
 - analysis over the same 17,408–20,480 average-context interval.
 
 The primary engine rate is the OLS slope of server-side decode forward passes.
-Synthetic fixed-window output rate and output tokens per forward are reported
-beside it, so speculative-acceptance variation remains visible. “Synthetic
-fixed-window output tok/s” is the OLS slope of the engine's
-generated-output-token counter over the fixed 17,408–20,480 average-context
-interval in this synthetic workload. It is not client end-to-end, production,
-interactive, or application throughput. It combines verifier rate with output
-tokens produced per step, so the accepted-draft-length distribution of each
-fixed prompt/seed path directly affects it and gives it a wider observed spread
-than verifier steps/s. Every
-repetition also records the mean, median, minimum, and maximum DSpARK acceptance
-rate and accepted draft length; the summary describes those run-level values
-without pooling them. SGLang uses its acceptance gauges. vLLM uses the deltas
-of its cumulative draft, draft-token, and accepted-token counters between
-adjacent server-metric scrapes; the per-run record also retains each
-whole-window counter ratio. The analyzer rejects a window with queueing,
-prefill work,
+Synthetic fixed-window output rate and output tokens per forward per request
+are reported beside it so speculative-acceptance variation remains visible.
+Synthetic output rate is not expected production, interactive, or application
+throughput. Every repetition also
+records the mean, median, minimum, and maximum DSpARK acceptance rate and
+accepted draft length; the summary describes those run-level values without
+pooling them. SGLang uses its acceptance gauges. vLLM uses the deltas of its
+cumulative draft, draft-token, and accepted-token counters between adjacent
+server-metric scrapes; the per-run record also retains each whole-window
+counter ratio. The analyzer rejects a window with queueing, prefill work,
 counter resets, wrong occupancy, or an insufficient equal-context interval.
 
 Client metrics are retained in the machine-readable summary, not substituted
@@ -96,16 +94,32 @@ warmup.
 
 | Mode | Decode panel | Cold-prefill panel | Use |
 |---|---|---|---|
+| `exploratory-decode` | C1/C2/C4/C8 x3 | none | bounded decode-candidate screen |
 | `quick` | C1/C4/C8 x3 | 8K/32K/64K/128K x3 | fast candidate screen |
 | `decode-supplement` | C2/C16 x3 | none | fill scale guardrails after a quick run |
+| `repeat-c2-c4` | C2/C4 x5 | none | confirm a suspicious mid-concurrency result before proceeding |
 | `prefill-quick` | none | 8K/32K/64K/128K x3 | matched prefill-only comparison |
 | `qualification` | C1/C2/C4/C8 x5; C16/C32 x3 | all lengths x5 | release decision |
 | `publication` | every supported C x5 | all lengths x5 | uniform public table |
 
 C1 is the primary single-user programming workload. C2/C4/C8 cover ordinary
-sub-agent fan-out. C16/C32 are scale and regression guardrails. vLLM r33 is
-configured for at most 16 sequences, so C32 is recorded as unsupported rather
-than assigned a synthetic value.
+sub-agent fan-out. C16/C32 are scale and regression guardrails. The retained
+`exploratory-decode` mode makes the project screening rule executable without
+changing any decode cell, warmup, analyzer, or retained-control comparison.
+The retained
+vLLM r33 measurements used the upstream-documented
+[`local-inference-lab/rtx6kpro` TP2 fixed-K5 profile](https://github.com/local-inference-lab/rtx6kpro/blob/master/models/ds4dspark-v20-r33.md)
+without modifying its serving limits. C32 is recorded as unreachable under
+that profile rather than assigned a synthetic value: the recipe sets
+`max_num_seqs=16`, and vLLM independently reported a 143,599-token KV pool at
+startup. The fixed 16,384-input/4,096-output C32 shape requires roughly
+655,000 KV tokens. These are profile-specific limits, not vLLM engine-wide
+limits.
+
+Use `repeat-c2-c4` only when a completed panel produces a suspicious C2 or C4
+result that must be checked before more expensive scale cells. It creates an
+independent five-run panel and never replaces, merges with, or silently extends
+the original publication result set.
 
 Run an engine gate inside the selected pod:
 
@@ -139,12 +153,18 @@ submitted until the cell's request set is complete.
 
 The analyzer requires the complete successful request set, exact input/output
 shape, sustained target client occupancy while requests remain to be admitted,
-the requested peak server occupancy, bounded queue depth, and valid server
-metrics. Terminal drain is reported but is not misclassified as a loss of
-client load. The gate reports aggregate output tokens/s, median TTFT, median
-ITL, running/queued occupancy, total prefill passes, and effective requests per
-prefill pass. The batching ratio is valid for this short, one-pass prompt shape
-and must not be compared with a different prompt or chunking method.
+the requested peak server occupancy, bounded queue depth, an exact match between
+the expected request count and the server's chat-completion POST counter, and
+valid server metrics. The client intervals define the concurrency contract.
+SGLang's running gauge can temporarily exceed that client concurrency because
+finished requests remain visible until scheduler cleanup. It may not exceed
+the complete submitted request set, and the exact HTTP request count rejects
+untracked traffic.
+Terminal drain is reported but is not misclassified as a loss of client load.
+The gate reports aggregate output tokens/s, median TTFT, median ITL,
+running/queued occupancy, total prefill passes, and effective requests per
+prefill pass. The latter is valid for this short, one-pass prompt shape and must
+not be compared with a different prompt or chunking method.
 
 The `release-screen` mode runs C8 three times and is the routine turnover check
 for an engine-changing public release. The broader `screen` mode runs three
@@ -154,9 +174,12 @@ scheduler, admission, batching, or refill behavior; integrates a new
 upstream-main source baseline; or produces a suspicious C8 release screen. A
 packaging- or documentation-only release may reuse evidence only when the exact
 immutable engine candidate and runtime configuration were already qualified.
-Run turnover immediately after the engine panel without restarting the server
-so the short screen reuses the existing serving session while retaining
-separate metrics and artifacts.
+All repetitions run on one unchanged server process after one unmeasured,
+closed-loop request set per concurrency. The warmup uses the same request count
+and shape as a measured repetition so replacement-prefill paths and their
+shape-specialized kernels are exercised before timing. Run turnover immediately
+after the engine panel without restarting the server so the short screen reuses
+the existing serving session while retaining separate metrics and artifacts.
 
 Run it inside the selected pod with the same provenance variables as the engine
 gate:
@@ -167,14 +190,29 @@ BENCH_GITOPS_REVISION='<deployment revision>' \
 BENCH_PROJECT_REVISION='<this repository revision>' \
 AIPERF_REVISION='6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23' \
 BENCH_MODEL_REVISION='<model snapshot revision>' \
-./run-turnover-gate-in-pod.sh <campaign> <build> release-screen
+./run-turnover-gate-in-pod.sh <campaign> <build> qualification
 ```
+
+For the routine engine-change screen, replace `qualification` with
+`release-screen`. This runs only C8 x3. Do not use it when the full-panel
+conditions above apply.
 
 Turnover is its own regression dimension. A gain here cannot erase a decode or
 prefill regression, and a clean decode plateau cannot excuse a turnover
-regression. Compare two matched summaries with
-[`compare_turnover_gates.py`](compare_turnover_gates.py); it rejects different
-modes, cell sets, request shapes, and repetition IDs.
+regression.
+
+Compare two matched summaries without collapsing their dimensions:
+
+```bash
+uv run compare_turnover_gates.py \
+  /path/to/baseline/summary.json \
+  /path/to/candidate/summary.json
+```
+
+Positive throughput or requests-per-prefill-pass changes mean higher values;
+positive TTFT or ITL changes mean slower latency.
+The comparator rejects different modes, cell sets, request shapes, and
+repetition IDs.
 
 ## Production-shaped AgentX gate
 
@@ -217,7 +255,7 @@ engine gate and cannot turn an engine regression into a pass.
   old methods into one table.
 
 Publication uses only a fresh `publication` panel for each engine. It includes
-all five run values, medians and dispersion, and states unsupported cells
+all five run values plus medians and dispersion, and states unsupported cells
 directly.
 
 ## Release quality and stability checks

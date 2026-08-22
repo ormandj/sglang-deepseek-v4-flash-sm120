@@ -6,10 +6,10 @@ with SGLang on NVIDIA RTX PRO 6000 Blackwell (SM120). The image contains the
 qualified SGLang, FlashInfer, and DeepGEMM composition; no local engine build is
 required.
 
-Current release: `0.8.1-rc1`
+Current release: `0.8.1-rc4`
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.1
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.4
 ```
 
 ## Why use this image
@@ -40,28 +40,28 @@ an estimate of application throughput.
 
 | Concurrency | SGLang forward/s | vLLM forward/s | SGLang synthetic tok/s | vLLM synthetic tok/s |
 |---:|---:|---:|---:|---:|
-| 1 | 64.519 | 66.575 | 350.2 | 255.2 |
-| 2 | 48.285 | 46.337 | 465.1 | 421.0 |
-| 4 | 34.422 | 33.074 | 674.2 | 616.0 |
-| 8 | 23.251 | 23.454 | 923.2 | 795.8 |
-| 16 | 17.909 | 15.865 | 1395.3 | 1097.2 |
-| 32 | 13.313 | not reachable in profile | 2089.5 | — |
+| 1 | 65.783 | 66.575 | 331.1 | 255.2 |
+| 2 | 48.468 | 46.337 | 489.1 | 421.0 |
+| 4 | 33.715 | 33.074 | 672.9 | 616.0 |
+| 8 | 23.318 | 23.454 | 924.0 | 795.8 |
+| 16 | 17.995 | 15.865 | 1408.1 | 1097.2 |
+| 32 | 13.380 | not reachable in profile | 2062.6 | — |
 
 | Cold-prefill target | SGLang prompt tok/s | vLLM prompt tok/s |
 |---:|---:|---:|
-| 8K | 7921.4 | 7689.8 |
-| 32K | 8840.3 | 8784.7 |
-| 64K | 8509.8 | 8518.7 |
-| 128K | 7965.0 | 7953.6 |
+| 8K | 7948.1 | 7689.8 |
+| 32K | 8823.9 | 8784.7 |
+| 64K | 8484.1 | 8518.7 |
+| 128K | 7966.7 | 7953.6 |
 
-| TP2 profile | SGLang 0.8.1-rc1 | vLLM r33 |
+| TP2 profile | SGLang 0.8.1-rc4 | vLLM r33 |
 |---|---:|---:|
 | Reported KV cache | 801,536 tokens | 143,599 tokens |
 | Declared context limit | 786,432 | 131,072 |
 | Scheduler sequence limit | 48 | 16 |
 | Fixed-window C32 decode | measured | not reachable in profile |
-| GSM8K, correct / 1,319 | 1,263 (95.75%) | 1,243 (94.24%) |
-| C8 turnover requests / prefill pass | 2.29 | not measured with this method |
+| GSM8K, correct / 1,319 | 1,260 (95.53%) | 1,243 (94.24%) |
+| C8 turnover requests / prefill pass | 2.00 | not measured with this method |
 | GSM8K request errors | 0 | 0 |
 
 The capacity rows describe these exact deployment profiles, not an
@@ -92,7 +92,7 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v34
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v37
 mkdir -p "$CACHE_DIR"
 ```
 
@@ -127,7 +127,7 @@ docker run --rm \
   --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=1 \
   --env SGLANG_PCIE_IPC_MAX_NUMEL=786432 \
   --env SGLANG_PCIE_IPC_AUTOTUNE=1 \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.1 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.4 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
@@ -155,7 +155,7 @@ docker run --rm \
 ```
 
 The first start compiles SM120 kernels before the service reports ready. Keep
-the v34 cache for later starts of this exact image.
+the v37 cache for later starts of this exact image.
 
 ### 3. Verify health, capacity, and generation
 

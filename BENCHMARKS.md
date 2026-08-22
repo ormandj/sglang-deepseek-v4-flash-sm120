@@ -1,12 +1,12 @@
 # Current benchmark panel
 
-Last updated: 2026-08-21 CDT.
+Last updated: 2026-08-22 CDT.
 
-This page reports the qualified SGLang `0.8.1-rc1` panel beside the retained
+This page reports the qualified SGLang `0.8.1-rc4` panel beside the retained
 vLLM r33 panel. Performance, capacity, and quality are separate measurements;
 the tables do not combine them into an overall score. Machine-readable
 summaries retain every measured repetition, distribution statistics, and raw
-metric inputs.
+metric inputs for the published release panels.
 
 ## Results
 
@@ -20,12 +20,12 @@ time per generated token.
 
 | C | SGLang forward/s | vLLM forward/s | SGLang synthetic tok/s | vLLM synthetic tok/s | SGLang ITL ms | vLLM ITL ms |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 64.519 | 66.575 | 350.2 | 255.2 | 3.019 | 3.886 |
-| 2 | 48.285 | 46.337 | 465.1 | 421.0 | 4.494 | 5.215 |
-| 4 | 34.422 | 33.074 | 674.2 | 616.0 | 6.368 | 7.082 |
-| 8 | 23.251 | 23.454 | 923.2 | 795.8 | 9.559 | 11.122 |
-| 16 | 17.909 | 15.865 | 1395.3 | 1097.2 | 14.199 | 17.111 |
-| 32 | 13.313 | — | 2089.5 | — | 21.481 | — |
+| 1 | 65.783 | 66.575 | 331.1 | 255.2 | 3.113 | 3.886 |
+| 2 | 48.468 | 46.337 | 489.1 | 421.0 | 4.512 | 5.215 |
+| 4 | 33.715 | 33.074 | 672.9 | 616.0 | 6.324 | 7.082 |
+| 8 | 23.318 | 23.454 | 924.0 | 795.8 | 9.533 | 11.122 |
+| 16 | 17.995 | 15.865 | 1408.1 | 1097.2 | 14.245 | 17.111 |
+| 32 | 13.380 | — | 2062.6 | — | 21.855 | — |
 
 The paired acceptance statistics explain why synthetic output rate can move
 independently of forward rate. They are workload/configuration evidence, not a
@@ -33,12 +33,12 @@ second engine-speed metric.
 
 | C | SGLang acceptance | vLLM acceptance | SGLang output/forward/request | vLLM output/forward/request |
 |---:|---:|---:|---:|---:|
-| 1 | 0.875 | 0.532 | 5.415 | 3.952 |
-| 2 | 0.773 | 0.714 | 4.781 | 4.638 |
-| 4 | 0.774 | 0.761 | 4.892 | 4.814 |
-| 8 | 0.780 | 0.656 | 4.937 | 4.241 |
-| 16 | 0.765 | 0.674 | 4.853 | 4.352 |
-| 32 | 0.769 | — | 4.918 | — |
+| 1 | 0.793 | 0.532 | 5.034 | 3.952 |
+| 2 | 0.781 | 0.714 | 5.070 | 4.638 |
+| 4 | 0.786 | 0.761 | 4.899 | 4.814 |
+| 8 | 0.785 | 0.656 | 4.895 | 4.241 |
+| 16 | 0.756 | 0.674 | 4.817 | 4.352 |
+| 32 | 0.750 | — | 4.785 | — |
 
 vLLM r33 was not measured at C32. Its documented TP2 profile set
 `max_num_seqs=16` and reported 143,599 KV tokens; the C32 workload needs about
@@ -53,10 +53,10 @@ therefore not repeated as an independent result.
 
 | Input target | SGLang prompt tok/s | vLLM prompt tok/s |
 |---:|---:|---:|
-| 8K | 7921.4 | 7689.8 |
-| 32K | 8840.3 | 8784.7 |
-| 64K | 8509.8 | 8518.7 |
-| 128K | 7965.0 | 7953.6 |
+| 8K | 7948.1 | 7689.8 |
+| 32K | 8823.9 | 8784.7 |
+| 64K | 8484.1 | 8518.7 |
+| 128K | 7966.7 | 7953.6 |
 
 ### Request turnover
 
@@ -65,16 +65,22 @@ The closed-loop turnover gate continuously replaces completed 256-input,
 clean decode and cold-prefill panels. This release changed refill scheduling,
 so it completed the full five-repetition C1/C2/C4/C8 panel.
 
-| C | Output tok/s | TTFT ms | ITL ms | Requests / prefill pass |
+| C | Median output tok/s | Median TTFT ms | Median ITL ms | Median requests / prefill pass |
 |---:|---:|---:|---:|---:|
-| 1 | 220.6 | 168.7 | 3.885 | 1.00 |
-| 2 | 307.4 | 175.7 | 5.498 | 1.00 |
-| 4 | 427.9 | 189.5 | 7.847 | 1.23 |
-| 8 | 611.6 | 297.9 | 10.704 | 2.29 |
+| 1 | 212.7 | 193.7 | 3.853 | 1.00 |
+| 2 | 299.0 | 178.0 | 5.549 | 1.00 |
+| 4 | 432.3 | 191.0 | 8.014 | 1.23 |
+| 8 | 607.9 | 358.5 | 11.096 | 2.00 |
 
-No prior release or retained vLLM profile used this exact method, so these
-values are published as structural qualification evidence rather than a
-cross-version or cross-engine performance comparison.
+In the matched `0.8.1-rc4` C8 control with automatic refill delay disabled,
+output throughput was 591.3 tokens/s, ITL was 11.887 ms, and requests per
+prefill pass was 1.33. Enabling the automatic policy changed those five-run
+means to 610.9 tokens/s, 11.132 ms, and 2.06 while increasing mean TTFT from
+241.5 ms to 352.7 ms. This is a
+throughput/first-token tradeoff for repeated request turnover, not a
+clean-decode or cold-prefill result. The causal-control artifact remains in the
+private qualification record; the machine-readable public turnover summary is
+the enabled-policy release panel.
 
 ### TP2 capacity
 
@@ -82,7 +88,7 @@ These are startup reports from the exact measured profiles. The profiles use
 different context and scheduler limits, so this table describes deployable
 capacity rather than isolating engine memory efficiency.
 
-| Setting | SGLang 0.8.1-rc1 | vLLM r33 |
+| Setting | SGLang 0.8.1-rc4 | vLLM r33 |
 |---|---:|---:|
 | Reported KV cache | 801,536 tokens | 143,599 tokens |
 | Declared context limit | 786,432 | 131,072 |
@@ -90,22 +96,34 @@ capacity rather than isolating engine memory efficiency.
 | Static/GPU memory fraction | 0.93 | 0.975 |
 | C32 fixed-window workload | completed, n=5 | not reachable in profile |
 
-At the shipped SGLang envelope, a cold 780,000-token request completed in 260.0
-seconds and four cold concurrent 250,000-token requests completed in 143.2
+At the shipped SGLang envelope, a cold 780,000-token request completed in 255.8
+seconds and four cold concurrent 250,000-token requests completed in 140.8
 seconds without process restarts. The four-request shape recomputed all
 1,000,000 prompt tokens. See
 [`RUN.md`](RUN.md) for capacity guidance and the prior higher-fraction failure.
+
+### Production-shaped coding replay
+
+The public Weka coding-trace AgentX scenario ran for 900 seconds each at C1 and
+C8 with temperature 1.0, top-p 0.95, fixed seeds, and HiCache disabled. This is
+a separate workload-validity check, not a replacement for the fixed decode and
+cold-prefill panels.
+
+| C | Completed requests | Output tok/s | Prompt-cache read share | Request errors | Submission valid |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 116 | 118.5 | 96.85% | 0 | yes |
+| 8 | 157 | 206.8 | 90.07% | 0 | yes |
 
 ### Quality
 
 Each engine ran the full GSM8K set once at C16, temperature 0, seed 42, and a
 16,384-token response cap.
 
-| Result | SGLang 0.8.1-rc1 | vLLM r33 |
+| Result | SGLang 0.8.1-rc4 | vLLM r33 |
 |---|---:|---:|
 | Questions | 1,319 | 1,319 |
-| Correct | 1,263 | 1,243 |
-| Accuracy | 95.75% | 94.24% |
+| Correct | 1,260 | 1,243 |
+| Accuracy | 95.53% | 94.24% |
 | Request errors | 0 | 0 |
 
 All 1,319 SGLang responses used the grader's documented last-number fallback
@@ -129,15 +147,15 @@ NCCL fallback, and prefill/decode warmups. PCIe-IPC all-gather and TRT/MNNVL
 fusion were absent. Its qualified source identity is:
 
 ```text
-SGLang base                   7fd5454335c15a4be0826397d2c2e6f19be3232f
-SGLang effective tree         9c8afe4bbcd04cd56df849d9ae8b55282d231115
-FlashInfer base               46fc99b9773bc98832a8610b5d789d3bcdafde85
-FlashInfer effective tree     2f72f320813e86813778f6e4b5b9badefcccd6d0
+SGLang base                   cce0a1244b5a3ee60411fb403f65f856a1d012f0
+SGLang effective tree         bedec1d0ee735ddbd246f2e2b91d724ceefc5136
+FlashInfer base               fb28d7242b3506a2348265962041acc1fb56cca4
+FlashInfer effective tree     d6d4f3d7daf66a57947049cf1cc7866b1678549b
 FlashInfer version            0.6.18.dev20260819
 DeepGEMM base                 80b2c44b9ae95b90c1e0a1626a05b6c4f7f09f1f
 DeepGEMM effective tree       b7e23a6fb5ac6571046cc12e85352d43af63f27d
 DeepGEMM version              0.0.0+sm120jit5
-Compilation-cache schema      v34
+Compilation-cache schema      v37
 ```
 
 The vLLM panel used local-inference-lab r33 at:
@@ -158,9 +176,8 @@ AIPerf 0.12.0 is pinned at revision:
 6ed4823d127b3a6d12c63fb8c2ca5eff13f9ba23
 ```
 
-The SGLang engine panel used benchmark-project revision
-`197ce28d06a1b920a9ffe14b7b7fd3c4b21c53b6`; the turnover panel used
-`202537d84afea0046d79054f3f3580720806e7f8`, and the retained vLLM panel used
+The SGLang engine and turnover panels used benchmark-project revision
+`2e9ac4d54d618543856cde9e018c2a4758827822`; the retained vLLM panel used
 `6fc08101a6c309b998a2f393b30065942e98a0b4`. Both revisions use the same
 request shapes, fixed context interval, five repetitions per supported cell,
 and 20-scrape minimum. The SGLang analyzer accepts a valid interval of at least
@@ -186,14 +203,14 @@ measurements.
 
 ## Machine-readable results
 
-- [`sglang-v0.8.1-rc.1-publication-summary.json`](bench/results/sglang-v0.8.1-rc.1-publication-summary.json)
-- [`sglang-v0.8.1-rc.1-turnover-summary.json`](bench/results/sglang-v0.8.1-rc.1-turnover-summary.json)
-- [`sglang-v0.8.1-rc.1-gsm8k.json`](bench/results/sglang-v0.8.1-rc.1-gsm8k.json)
+- [`sglang-v0.8.1-rc.4-publication-summary.json`](bench/results/sglang-v0.8.1-rc.4-publication-summary.json)
+- [`sglang-v0.8.1-rc.4-turnover-summary.json`](bench/results/sglang-v0.8.1-rc.4-turnover-summary.json)
+- [`sglang-v0.8.1-rc.4-gsm8k.json`](bench/results/sglang-v0.8.1-rc.4-gsm8k.json)
 - [`vllm-r33-publication-summary.json`](bench/results/vllm-r33-publication-summary.json)
 - [`vllm-r33-gsm8k.json`](bench/results/vllm-r33-gsm8k.json)
 
-Historical public panels remain available in immutable release tags rather
-than on current main.
+Historical public panels remain available in repository history rather than on
+current main.
 
 ## Reproduce the engine gate
 

@@ -76,9 +76,11 @@ same prefill observation expressed as elapsed time.
 
 ## Repetitions and uncertainty
 
-A quick panel uses three fixed prompt paths at C1/C4/C8. A qualification panel
-uses five paths at the priority C1/C2/C4/C8 cells and three at C16/C32. Public
-tables use five at every supported concurrency for a simple uniform contract.
+An exploratory decode panel uses three fixed prompt paths at C1/C2/C4/C8. A
+quick panel uses three paths at C1/C4/C8 plus its matched prefill panel. A
+qualification panel uses five paths at the priority C1/C2/C4/C8 cells and three
+at C16/C32. Public tables use five at every supported concurrency for a simple
+uniform contract.
 
 These are same-process prompt-path repetitions, not independent machine or
 deployment replicates. They provide:

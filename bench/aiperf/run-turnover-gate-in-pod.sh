@@ -44,7 +44,7 @@ export MODEL_NAME=${MODEL_NAME:-deepseek-v4-flash}
 export TOKENIZER_PATH=${TOKENIZER_PATH:-/models/deepseek-ai/DeepSeek-V4-Flash-0731}
 export INFERENCE_URL=${INFERENCE_URL:-http://127.0.0.1:8000}
 export SERVER_METRICS_URL=${SERVER_METRICS_URL:-http://127.0.0.1:8000/metrics}
-export BENCH_API_KEY=${BENCH_API_KEY:-${VLLM_API_KEY:-}}
+export BENCH_API_KEY=${BENCH_API_KEY:-${SGLANG_API_KEY:-${VLLM_API_KEY:-}}}
 export AIPERF_WORKERS=1
 export AIPERF_RECORD_PROCESSORS=1
 
@@ -79,6 +79,12 @@ if [ -n "$turnover_requests_override" ]; then
     echo "error: TURNOVER_REQUESTS must be a positive integer" >&2
     exit 2
   fi
+  for concurrency in $concurrencies; do
+    if [ "$turnover_requests_override" -le "$concurrency" ]; then
+      echo "error: TURNOVER_REQUESTS must exceed every measured concurrency" >&2
+      exit 2
+    fi
+  done
 fi
 if [ -e "$gate_root" ]; then
   echo "error: immutable turnover gate already exists: $gate_root" >&2
@@ -86,12 +92,24 @@ if [ -e "$gate_root" ]; then
 fi
 mkdir -p "$gate_root"
 
+turnover_requests_for_concurrency() {
+  concurrency=$1
+  if [ -n "$turnover_requests_override" ]; then
+    printf '%s\n' "$turnover_requests_override"
+  elif [ "$concurrency" -lt 8 ]; then
+    printf '%s\n' 16
+  else
+    printf '%s\n' 32
+  fi
+}
+
 for concurrency in $concurrencies; do
+  turnover_requests=$(turnover_requests_for_concurrency "$concurrency")
   export AIPERF_ARTIFACT_ROOT="$gate_root/warmup"
   export WARMUP_ISL="$turnover_isl"
   export WARMUP_OSL="$turnover_osl"
   export WARMUP_CONCURRENCY="$concurrency"
-  export WARMUP_REQUESTS="$concurrency"
+  export WARMUP_REQUESTS="$turnover_requests"
   export WARMUP_TEMPERATURE=0.0
   export WARMUP_TOP_P=1.0
   export AIPERF_RANDOM_SEED=$((2026082200 + concurrency))
@@ -100,13 +118,7 @@ for concurrency in $concurrencies; do
 done
 
 for concurrency in $concurrencies; do
-  if [ -n "$turnover_requests_override" ]; then
-    turnover_requests=$turnover_requests_override
-  elif [ "$concurrency" -lt 8 ]; then
-    turnover_requests=16
-  else
-    turnover_requests=32
-  fi
+  turnover_requests=$(turnover_requests_for_concurrency "$concurrency")
   repetition=1
   while [ "$repetition" -le "$repetitions" ]; do
     run_id=$(printf 'r%02d' "$repetition")

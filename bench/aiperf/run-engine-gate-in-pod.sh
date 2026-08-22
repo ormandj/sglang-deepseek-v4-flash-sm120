@@ -6,7 +6,7 @@ if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
   exit 2
 fi
 if [ "$#" -ne 3 ]; then
-  echo "usage: $0 CAMPAIGN_ID BUILD_ID quick|prefill-quick|decode-supplement|qualification|publication" >&2
+  echo "usage: $0 CAMPAIGN_ID BUILD_ID exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|qualification|publication" >&2
   exit 2
 fi
 
@@ -19,8 +19,8 @@ for value in "$campaign" "$build_id"; do
   esac
 done
 case "$mode" in
-  quick|prefill-quick|decode-supplement|qualification|publication) ;;
-  *) echo "error: mode must be quick, prefill-quick, decode-supplement, qualification, or publication" >&2; exit 2 ;;
+  exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|qualification|publication) ;;
+  *) echo "error: unsupported engine-gate mode: $mode" >&2; exit 2 ;;
 esac
 
 : "${BENCH_IMAGE_REF:?BENCH_IMAGE_REF must identify the immutable image}"
@@ -49,10 +49,10 @@ case "$bench_engine" in
   sglang|vllm) ;;
   *) echo "error: BENCH_ENGINE must be sglang or vllm" >&2; exit 2 ;;
 esac
-# A caller may provide BENCH_API_KEY explicitly.  vLLM deployments commonly
-# expose VLLM_API_KEY; use it when available without requiring authentication
-# for keyless endpoints.  Neither variable is captured in artifacts.
-export BENCH_API_KEY=${BENCH_API_KEY:-${VLLM_API_KEY:-}}
+# A caller may provide BENCH_API_KEY explicitly. Use the engine-native key when
+# available without requiring authentication for keyless endpoints. None of
+# these variables is captured in artifacts.
+export BENCH_API_KEY=${BENCH_API_KEY:-${SGLANG_API_KEY:-${VLLM_API_KEY:-}}}
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 config_dir="$script_dir/configs"
@@ -167,6 +167,10 @@ run_prefill() {
 }
 
 case "$mode" in
+  exploratory-decode)
+    decode_shapes='1:3:4096 2:3:4096 4:3:4096 8:3:4096'
+    prefill_shapes=''
+    ;;
   quick)
     decode_shapes='1:3:4096 4:3:4096 8:3:4096'
     prefill_shapes='8k-c1:8192:1:3 32k-c1:32768:1:3 64k-c1:65536:1:3 128k-c1:130816:1:3'
@@ -177,6 +181,10 @@ case "$mode" in
     ;;
   decode-supplement)
     decode_shapes='2:3:4096 16:3:4096'
+    prefill_shapes=''
+    ;;
+  repeat-c2-c4)
+    decode_shapes='2:5:4096 4:5:4096'
     prefill_shapes=''
     ;;
   qualification)
