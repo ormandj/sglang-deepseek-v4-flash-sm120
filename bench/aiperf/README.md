@@ -98,6 +98,7 @@ warmup.
 | `quick` | C1/C4/C8 x3 | 8K/32K/64K/128K x3 | fast candidate screen |
 | `decode-supplement` | C2/C16 x3 | none | fill scale guardrails after a quick run |
 | `repeat-c2-c4` | C2/C4 x5 | none | confirm a suspicious mid-concurrency result before proceeding |
+| `repeat-c8` | C8 x5 | none | bounded C8 measurement |
 | `prefill-quick` | none | 8K/32K/64K/128K x3 | matched prefill-only comparison |
 | `qualification` | C1/C2/C4/C8 x5; C16/C32 x3 | all lengths x5 | release decision |
 | `publication` | every supported C x5 | all lengths x5 | uniform public table |

@@ -2,9 +2,9 @@
   "schema": 1,
   "product": "sglang-deepseek-v4-flash-sm120",
   "version": "0.8.1",
-  "candidate": 4,
-  "candidate_tag": "v0.8.1-rc.4",
+  "candidate": 10,
+  "candidate_tag": "v0.8.1-rc.10",
   "stable_tag": "v0.8.1",
-  "cache_schema": "v37",
+  "cache_schema": "v38",
   "platform": "linux/amd64"
 }

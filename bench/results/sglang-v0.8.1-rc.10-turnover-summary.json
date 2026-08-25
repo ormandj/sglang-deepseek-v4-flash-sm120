@@ -1,0 +1,76 @@
+{
+  "build_id": "sglang-v0.8.1-rc10",
+  "engine": "sglang",
+  "interpretation": "same-process closed-loop request-turnover signal; compare each concurrency independently from steady-state decode and cold prefill",
+  "mode": "release-screen",
+  "schema_version": "1.0",
+  "turnover": {
+    "c8": {
+      "median_itl_ms": {
+        "count": 3,
+        "max": 11.04906062352941,
+        "mean": 10.898016254248367,
+        "median": 10.971418174509804,
+        "min": 10.673569964705884,
+        "sample_cv": 0.018188173448269684,
+        "sample_stddev": 0.19821500987433158
+      },
+      "median_ttft_ms": {
+        "count": 3,
+        "max": 407.96795149999997,
+        "mean": 378.913158,
+        "median": 368.6620225,
+        "min": 360.10949999999997,
+        "sample_cv": 0.0673583722806991,
+        "sample_stddev": 25.522973558619363
+      },
+      "output_tokens_per_second": {
+        "count": 3,
+        "max": 628.4309256674882,
+        "mean": 626.3825165496884,
+        "median": 626.0727410499709,
+        "min": 624.643882931606,
+        "sample_cv": 0.003053136602714092,
+        "sample_stddev": 1.912431388578019
+      },
+      "repetitions": [
+        {
+          "id": "r01",
+          "median_itl_ms": 10.673569964705884,
+          "median_ttft_ms": 407.96795149999997,
+          "output_tokens_per_second": 628.4309256674882,
+          "requests_per_prefill_pass": 2.0
+        },
+        {
+          "id": "r02",
+          "median_itl_ms": 10.971418174509804,
+          "median_ttft_ms": 360.10949999999997,
+          "output_tokens_per_second": 626.0727410499709,
+          "requests_per_prefill_pass": 2.1333333333333333
+        },
+        {
+          "id": "r03",
+          "median_itl_ms": 11.04906062352941,
+          "median_ttft_ms": 368.6620225,
+          "output_tokens_per_second": 624.643882931606,
+          "requests_per_prefill_pass": 2.0
+        }
+      ],
+      "requests_per_prefill_pass": {
+        "count": 3,
+        "max": 2.1333333333333333,
+        "mean": 2.0444444444444443,
+        "median": 2.0,
+        "min": 2.0,
+        "sample_cv": 0.03765327842541037,
+        "sample_stddev": 0.07698003589195009
+      },
+      "shape": {
+        "expected_requests": 32,
+        "target_concurrency": 8,
+        "target_isl": 256,
+        "target_osl": 256
+      }
+    }
+  }
+}

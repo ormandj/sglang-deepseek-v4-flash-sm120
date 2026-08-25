@@ -6,10 +6,10 @@ with SGLang on NVIDIA RTX PRO 6000 Blackwell (SM120). The image contains the
 qualified SGLang, FlashInfer, and DeepGEMM composition; no local engine build is
 required.
 
-Current release: `0.8.1-rc4`
+Current release: `0.8.1-rc10`
 
 ```text
-ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.4
+ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.10
 ```
 
 ## Why use this image
@@ -23,6 +23,8 @@ ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.4
 - **Stable request turnover.** Occupancy-aware refill batching keeps replacement
   requests grouped as concurrent coding or agent workloads finish and refill,
   while still admitting genuine demand growth immediately.
+- **Reserved MLA slot protection.** The SGLang-owned MLA KV writers preserve
+  physical slot 0 when CUDA-graph padding rows are present.
 - **Long-conversation reuse.** Optional hierarchical KV cache (HiCache) can
   keep evicted prefixes in host memory and a bounded file-storage tier. It is
   disabled by default so one-shot workloads do not pay its write cost.
@@ -40,27 +42,27 @@ an estimate of application throughput.
 
 | Concurrency | SGLang forward/s | vLLM forward/s | SGLang synthetic tok/s | vLLM synthetic tok/s |
 |---:|---:|---:|---:|---:|
-| 1 | 65.783 | 66.575 | 331.1 | 255.2 |
-| 2 | 48.468 | 46.337 | 489.1 | 421.0 |
-| 4 | 33.715 | 33.074 | 672.9 | 616.0 |
-| 8 | 23.318 | 23.454 | 924.0 | 795.8 |
-| 16 | 17.995 | 15.865 | 1408.1 | 1097.2 |
-| 32 | 13.380 | not reachable in profile | 2062.6 | — |
+| 1 | 65.091 | 66.575 | 323.9 | 255.2 |
+| 2 | 49.351 | 46.337 | 475.8 | 421.0 |
+| 4 | 33.387 | 33.074 | 654.8 | 616.0 |
+| 8 | 23.289 | 23.454 | 930.0 | 795.8 |
+| 16 | 18.002 | 15.865 | 1409.5 | 1097.2 |
+| 32 | 13.372 | not reachable in profile | 2090.3 | — |
 
 | Cold-prefill target | SGLang prompt tok/s | vLLM prompt tok/s |
 |---:|---:|---:|
-| 8K | 7948.1 | 7689.8 |
-| 32K | 8823.9 | 8784.7 |
-| 64K | 8484.1 | 8518.7 |
-| 128K | 7966.7 | 7953.6 |
+| 8K | 7902.0 | 7689.8 |
+| 32K | 8813.2 | 8784.7 |
+| 64K | 8482.9 | 8518.7 |
+| 128K | 7966.2 | 7953.6 |
 
-| TP2 profile | SGLang 0.8.1-rc4 | vLLM r33 |
+| TP2 profile | SGLang 0.8.1-rc10 | vLLM r33 |
 |---|---:|---:|
 | Reported KV cache | 801,536 tokens | 143,599 tokens |
 | Declared context limit | 786,432 | 131,072 |
 | Scheduler sequence limit | 48 | 16 |
 | Fixed-window C32 decode | measured | not reachable in profile |
-| GSM8K, correct / 1,319 | 1,260 (95.53%) | 1,243 (94.24%) |
+| GSM8K, correct / 1,319 | 1,266 (95.98%) | 1,243 (94.24%) |
 | C8 turnover requests / prefill pass | 2.00 | not measured with this method |
 | GSM8K request errors | 0 | 0 |
 
@@ -92,7 +94,7 @@ uvx --from huggingface-hub hf download \
   --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
   --local-dir "$MODEL_DIR"
 
-export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v37
+export CACHE_DIR=/srv/cache/sglang-dsv4-0731-v38
 mkdir -p "$CACHE_DIR"
 ```
 
@@ -127,7 +129,7 @@ docker run --rm \
   --env SGLANG_ENABLE_PCIE_IPC_ALLREDUCE=1 \
   --env SGLANG_PCIE_IPC_MAX_NUMEL=786432 \
   --env SGLANG_PCIE_IPC_AUTOTUNE=1 \
-  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.4 \
+  ghcr.io/ormandj/sglang-deepseek-v4-flash-sm120:v0.8.1-rc.10 \
   serve \
   --model-path /models/deepseek-ai/DeepSeek-V4-Flash-0731 \
   --served-model-name deepseek-v4-flash \
@@ -155,7 +157,7 @@ docker run --rm \
 ```
 
 The first start compiles SM120 kernels before the service reports ready. Keep
-the v37 cache for later starts of this exact image.
+the v38 cache for later starts of this exact image.
 
 ### 3. Verify health, capacity, and generation
 

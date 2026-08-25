@@ -1,3 +1,42 @@
+diff --git a/python/sglang/kernels/jit/csrc/elementwise/set_mla_kv_buffer.cuh b/python/sglang/kernels/jit/csrc/elementwise/set_mla_kv_buffer.cuh
+index 32b2582a93b0c741f4218e485b37082fe7244925..a80d63562d9348344dd021d60b419bae021fa0d1 100644
+--- a/python/sglang/kernels/jit/csrc/elementwise/set_mla_kv_buffer.cuh
++++ b/python/sglang/kernels/jit/csrc/elementwise/set_mla_kv_buffer.cuh
+@@ -46,6 +46,7 @@ struct SetMlaKVBufferParams {
+   int64_t stride_rope_bytes;
+   int64_t stride_buffer_bytes;
+   uint32_t batch_size;
++  int64_t reserved_skip_index;
+ };
+ 
+ template <int64_t kNopeBytes, int64_t kRopeBytes, int kNumWarps, bool kUsePDL, typename TLoc>
+@@ -81,7 +82,7 @@ __global__ void set_mla_kv_buffer_kernel(const __grid_constant__ SetMlaKVBufferP
+   asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+ 
+   // Lane 0 issues one bulk store from the smem slot to the scattered gmem row.
+-  if (threadIdx.x % kWarpThreads == 0) {
++  if (threadIdx.x % kWarpThreads == 0 && loc != params.reserved_skip_index) {
+     cuda::ptx::cp_async_bulk(
+         cuda::ptx::space_global,
+         cuda::ptx::space_shared,
+@@ -114,7 +115,8 @@ struct SetMlaKVBufferKernel {
+       tvm::ffi::TensorView loc,
+       tvm::ffi::TensorView k_nope,
+       tvm::ffi::TensorView k_rope,
+-      int64_t num_warps_per_block) {
++      int64_t num_warps_per_block,
++      int64_t reserved_skip_index) {
+     using namespace host;
+ 
+     auto B = SymbolicSize{"batch_size"};
+@@ -182,6 +184,7 @@ struct SetMlaKVBufferKernel {
+         .stride_rope_bytes = S_rope.unwrap() * dtype_size,
+         .stride_buffer_bytes = S_buf.unwrap() * dtype_size,
+         .batch_size = batch,
++        .reserved_skip_index = reserved_skip_index,
+     };
+ 
+     const auto use_int32 = loc_dtype.is_type<int32_t>();
 diff --git a/python/sglang/kernels/ops/attention/flash_mla_sm120.py b/python/sglang/kernels/ops/attention/flash_mla_sm120.py
 index ec43c55089ddcd24ec48cd4d2b60d5e052fc68c1..bf8dc234df41a3c9f00ba2a3bd580f24a4bbaece 100644
 --- a/python/sglang/kernels/ops/attention/flash_mla_sm120.py
@@ -192,6 +231,203 @@ index ec43c55089ddcd24ec48cd4d2b60d5e052fc68c1..bf8dc234df41a3c9f00ba2a3bd580f24
      grid = (N * ratio,)
      _page_split_kernel[grid](
          src_2d,
+diff --git a/python/sglang/kernels/ops/kvcache/mla_buffer.py b/python/sglang/kernels/ops/kvcache/mla_buffer.py
+index ea179daa3644cf688da228871c5de88a13982a4b..ba9b7a5c8cecc7d567aa7a779ddd684a6cd08438 100644
+--- a/python/sglang/kernels/ops/kvcache/mla_buffer.py
++++ b/python/sglang/kernels/ops/kvcache/mla_buffer.py
+@@ -14,6 +14,7 @@ def set_mla_kv_buffer_kernel(
+     cache_k_nope_ptr,
+     cache_k_rope_ptr,
+     loc_ptr,
++    reserved_skip_index,
+     buffer_stride: tl.constexpr,
+     nope_stride: tl.constexpr,
+     rope_stride: tl.constexpr,
+@@ -36,7 +37,7 @@ def set_mla_kv_buffer_kernel(
+         tl.extra.cuda.gdc_wait()
+ 
+     loc = tl.load(loc_ptr + pid_loc).to(tl.int64)
+-    is_valid = loc % DCP_WORLD_SIZE == DCP_RANK
++    is_valid = (loc != reserved_skip_index) & (loc % DCP_WORLD_SIZE == DCP_RANK)
+     safe_loc = tl.where(is_valid, loc, 0)
+     safe_loc = safe_loc // DCP_WORLD_SIZE
+     dst_ptr = kv_buffer_ptr + safe_loc * buffer_stride + offs
+@@ -92,6 +93,8 @@ def set_mla_kv_buffer_triton(
+     loc: torch.Tensor,
+     cache_k_nope: torch.Tensor,
+     cache_k_rope: torch.Tensor,
++    *,
++    reserved_skip_index: int = 0,
+ ):
+     """Dispatch MLA paged-KV scatter writes to the fastest available path.
+ 
+@@ -115,6 +118,9 @@ def set_mla_kv_buffer_triton(
+ 
+     Name retained for caller compatibility; the implementation is no longer
+     Triton-only.
++
++    Writes targeting ``reserved_skip_index`` are skipped. Slot 0 is reserved
++    for CUDA-graph padding by default; pass -1 to disable skipping.
+     """
+     from sglang.kernels.ops.kvcache.set_mla_kv_buffer import (
+         can_use_set_mla_kv_buffer,
+@@ -132,7 +138,13 @@ def set_mla_kv_buffer_triton(
+         and can_use_set_mla_kv_buffer(nope_bytes, rope_bytes)
+         and not get_parallel().dcp_enabled
+     ):
+-        jit_set_mla_kv_buffer(kv_buffer, loc, cache_k_nope, cache_k_rope)
++        jit_set_mla_kv_buffer(
++            kv_buffer,
++            loc,
++            cache_k_nope,
++            cache_k_rope,
++            reserved_skip_index=reserved_skip_index,
++        )
+         return
+ 
+     # Fallback: Triton with BLOCK = next_pow2(total_dim). One CTA per loc; the
+@@ -151,6 +163,7 @@ def set_mla_kv_buffer_triton(
+         cache_k_nope,
+         cache_k_rope,
+         loc,
++        reserved_skip_index,
+         kv_buffer.stride(0),
+         cache_k_nope.stride(0),
+         cache_k_rope.stride(0),
+@@ -169,6 +182,7 @@ def set_mla_kv_buffer_fp8_quant_kernel(
+     cache_k_nope_ptr,
+     cache_k_rope_ptr,
+     loc_ptr,
++    reserved_skip_index,
+     buffer_stride: tl.constexpr,
+     nope_stride: tl.constexpr,
+     rope_stride: tl.constexpr,
+@@ -190,7 +204,9 @@ def set_mla_kv_buffer_fp8_quant_kernel(
+         tl.extra.cuda.gdc_wait()
+ 
+     loc = tl.load(loc_ptr + pid_loc).to(tl.int64)
+-    dst_ptr = kv_buffer_fp8_ptr + loc * buffer_stride + offs
++    is_valid = loc != reserved_skip_index
++    safe_loc = tl.where(is_valid, loc, 0)
++    dst_ptr = kv_buffer_fp8_ptr + safe_loc * buffer_stride + offs
+ 
+     if base + BLOCK <= nope_dim:
+         src = tl.load(
+@@ -220,7 +236,7 @@ def set_mla_kv_buffer_fp8_quant_kernel(
+         src = tl.where(is_nope, src_nope, src_rope)
+ 
+     # Destination pointer is FP8-typed view; tl.store performs downcast.
+-    tl.store(dst_ptr, src, mask=mask)
++    tl.store(dst_ptr, src, mask=mask & is_valid)
+ 
+     if USE_GDC:
+         tl.extra.cuda.gdc_launch_dependents()
+@@ -232,8 +248,13 @@ def set_mla_kv_buffer_triton_fp8_quant(
+     cache_k_nope: torch.Tensor,
+     cache_k_rope: torch.Tensor,
+     fp8_dtype: torch.dtype,
++    *,
++    reserved_skip_index: int = 0,
+ ):
+-    """Fuse BF16/FP16 MLA K quantization with paged KV write."""
++    """Fuse BF16/FP16 MLA K quantization with paged KV write.
++
++    Writes targeting ``reserved_skip_index`` are skipped. Pass -1 to disable.
++    """
+     kv_buffer_fp8 = kv_buffer.view(fp8_dtype)
+ 
+     nope_dim = cache_k_nope.shape[-1]
+@@ -250,6 +271,7 @@ def set_mla_kv_buffer_triton_fp8_quant(
+         cache_k_nope,
+         cache_k_rope,
+         loc,
++        reserved_skip_index,
+         kv_buffer_fp8.stride(0),
+         cache_k_nope.stride(0),
+         cache_k_rope.stride(0),
+@@ -266,6 +288,7 @@ def set_mla_kv_scale_buffer_kernel(
+     cache_k_nope_ptr,
+     cache_k_rope_ptr,
+     loc_ptr,
++    reserved_skip_index,
+     buffer_stride: tl.constexpr,
+     nope_stride: tl.constexpr,
+     rope_stride: tl.constexpr,
+@@ -282,7 +305,9 @@ def set_mla_kv_scale_buffer_kernel(
+     mask = offs < total_dim  # Make sure don't cross the boundary
+ 
+     loc = tl.load(loc_ptr + pid_loc)
+-    dst_ptr = kv_buffer_ptr + loc * buffer_stride + offs
++    is_valid = loc != reserved_skip_index
++    safe_loc = tl.where(is_valid, loc, 0)
++    dst_ptr = kv_buffer_ptr + safe_loc * buffer_stride + offs
+ 
+     # Check each offs should read 'nope' or 'rope'
+     is_nope = offs < nope_dim
+@@ -297,7 +322,7 @@ def set_mla_kv_scale_buffer_kernel(
+ 
+     # Combine nope + rope
+     src = src_nope + src_rope
+-    tl.store(dst_ptr, src, mask=mask)
++    tl.store(dst_ptr, src, mask=mask & is_valid)
+ 
+ 
+ def set_mla_kv_scale_buffer_triton(
+@@ -305,7 +330,10 @@ def set_mla_kv_scale_buffer_triton(
+     loc: torch.Tensor,
+     cache_k_nope: torch.Tensor,
+     cache_k_rope: torch.Tensor,
++    *,
++    reserved_skip_index: int = 0,
+ ):
++    """Write MLA scale rows while preserving the reserved padding slot."""
+     nope_dim = cache_k_nope.shape[-1]
+     rope_dim = cache_k_rope.shape[-1]
+     total_dim = nope_dim + rope_dim
+@@ -318,6 +346,7 @@ def set_mla_kv_scale_buffer_triton(
+         cache_k_nope,
+         cache_k_rope,
+         loc,
++        reserved_skip_index,
+         kv_buffer.stride(0),
+         cache_k_nope.stride(0),
+         cache_k_rope.stride(0),
+diff --git a/python/sglang/kernels/ops/kvcache/set_mla_kv_buffer.py b/python/sglang/kernels/ops/kvcache/set_mla_kv_buffer.py
+index da462a780c12543bc153c5363b5e34f4d15ce98f..e6b5571478098717bb924c8852a302d1632b4c87 100644
+--- a/python/sglang/kernels/ops/kvcache/set_mla_kv_buffer.py
++++ b/python/sglang/kernels/ops/kvcache/set_mla_kv_buffer.py
+@@ -89,6 +89,8 @@ def set_mla_kv_buffer(
+     cache_k_nope: torch.Tensor,
+     cache_k_rope: torch.Tensor,
+     num_warps: int = 0,
++    *,
++    reserved_skip_index: int = 0,
+ ) -> None:
+     """Write packed [k_nope | k_rope] rows into ``kv_buffer`` at ``loc`` indices
+     via a TMA bulk-store. SM90+ only — the caller is expected to gate.
+@@ -99,6 +101,9 @@ def set_mla_kv_buffer(
+         cache_k_nope: [n_loc, nope_dim] or [n_loc, 1, nope_dim]
+         cache_k_rope: [n_loc, rope_dim] or [n_loc, 1, rope_dim]
+         loc:          [n_loc]
++
++    Writes targeting ``reserved_skip_index`` are skipped. Slot 0 is reserved
++    for CUDA-graph padding by default; pass -1 to disable skipping.
+     """
+     n_loc = loc.shape[0]
+     if n_loc == 0:
+@@ -114,4 +119,11 @@ def set_mla_kv_buffer(
+         num_warps = _pick_num_warps(n_loc)
+ 
+     module = set_mla_kv_buffer_module(nope_bytes, rope_bytes, is_arch_support_pdl())
+-    module.set_mla_kv_buffer(buf, loc, src_nope, src_rope, num_warps)
++    module.set_mla_kv_buffer(
++        buf,
++        loc,
++        src_nope,
++        src_rope,
++        num_warps,
++        reserved_skip_index,
++    )
 diff --git a/python/sglang/kernels/ops/layernorm/mhc.py b/python/sglang/kernels/ops/layernorm/mhc.py
 index 1f310d82a58e1602aff781021a94002ef799b05f..e9edbf11f517216d1cc01fe24549aa70fad5813a 100644
 --- a/python/sglang/kernels/ops/layernorm/mhc.py
@@ -3067,6 +3303,18 @@ index 0000000000000000000000000000000000000000..cbbf4b8738623411124fde4d80aeaad5
 +
 +if __name__ == "__main__":
 +    unittest.main()
+diff --git a/test/registered/kernels/benchmark/kvcache/bench_set_mla_kv_buffer.py b/test/registered/kernels/benchmark/kvcache/bench_set_mla_kv_buffer.py
+index 90bbfa1a8c15ba387ae2e3775d5383e10ee28314..3af514ef5ba13ad21c11c277de4de82fb1e12040 100644
+--- a/test/registered/kernels/benchmark/kvcache/bench_set_mla_kv_buffer.py
++++ b/test/registered/kernels/benchmark/kvcache/bench_set_mla_kv_buffer.py
+@@ -44,6 +44,7 @@ def _triton_baseline(kv_buffer, loc, cache_k_nope, cache_k_rope):
+         cache_k_nope,
+         cache_k_rope,
+         loc,
++        0,
+         kv_buffer.stride(0),
+         cache_k_nope.stride(0),
+         cache_k_rope.stride(0),
 diff --git a/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py b/test/registered/kernels/ops/attention/test_silu_and_mul_contig_post_quant.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..192d9a1bdb9106a5c47aa627018bc02f8ab38171
@@ -3217,6 +3465,285 @@ index 0000000000000000000000000000000000000000..192d9a1bdb9106a5c47aa627018bc02f
 +        f"({swz_match:.4f}) — if the kernel changed, revisit use_swizzle in "
 +        "DeepGemmRunnerCore"
 +    )
+diff --git a/test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py b/test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py
+index ac2947258383cfa82d0c8bd2f43f3ae49167325f..ab7598db6976770d7acf887abb616ae551f54adf 100644
+--- a/test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py
++++ b/test/registered/kernels/ops/kvcache/test_set_mla_kv_buffer.py
+@@ -4,16 +4,28 @@ import pytest
+ import torch
+ 
+ from sglang.kernels.jit.utils import get_ci_test_range
++from sglang.kernels.ops.kvcache.mla_buffer import (
++    set_mla_kv_buffer_triton,
++    set_mla_kv_buffer_triton_fp8_quant,
++    set_mla_kv_scale_buffer_triton,
++)
+ from sglang.kernels.ops.kvcache.set_mla_kv_buffer import (
+     can_use_set_mla_kv_buffer,
+     set_mla_kv_buffer,
+ )
+-from sglang.test.ci.ci_register import register_cuda_ci
++from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
+ 
+ register_cuda_ci(est_time=30, stage="base-b-kernel-unit", runner_config="1-gpu-large")
++register_amd_ci(est_time=15, stage="jit-kernel-unit", runner_config="amd")
+ 
+ DEVICE = "cuda"
+ CACHE_SIZE = 4096
++TRITON_NOPE_DIM = 128
++TRITON_ROPE_DIM = 64
++CUDA_TMA_ONLY = pytest.mark.skipif(
++    torch.version.hip is not None,
++    reason="The TMA bulk-store kernel requires CUDA SM90+",
++)
+ 
+ # (nope_dim, rope_dim) pairs: standard MLA, MLA scale buffer, FP8 nope-extended layout.
+ SHAPES = get_ci_test_range(
+@@ -36,6 +48,7 @@ def _ref(kv_buffer, loc, cache_k_nope, cache_k_rope):
+ @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+ @pytest.mark.parametrize("shape", SHAPES)
+ @pytest.mark.parametrize("batch_size", BATCH_SIZES)
++@CUDA_TMA_ONLY
+ def test_set_mla_kv_buffer_correctness(dtype, shape, batch_size):
+     nope_dim, rope_dim = shape
+     total_dim = nope_dim + rope_dim
+@@ -45,7 +58,7 @@ def test_set_mla_kv_buffer_correctness(dtype, shape, batch_size):
+     kv_buffer = torch.randn((CACHE_SIZE, 1, total_dim), dtype=dtype, device=DEVICE)
+     kv_ref = kv_buffer.clone()
+ 
+-    loc = torch.randperm(CACHE_SIZE, device=DEVICE)[:batch_size]
++    loc = torch.randperm(CACHE_SIZE - 1, device=DEVICE)[:batch_size] + 1
+ 
+     set_mla_kv_buffer(kv_buffer, loc, cache_k_nope, cache_k_rope)
+     _ref(kv_ref, loc, cache_k_nope, cache_k_rope)
+@@ -54,6 +67,7 @@ def test_set_mla_kv_buffer_correctness(dtype, shape, batch_size):
+ 
+ 
+ @pytest.mark.parametrize("loc_dtype", [torch.int32, torch.int64])
++@CUDA_TMA_ONLY
+ def test_set_mla_kv_buffer_loc_dtypes(loc_dtype):
+     nope_dim, rope_dim = 512, 64
+     batch_size = 128
+@@ -66,7 +80,7 @@ def test_set_mla_kv_buffer_loc_dtypes(loc_dtype):
+     )
+     kv_ref = kv_buffer.clone()
+ 
+-    loc = torch.randperm(CACHE_SIZE, device=DEVICE)[:batch_size].to(loc_dtype)
++    loc = (torch.randperm(CACHE_SIZE - 1, device=DEVICE)[:batch_size] + 1).to(loc_dtype)
+ 
+     set_mla_kv_buffer(kv_buffer, loc, cache_k_nope, cache_k_rope)
+     _ref(kv_ref, loc, cache_k_nope, cache_k_rope)
+@@ -74,6 +88,7 @@ def test_set_mla_kv_buffer_loc_dtypes(loc_dtype):
+     assert torch.equal(kv_buffer, kv_ref)
+ 
+ 
++@CUDA_TMA_ONLY
+ def test_set_mla_kv_buffer_uint8_byte_layout():
+     """FP8 DSA byte-layout: cache_k_nope is uint8 with [fp8(512) | scales(16)] = 528,
+     cache_k_rope is uint8 [128]; total payload = 656 bytes."""
+@@ -92,7 +107,7 @@ def test_set_mla_kv_buffer_uint8_byte_layout():
+     )
+     kv_ref = kv_buffer.clone()
+ 
+-    loc = torch.randperm(CACHE_SIZE, device=DEVICE)[:batch_size]
++    loc = torch.randperm(CACHE_SIZE - 1, device=DEVICE)[:batch_size] + 1
+ 
+     set_mla_kv_buffer(kv_buffer, loc, cache_k_nope, cache_k_rope)
+     _ref(kv_ref, loc, cache_k_nope, cache_k_rope)
+@@ -100,6 +115,7 @@ def test_set_mla_kv_buffer_uint8_byte_layout():
+     assert torch.equal(kv_buffer, kv_ref)
+ 
+ 
++@CUDA_TMA_ONLY
+ def test_set_mla_kv_buffer_empty_loc():
+     nope_dim, rope_dim = 512, 64
+     dtype = torch.bfloat16
+@@ -116,6 +132,185 @@ def test_set_mla_kv_buffer_empty_loc():
+     assert torch.equal(kv_buffer, kv_before)
+ 
+ 
++@pytest.mark.parametrize("loc_dtype", [torch.int32, torch.int64])
++@CUDA_TMA_ONLY
++def test_set_mla_kv_buffer_reserved_skip_index(loc_dtype):
++    nope_dim, rope_dim = 512, 64
++    dtype = torch.bfloat16
++    cache_k_nope = torch.randn((4, 1, nope_dim), dtype=dtype, device=DEVICE)
++    cache_k_rope = torch.randn((4, 1, rope_dim), dtype=dtype, device=DEVICE)
++    cache_k_nope[[0, 2]] = torch.nan
++    cache_k_rope[[0, 2]] = torch.nan
++    kv_buffer = torch.randn(
++        (CACHE_SIZE, 1, nope_dim + rope_dim), dtype=dtype, device=DEVICE
++    )
++    reserved_before = kv_buffer[0].clone()
++    loc = torch.tensor([0, 7, 0, 9], dtype=loc_dtype, device=DEVICE)
++
++    set_mla_kv_buffer(kv_buffer, loc, cache_k_nope, cache_k_rope)
++
++    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
++    torch.testing.assert_close(
++        kv_buffer[7, 0, :nope_dim], cache_k_nope[1, 0], rtol=0.0, atol=0.0
++    )
++    torch.testing.assert_close(
++        kv_buffer[7, 0, nope_dim:], cache_k_rope[1, 0], rtol=0.0, atol=0.0
++    )
++    torch.testing.assert_close(
++        kv_buffer[9, 0, :nope_dim], cache_k_nope[3, 0], rtol=0.0, atol=0.0
++    )
++    torch.testing.assert_close(
++        kv_buffer[9, 0, nope_dim:], cache_k_rope[3, 0], rtol=0.0, atol=0.0
++    )
++
++
++@CUDA_TMA_ONLY
++def test_set_mla_kv_buffer_zero_index_can_be_written_when_skip_disabled():
++    nope_dim, rope_dim = 512, 64
++    dtype = torch.bfloat16
++    cache_k_nope = torch.randn((1, 1, nope_dim), dtype=dtype, device=DEVICE)
++    cache_k_rope = torch.randn((1, 1, rope_dim), dtype=dtype, device=DEVICE)
++    kv_buffer = torch.randn(
++        (CACHE_SIZE, 1, nope_dim + rope_dim), dtype=dtype, device=DEVICE
++    )
++    loc = torch.zeros(1, dtype=torch.int64, device=DEVICE)
++
++    set_mla_kv_buffer(
++        kv_buffer,
++        loc,
++        cache_k_nope,
++        cache_k_rope,
++        reserved_skip_index=-1,
++    )
++
++    torch.testing.assert_close(
++        kv_buffer[0, 0, :nope_dim], cache_k_nope[0, 0], rtol=0.0, atol=0.0
++    )
++    torch.testing.assert_close(
++        kv_buffer[0, 0, nope_dim:], cache_k_rope[0, 0], rtol=0.0, atol=0.0
++    )
++
++
++@pytest.mark.parametrize("loc_dtype", [torch.int32, torch.int64])
++def test_set_mla_kv_buffer_triton_reserved_skip_index(loc_dtype):
++    dtype = torch.bfloat16
++    cache_k_nope = torch.randn((4, 1, TRITON_NOPE_DIM), dtype=dtype, device=DEVICE)
++    cache_k_rope = torch.randn((4, 1, TRITON_ROPE_DIM), dtype=dtype, device=DEVICE)
++    cache_k_nope[[0, 2]] = torch.nan
++    cache_k_rope[[0, 2]] = torch.nan
++    kv_buffer = torch.randn(
++        (CACHE_SIZE, 1, TRITON_NOPE_DIM + TRITON_ROPE_DIM),
++        dtype=dtype,
++        device=DEVICE,
++    )
++    reserved_before = kv_buffer[0].clone()
++    loc = torch.tensor([0, 7, 0, 9], dtype=loc_dtype, device=DEVICE)
++
++    set_mla_kv_buffer_triton(kv_buffer, loc, cache_k_nope, cache_k_rope)
++
++    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
++    torch.testing.assert_close(
++        kv_buffer[7, 0],
++        torch.cat((cache_k_nope[1, 0], cache_k_rope[1, 0])),
++        rtol=0.0,
++        atol=0.0,
++    )
++    torch.testing.assert_close(
++        kv_buffer[9, 0],
++        torch.cat((cache_k_nope[3, 0], cache_k_rope[3, 0])),
++        rtol=0.0,
++        atol=0.0,
++    )
++
++
++def test_set_mla_kv_buffer_triton_zero_index_can_be_written_when_skip_disabled():
++    dtype = torch.bfloat16
++    cache_k_nope = torch.randn((1, 1, TRITON_NOPE_DIM), dtype=dtype, device=DEVICE)
++    cache_k_rope = torch.randn((1, 1, TRITON_ROPE_DIM), dtype=dtype, device=DEVICE)
++    kv_buffer = torch.randn(
++        (CACHE_SIZE, 1, TRITON_NOPE_DIM + TRITON_ROPE_DIM),
++        dtype=dtype,
++        device=DEVICE,
++    )
++    loc = torch.zeros(1, dtype=torch.int64, device=DEVICE)
++
++    set_mla_kv_buffer_triton(
++        kv_buffer,
++        loc,
++        cache_k_nope,
++        cache_k_rope,
++        reserved_skip_index=-1,
++    )
++
++    torch.testing.assert_close(
++        kv_buffer[0, 0],
++        torch.cat((cache_k_nope[0, 0], cache_k_rope[0, 0])),
++        rtol=0.0,
++        atol=0.0,
++    )
++
++
++def test_set_mla_kv_buffer_triton_fp8_quant_reserved_skip_index():
++    fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
++    cache_k_nope = torch.randn(
++        (4, 1, TRITON_NOPE_DIM), dtype=torch.bfloat16, device=DEVICE
++    )
++    cache_k_rope = torch.randn(
++        (4, 1, TRITON_ROPE_DIM), dtype=torch.bfloat16, device=DEVICE
++    )
++    cache_k_nope[[0, 2]] = torch.nan
++    cache_k_rope[[0, 2]] = torch.nan
++    kv_buffer = torch.randint(
++        0,
++        256,
++        (CACHE_SIZE, 1, TRITON_NOPE_DIM + TRITON_ROPE_DIM),
++        dtype=torch.uint8,
++        device=DEVICE,
++    )
++    reserved_before = kv_buffer[0].clone()
++    loc = torch.tensor([0, 7, 0, 9], dtype=torch.int64, device=DEVICE)
++
++    set_mla_kv_buffer_triton_fp8_quant(
++        kv_buffer,
++        loc,
++        cache_k_nope,
++        cache_k_rope,
++        fp8_dtype,
++    )
++
++    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
++    expected = torch.cat((cache_k_nope[1, 0], cache_k_rope[1, 0])).to(fp8_dtype)
++    torch.testing.assert_close(
++        kv_buffer[7, 0], expected.view(torch.uint8), rtol=0.0, atol=0.0
++    )
++
++
++def test_set_mla_kv_scale_buffer_triton_reserved_skip_index():
++    cache_k_nope = torch.randn((4, 1, 16), dtype=torch.float32, device=DEVICE)
++    cache_k_rope = torch.randn((4, 1, 4), dtype=torch.float32, device=DEVICE)
++    cache_k_nope[[0, 2]] = torch.nan
++    cache_k_rope[[0, 2]] = torch.nan
++    kv_buffer = torch.randn((CACHE_SIZE, 1, 20), dtype=torch.float32, device=DEVICE)
++    reserved_before = kv_buffer[0].clone()
++    loc = torch.tensor([0, 7, 0, 9], dtype=torch.int64, device=DEVICE)
++
++    set_mla_kv_scale_buffer_triton(
++        kv_buffer,
++        loc,
++        cache_k_nope,
++        cache_k_rope,
++    )
++
++    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
++    torch.testing.assert_close(
++        kv_buffer[7, 0],
++        torch.cat((cache_k_nope[1, 0], cache_k_rope[1, 0])),
++        rtol=0.0,
++        atol=0.0,
++    )
++
++
++@CUDA_TMA_ONLY
+ def test_can_use_set_mla_kv_buffer():
+     assert can_use_set_mla_kv_buffer(1024, 128)  # bf16 (512,64)
+     assert can_use_set_mla_kv_buffer(528, 128)  # fp8 byte layout
 diff --git a/test/registered/kernels/ops/layernorm/test_hc_combine.py b/test/registered/kernels/ops/layernorm/test_hc_combine.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..82b070ac0f0e5aa0c26d3f63b17f5d6c5e5f7a78
@@ -3274,6 +3801,24 @@ index 0000000000000000000000000000000000000000..82b070ac0f0e5aa0c26d3f63b17f5d6c
 +    ref = _reference(x_flat, pre, hc, torch.bfloat16)
 +    scale = ref.float().abs().max().clamp(min=1e-6)
 +    assert (got.float() - ref.float()).abs().max() / scale < 5e-2
+diff --git a/test/registered/kernels/ops/test_kimi_k3_prerequisite_ops.py b/test/registered/kernels/ops/test_kimi_k3_prerequisite_ops.py
+index cb26a235d0da79de75982544ac08e1c908644fa0..cf1cac046acb866999a8437a07c7b6a7c3913a97 100644
+--- a/test/registered/kernels/ops/test_kimi_k3_prerequisite_ops.py
++++ b/test/registered/kernels/ops/test_kimi_k3_prerequisite_ops.py
+@@ -103,9 +103,10 @@ def _make_mla_inputs(batch_size, num_heads, seed):
+     pool = randn(MLA_PAGES, MLA_DIM)
+     latent = randn(batch_size, MLA_DIM)
+     query = randn(batch_size, num_heads, MLA_DIM)
+-    loc = torch.randperm(MLA_PAGES, generator=generator, device="cuda")[:batch_size].to(
+-        torch.int64
+-    )
++    loc = (
++        torch.randperm(MLA_PAGES - 1, generator=generator, device="cuda")[:batch_size]
++        + 1
++    ).to(torch.int64)
+     return (
+         pool,
+         loc,
 diff --git a/test/registered/scheduler/test_min_free_slots_delayer.py b/test/registered/scheduler/test_min_free_slots_delayer.py
 index 44f2f8c49d02dbb4a41fc424e61b5fb4a940770b..6c9b70114f492e53bd03ca70c647b61c383ad3ce 100644
 --- a/test/registered/scheduler/test_min_free_slots_delayer.py

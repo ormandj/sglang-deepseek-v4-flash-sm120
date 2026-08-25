@@ -25,6 +25,7 @@ EXPECTED_DECODE = {
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
         "repeat-c2-c4": {2: 5, 4: 5},
+        "repeat-c8": {8: 5},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3, 32: 3},
         "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5, 32: 5},
     },
@@ -34,6 +35,7 @@ EXPECTED_DECODE = {
         "prefill-quick": {},
         "decode-supplement": {2: 3, 16: 3},
         "repeat-c2-c4": {2: 5, 4: 5},
+        "repeat-c8": {8: 5},
         "qualification": {1: 5, 2: 5, 4: 5, 8: 5, 16: 3},
         "publication": {1: 5, 2: 5, 4: 5, 8: 5, 16: 5},
     },
@@ -44,6 +46,7 @@ EXPECTED_PREFILL = {
     "prefill-quick": {"8k-c1": 3, "32k-c1": 3, "64k-c1": 3, "128k-c1": 3},
     "decode-supplement": {},
     "repeat-c2-c4": {},
+    "repeat-c8": {},
     "qualification": {
         "8k-c1": 5,
         "32k-c1": 5,

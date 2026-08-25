@@ -254,6 +254,49 @@ def test_repeat_c2_c4_requires_five_independent_repetitions(tmp_path) -> None:
     assert result["prefill"] == {}
 
 
+def test_repeat_c8_requires_five_independent_repetitions(tmp_path) -> None:
+    for repetition in range(1, 6):
+        run = tmp_path / "decode" / "c8" / f"r{repetition:02d}"
+        _write(
+            run / "decode-analysis.json",
+            {
+                "validation": {"valid": True},
+                "decode": {
+                    "target_concurrency": 8,
+                    "tokens_per_second_ols": 800 + repetition,
+                },
+                "engine_work": {
+                    "forward_passes_per_second_ols": 50 + repetition,
+                    "useful_tokens_per_forward_per_request": 5.5,
+                },
+                "server_cross_checks": _speculative(repetition),
+            },
+        )
+        _write(
+            run / "profile_export_aiperf.json",
+            {
+                metric: {
+                    "unit": "ms",
+                    "avg": 10 + repetition,
+                    "p50": 9 + repetition,
+                    "p90": 11 + repetition,
+                    "p99": 12 + repetition,
+                }
+                for metric in (
+                    "time_to_first_token",
+                    "inter_token_latency",
+                    "request_latency",
+                )
+            },
+        )
+
+    result = summarize(tmp_path, mode="repeat-c8", build_id="rc10-repeat")
+
+    assert set(result["decode"]) == {"c8"}
+    assert result["decode"]["c8"]["engine_forward_passes_per_second"]["count"] == 5
+    assert result["prefill"] == {}
+
+
 def test_prefill_quick_requires_only_quick_prefill_cells(tmp_path) -> None:
     root = _gate(tmp_path)
     for path in root.glob("decode/c*/r*/decode-analysis.json"):

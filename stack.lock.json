@@ -3,14 +3,14 @@
   "release": {
     "manifest": "release.json",
     "version": "0.8.1",
-    "candidate": 4,
-    "candidate_tag": "v0.8.1-rc.4",
+    "candidate": 10,
+    "candidate_tag": "v0.8.1-rc.10",
     "stable_tag": "v0.8.1",
-    "cache_schema": "v37"
+    "cache_schema": "v38"
   },
   "image": {
     "repository": "sglang-deepseek-v4-flash-sm120",
-    "tag": "v0.8.1-rc.4",
+    "tag": "v0.8.1-rc.10",
     "platform": "linux/amd64",
     "containerfile_target": "runtime"
   },
@@ -29,17 +29,17 @@
     {
       "arg": "DSV4_0731_RELEASE_VERSION",
       "value": "0.8.1",
-      "description": "Stable SemVer target for the current-main refill-scheduling correction."
+      "description": "Stable SemVer target for the MLA reserved-padding-slot correctness fix."
     },
     {
       "arg": "DSV4_0731_RELEASE_CANDIDATE",
-      "value": "4",
-      "description": "Release candidate 0.8.1-rc4 of the occupancy-aware refill line."
+      "value": "10",
+      "description": "Correctness release adding upstream PR #36003 to the qualified 0.8.1-rc4 engine stack."
     },
     {
       "arg": "DSV4_0731_CACHE_SCHEMA",
-      "value": "v37",
-      "description": "Fresh compiled-kernel and PCIe-IPC tuning-cache namespace for the corrected current-main rebase and SM120 import fix."
+      "value": "v38",
+      "description": "Fresh namespace because PR #36003 changes compiled MLA KV-writer source and its JIT ABI."
     },
     {
       "arg": "DSV4_0731_SGLANG_BASE",
@@ -63,12 +63,12 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "bedec1d0ee735ddbd246f2e2b91d724ceefc5136",
-      "description": "Final audited SGLang tree after the release patch."
+      "value": "ebfcc2bd55a873719cc2b959315dfa74830aeddc",
+      "description": "Final audited SGLang tree after the qualified carry stack and upstream PR #36003 reserved-slot correction."
     },
     {
       "arg": "DSV4_0731_SGLANG_INTEGRATION_HEAD",
-      "value": "1936c436ba12e5931d3a04f43d9ee1d338d41efc",
+      "value": "5754bc192e66ec39a1595132c6d18f495a6db446",
       "description": "Head of the linear local SGLang integration branch."
     },
     {
@@ -120,6 +120,11 @@
       "arg": "DSV4_0731_SGLANG_PR35954_HEAD",
       "value": "6200c54c713d3356842d7cfa32e284d42dd537f2",
       "description": "SGLang PR #35954 source head: active-demand replacement-prefill batching."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR36003_HEAD",
+      "value": "64f51d9a95efb84dba1291b62250360db5eb300f",
+      "description": "SGLang PR #36003 source head: preserve reserved slot 0 in SGLang-owned MLA KV writers."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
@@ -205,7 +210,7 @@
   "integration": {
     "sglang": {
       "base": "cce0a1244b5a3ee60411fb403f65f856a1d012f0",
-      "head": "1936c436ba12e5931d3a04f43d9ee1d338d41efc",
+      "head": "5754bc192e66ec39a1595132c6d18f495a6db446",
       "commits": [
         {
           "source": "sgl-project/sglang#29927 through the previously qualified head",
@@ -296,6 +301,16 @@
           "source": "local current-main SM120 architecture-guard import and test",
           "source_head": "1936c436ba12e5931d3a04f43d9ee1d338d41efc",
           "integration_commit": "1936c436ba12e5931d3a04f43d9ee1d338d41efc"
+        },
+        {
+          "source": "sgl-project/sglang#36003 MLA writer correction",
+          "source_head": "15f1e8969cedff1d1e8f830ac767214d104ab334",
+          "integration_commit": "556e5e998cb6d0ffa07e9a44bfb9651d55056810"
+        },
+        {
+          "source": "sgl-project/sglang#36003 consolidated tests",
+          "source_head": "64f51d9a95efb84dba1291b62250360db5eb300f",
+          "integration_commit": "5754bc192e66ec39a1595132c6d18f495a6db446"
         }
       ]
     },
@@ -344,21 +359,21 @@
   },
   "patches": [
     {
-      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.8.1-rc.4.patch",
+      "path": "patches/sglang/0001-sglang-dsv4-0731-v0.8.1-rc.10.patch",
       "repository": "sglang",
       "order": 1,
-      "sha256": "dc4cb200db40178715223ed8f8f8033476290ac7433688e60bfe01e7c776e285",
-      "description": "Current SGLang main plus the reviewed DeepSeek-V4/SM120 carries, upstream PR #35954, bounded indexer logits, exact-shape PCIe-IPC startup tuning, pre-readiness warmups, and the current-main SM120 architecture-guard import fix."
+      "sha256": "62632e603e82bd88338b82f0cd852d84accb00e075a44b9167a52bbb9c7a11f7",
+      "description": "Qualified 0.8.1-rc4 SGLang composition plus upstream PR #36003, which prevents graph-padding writes from poisoning reserved MLA KV slot 0."
     },
     {
-      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.4.patch",
+      "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.10.patch",
       "repository": "flashinfer",
       "order": 1,
       "sha256": "682de50501ed17dd232f83aa3948b12de0c347e8f8df7e85790c574e415a85b4",
       "description": "Qualified FlashInfer main containing merged PCIe-IPC PR #4393, plus PR #3930 and the reviewed exact CUDA-runtime filename matcher."
     },
     {
-      "path": "patches/deepgemm/0001-deepgemm-sm120-v0.8.1-rc.4.patch",
+      "path": "patches/deepgemm/0001-deepgemm-sm120-v0.8.1-rc.10.patch",
       "repository": "deepgemm",
       "order": 1,
       "sha256": "d7cb8a033d4839966a5f31a4537ead42f8febf2e6596a72f17f4f579f5c84540",
