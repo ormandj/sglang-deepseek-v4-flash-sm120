@@ -6,7 +6,7 @@ if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
   exit 2
 fi
 if [ "$#" -ne 3 ]; then
-  echo "usage: $0 CAMPAIGN_ID BUILD_ID exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|qualification|publication" >&2
+  echo "usage: $0 CAMPAIGN_ID BUILD_ID exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|repeat-c8|qualification|publication" >&2
   exit 2
 fi
 
@@ -19,7 +19,7 @@ for value in "$campaign" "$build_id"; do
   esac
 done
 case "$mode" in
-  exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|qualification|publication) ;;
+  exploratory-decode|quick|prefill-quick|decode-supplement|repeat-c2-c4|repeat-c8|qualification|publication) ;;
   *) echo "error: unsupported engine-gate mode: $mode" >&2; exit 2 ;;
 esac
 
@@ -185,6 +185,10 @@ case "$mode" in
     ;;
   repeat-c2-c4)
     decode_shapes='2:5:4096 4:5:4096'
+    prefill_shapes=''
+    ;;
+  repeat-c8)
+    decode_shapes='8:5:4096'
     prefill_shapes=''
     ;;
   qualification)

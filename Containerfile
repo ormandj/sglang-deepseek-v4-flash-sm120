@@ -1,16 +1,15 @@
 # DeepSeek-V4-Flash-0731 on SGLang for RTX PRO 6000 Blackwell (SM120).
 #
-# v0.8.1-rc4 restores the SM120 architecture guard import required by the
-# retained FP8 W_o_A carry on the current-main refill integration.
+# v0.8.1-rc10 preserves reserved MLA KV slot 0 across graph-padding writes.
 ARG DSV4_0731_RELEASE_VERSION=0.8.1
-ARG DSV4_0731_RELEASE_CANDIDATE=4
-ARG DSV4_0731_CACHE_SCHEMA=v37
+ARG DSV4_0731_RELEASE_CANDIDATE=10
+ARG DSV4_0731_CACHE_SCHEMA=v38
 ARG DSV4_0731_SGLANG_BASE=lmsysorg/sglang:nightly-dev-cu13-20260818-c0b6474b@sha256:51e576f02368480c055c7aadb67590d82b172e2392123ce4cf4cc8251b2d8caf
 ARG DSV4_0731_SGLANG_BASE_HEAD=c0b6474b43363c2f4bc60fe3d7817d393fb51d32
 ARG DSV4_0731_SGLANG_MAIN_HEAD=cce0a1244b5a3ee60411fb403f65f856a1d012f0
 ARG DSV4_0731_SGLANG_MAIN_TREE=48cbe6e092a0960d936e9fe72c227f9e43b52121
-ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=bedec1d0ee735ddbd246f2e2b91d724ceefc5136
-ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=1936c436ba12e5931d3a04f43d9ee1d338d41efc
+ARG DSV4_0731_SGLANG_EFFECTIVE_TREE=ebfcc2bd55a873719cc2b959315dfa74830aeddc
+ARG DSV4_0731_SGLANG_INTEGRATION_HEAD=5754bc192e66ec39a1595132c6d18f495a6db446
 ARG DSV4_0731_SGLANG_PR29927_HEAD=b19fd53b923614f4cbafc21ae99a853737ede9bd
 ARG DSV4_0731_SGLANG_PR35116_HEAD=65eef2612efba5759aaebbabfae37763cf56a277
 ARG DSV4_0731_SGLANG_PR35118_HEAD=23d2ac6f51f2696da42663b2160bc89754680ca9
@@ -21,6 +20,7 @@ ARG DSV4_0731_SGLANG_PR34018_HEAD=c3ffe8cfd3cf6cf9c30fc470cf7b76754954f3f0
 ARG DSV4_0731_SGLANG_PR34528_HEAD=f28d875d121a1ec0ab879ef54873220c2ed23c6a
 ARG DSV4_0731_SGLANG_PR35217_HEAD=8460babe10361637deee4c59bd7a1372eda51fc6
 ARG DSV4_0731_SGLANG_PR35954_HEAD=6200c54c713d3356842d7cfa32e284d42dd537f2
+ARG DSV4_0731_SGLANG_PR36003_HEAD=64f51d9a95efb84dba1291b62250360db5eb300f
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD=fb28d7242b3506a2348265962041acc1fb56cca4
 ARG DSV4_0731_FLASHINFER_MAIN_TREE=91ea0cae3ec19fe58e0a759a050f2adda22227e9
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE=d6d4f3d7daf66a57947049cf1cc7866b1678549b
@@ -59,6 +59,7 @@ ARG DSV4_0731_SGLANG_PR34018_HEAD
 ARG DSV4_0731_SGLANG_PR34528_HEAD
 ARG DSV4_0731_SGLANG_PR35217_HEAD
 ARG DSV4_0731_SGLANG_PR35954_HEAD
+ARG DSV4_0731_SGLANG_PR36003_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_HEAD
 ARG DSV4_0731_FLASHINFER_MAIN_TREE
 ARG DSV4_0731_FLASHINFER_EFFECTIVE_TREE
@@ -78,7 +79,7 @@ ARG DSV4_0731_DEEPGEMM_PR77_HEAD
 ARG IMAGE_SOURCE
 ARG IMAGE_SOURCE_REVISION
 
-COPY patches/sglang/0001-sglang-dsv4-0731-v0.8.1-rc.4.patch /tmp/sglang-release.patch
+COPY patches/sglang/0001-sglang-dsv4-0731-v0.8.1-rc.10.patch /tmp/sglang-release.patch
 RUN set -e; cd /sgl-workspace/sglang; \
     git config --local --unset-all http.https://github.com/.extraheader || true; \
     git remote set-url origin https://github.com/sgl-project/sglang.git; \
@@ -97,6 +98,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       python/sglang/srt/environ.py \
       python/sglang/srt/entrypoints/warmup.py \
       python/sglang/srt/entrypoints/openai \
+      python/sglang/kernels/ops/kvcache \
       python/sglang/srt/layers/attention/deepseek_v4_backend.py \
       python/sglang/srt/layers/attention/dsv4 \
       python/sglang/srt/layers/deep_gemm_wrapper \
@@ -110,7 +112,7 @@ RUN set -e; cd /sgl-workspace/sglang; \
       python/sglang/srt/speculative/spec_utils.py; \
     rm /tmp/sglang-release.patch
 
-COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.4.patch /tmp/flashinfer-release.patch
+COPY patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.10.patch /tmp/flashinfer-release.patch
 RUN set -e; \
     git init /tmp/flashinfer-src; \
     git -C /tmp/flashinfer-src remote add origin https://github.com/flashinfer-ai/flashinfer.git; \
@@ -140,7 +142,7 @@ RUN set -e; \
     uv run --no-project --python /usr/bin/python python -c "import flashinfer, importlib.metadata as m; expected='${DSV4_0731_FLASHINFER_VERSION}'; assert flashinfer.__version__ == expected, flashinfer.__version__; assert flashinfer.__git_version__ == '${DSV4_0731_FLASHINFER_MAIN_HEAD}', flashinfer.__git_version__; assert m.version('flashinfer-cubin') == expected, m.version('flashinfer-cubin'); assert all(d.metadata['Name'] != 'flashinfer-jit-cache' for d in m.distributions()); print('flashinfer', expected)"; \
     rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheel /tmp/flashinfer-release.patch
 
-COPY patches/deepgemm/0001-deepgemm-sm120-v0.8.1-rc.4.patch /tmp/deepgemm-release.patch
+COPY patches/deepgemm/0001-deepgemm-sm120-v0.8.1-rc.10.patch /tmp/deepgemm-release.patch
 RUN set -e; \
     git init /tmp/deepgemm-src; \
     git -C /tmp/deepgemm-src remote add origin https://github.com/sgl-project/DeepGEMM.git; \
@@ -203,6 +205,7 @@ LABEL org.opencontainers.image.title="sglang-deepseek-v4-flash-sm120" \
       ai.sglang.pr34528.head=${DSV4_0731_SGLANG_PR34528_HEAD} \
       ai.sglang.pr35217.head=${DSV4_0731_SGLANG_PR35217_HEAD} \
       ai.sglang.pr35954.head=${DSV4_0731_SGLANG_PR35954_HEAD} \
+      ai.sglang.pr36003.head=${DSV4_0731_SGLANG_PR36003_HEAD} \
       ai.flashinfer.version=${DSV4_0731_FLASHINFER_VERSION} \
       ai.flashinfer.main.head=${DSV4_0731_FLASHINFER_MAIN_HEAD} \
       ai.flashinfer.main.tree=${DSV4_0731_FLASHINFER_MAIN_TREE} \
