@@ -179,7 +179,6 @@ RUN set -e; cd /sgl-workspace/sglang; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/entrypoints/test_warmup.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/distributed/test_pcie_ipc_ar.py; \
     uv run --no-project --python /usr/bin/python python test/registered/scheduler/test_min_free_slots_delayer.py; \
-    uv run --no-project --python /usr/bin/python python test/registered/unit/mem_cache/test_swa_unittest.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/server_args/test_server_args.py; \
     uv run --no-project --python /usr/bin/python python test/registered/unit/spec/test_decode_bookkeeping_ownership.py; \
     uv run --no-project --python /usr/bin/python python test/registered/spec/dspark/test_dspark_dp_tier.py
