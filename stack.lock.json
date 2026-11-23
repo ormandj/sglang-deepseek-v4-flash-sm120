@@ -63,8 +63,8 @@
     },
     {
       "arg": "DSV4_0731_SGLANG_EFFECTIVE_TREE",
-      "value": "ebfcc2bd55a873719cc2b959315dfa74830aeddc",
-      "description": "Final audited SGLang tree after the qualified carry stack and upstream PR #36003 reserved-slot correction."
+      "value": "7975dc8a1674b4b9e8f9a6e193b8530df16879c0",
+      "description": "Final SGLang tree after the qualified carry stack, PR #36003 reserved-slot correction, and PR #36381 grouped-free SWA ownership fix."
     },
     {
       "arg": "DSV4_0731_SGLANG_INTEGRATION_HEAD",
@@ -125,6 +125,11 @@
       "arg": "DSV4_0731_SGLANG_PR36003_HEAD",
       "value": "64f51d9a95efb84dba1291b62250360db5eb300f",
       "description": "SGLang PR #36003 source head: preserve reserved slot 0 in SGLang-owned MLA KV writers."
+    },
+    {
+      "arg": "DSV4_0731_SGLANG_PR36381_HEAD",
+      "value": "a872744bb431e0932040810ffbf4bc5b309643da",
+      "description": "SGLang PR #36381 source head: resolve SWA ownership before grouped frees can observe a replacement mapping."
     },
     {
       "arg": "DSV4_0731_FLASHINFER_MAIN_HEAD",
@@ -311,6 +316,11 @@
           "source": "sgl-project/sglang#36003 consolidated tests",
           "source_head": "64f51d9a95efb84dba1291b62250360db5eb300f",
           "integration_commit": "5754bc192e66ec39a1595132c6d18f495a6db446"
+        },
+        {
+          "source": "sgl-project/sglang#36381",
+          "source_head": "a872744bb431e0932040810ffbf4bc5b309643da",
+          "integration_commit": "f7a56494b1e9c96cbe7ff1a4eeb8fdfcf12a606b"
         }
       ]
     },
@@ -364,6 +374,13 @@
       "order": 1,
       "sha256": "62632e603e82bd88338b82f0cd852d84accb00e075a44b9167a52bbb9c7a11f7",
       "description": "Qualified 0.8.1-rc4 SGLang composition plus upstream PR #36003, which prevents graph-padding writes from poisoning reserved MLA KV slot 0."
+    },
+    {
+      "path": "patches/sglang/0002-swa-grouped-free-ownership.patch",
+      "repository": "sglang",
+      "order": 2,
+      "sha256": "fec71aab495b9a7aba1efcea0cee9c516f820200d4abe640c7d8bb2ee1ef6608",
+      "description": "Upstream PR #36381, which fixes the one-page SWA leak caused by mapping replacement during grouped frees."
     },
     {
       "path": "patches/flashinfer/0001-flashinfer-dsv4-0731-v0.8.1-rc.10.patch",

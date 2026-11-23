@@ -1,0 +1,97 @@
+From a872744bb431e0932040810ffbf4bc5b309643da Mon Sep 17 00:00:00 2001
+From: Leon Gao <leon.gao19@gmail.com>
+Date: Tue, 25 Aug 2026 19:20:47 +0000
+Subject: [PATCH] Fix SWA ownership across grouped frees
+
+---
+ python/sglang/srt/mem_cache/allocator/swa.py | 15 +++++----
+ .../unit/mem_cache/test_swa_unittest.py       | 32 +++++++++++++++++++
+ 2 files changed, 41 insertions(+), 6 deletions(-)
+
+diff --git a/python/sglang/srt/mem_cache/allocator/swa.py b/python/sglang/srt/mem_cache/allocator/swa.py
+index 2f70b6216858..f3540340f7e6 100644
+--- a/python/sglang/srt/mem_cache/allocator/swa.py
++++ b/python/sglang/srt/mem_cache/allocator/swa.py
+@@ -354,10 +354,6 @@ class SWATokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if free_index.numel() == 0:
+             return
+ 
+-        if not self.is_not_in_free_group:
+-            self.swa_free_group.append(self._copy_for_free_group(free_index))
+-            return
+-
+         if self.page_size == 1:
+             mapping_indices = free_index
+         else:
+@@ -365,9 +361,16 @@ class SWATokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+ 
+         swa_indices = self.full_to_swa_index_mapping[mapping_indices]
+         swa_indices = swa_indices[swa_indices > 0]
+-        self.swa_attn_allocator.free(swa_indices)
+         self.clear_full_to_swa_mapping(mapping_indices)
+ 
++        if not self.is_not_in_free_group:
++            # Resolve ownership now. A cache action later in this group may
++            # install a new mapping for the same full index.
++            self.swa_free_group.append(swa_indices)
++            return
++
++        self.swa_attn_allocator.free(swa_indices)
++
+     def free_group_begin(self):
+         super().free_group_begin()
+         self.swa_free_group = []
+@@ -377,7 +380,7 @@ class SWATokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+         if self.swa_free_group:
+             swa_free_group = self.swa_free_group
+             self.swa_free_group = []
+-            self.free_swa(torch.cat(swa_free_group))
++            self.swa_attn_allocator.free(torch.cat(swa_free_group))
+ 
+     def _expand_to_full_pages(self, indices: torch.Tensor) -> torch.Tensor:
+         pages = torch.unique(indices // self.page_size)
+diff --git a/test/registered/unit/mem_cache/test_swa_unittest.py b/test/registered/unit/mem_cache/test_swa_unittest.py
+index d75ee3ae9702..3a3a10ba8769 100644
+--- a/test/registered/unit/mem_cache/test_swa_unittest.py
++++ b/test/registered/unit/mem_cache/test_swa_unittest.py
+@@ -298,6 +298,38 @@ class TestSWA(unittest.TestCase):
+             available_before_free + original_indices.numel(),
+         )
+ 
++    def test_free_swa_group_owns_mapping_at_enqueue_time(self):
++        _, allocator, _ = _build_swa_tree(
++            is_eagle=False,
++            kv_size=8,
++            kv_size_swa=8,
++        )
++        old_full = _swa_alloc(allocator, 1)
++        new_full = _swa_alloc(allocator, 1)
++        assert old_full is not None and new_full is not None
++        old_swa = allocator.full_to_swa_index_mapping[old_full].clone()
++        new_swa = allocator.full_to_swa_index_mapping[new_full].clone()
++
++        allocator.free_group_begin()
++        allocator.free_swa(old_full)
++
++        # Cache reconciliation can transfer a different SWA slot onto the same
++        # full slot before the group flushes. The deferred free still owns the
++        # mapping observed above, not this replacement mapping.
++        allocator.set_full_to_swa_mapping(old_full, new_swa)
++        allocator.clear_full_to_swa_mapping(new_full)
++        allocator.free_group_end()
++
++        torch.testing.assert_close(
++            allocator.full_to_swa_index_mapping[old_full], new_swa
++        )
++        self.assertTrue(
++            torch.isin(old_swa, allocator.swa_attn_allocator.free_pages).item()
++        )
++        self.assertFalse(
++            torch.isin(new_swa, allocator.swa_attn_allocator.free_pages).item()
++        )
++
+     def test_swa_radix_cache_1(self):
+         # args
+         req_size = 10
+-- 
+2.51.0
